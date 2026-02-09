@@ -21,7 +21,7 @@ import { ClaudeProjectStore } from "./claude-project-store";
 import { ClaudeSessionService } from "./claude-session-service";
 import { ClaudeSessionSnapshotStore } from "./claude-session-snapshot-store";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
-import { ClaudeUsageMonitor } from "./claude-usage-monitor";
+import { getUsage } from "./claude-usage-service";
 import log from "./logger";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -42,7 +42,6 @@ const indexHtml = path.join(rendererDist, "index.html");
 
 let mainWindow: BrowserWindow | null = null;
 let sessionService: ClaudeSessionService | null = null;
-let usageMonitor: ClaudeUsageMonitor | null = null;
 let managedPluginDir: string | null = null;
 let pluginWarning: string | null = null;
 
@@ -190,16 +189,7 @@ function registerIpcHandlers(): void {
     },
   );
 
-  ipcMain.handle(CLAUDE_IPC_CHANNELS.startUsageMonitor, async () => {
-    if (!usageMonitor) {
-      return { ok: false, message: "Usage monitor is unavailable." };
-    }
-    return usageMonitor.start();
-  });
-
-  ipcMain.handle(CLAUDE_IPC_CHANNELS.stopUsageMonitor, () => {
-    usageMonitor?.stop();
-  });
+  ipcMain.handle(CLAUDE_IPC_CHANNELS.getUsage, () => getUsage());
 
   ipcMain.handle(CLAUDE_IPC_CHANNELS.openLogFolder, async () => {
     const logPath = app.getPath("logs");
@@ -218,10 +208,6 @@ app.whenReady().then(async () => {
   log.info("Plugin initialization result", {
     pluginDir: managedPluginDir,
     pluginWarning,
-  });
-
-  usageMonitor = new ClaudeUsageMonitor((result) => {
-    sendToRenderer(CLAUDE_IPC_CHANNELS.usageUpdate, { result });
   });
 
   sessionService = new ClaudeSessionService({
@@ -257,7 +243,6 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  usageMonitor?.stop();
   sessionService?.dispose();
 
   if (process.platform !== "darwin") {
@@ -266,6 +251,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  usageMonitor?.stop();
   sessionService?.dispose();
 });

@@ -16,9 +16,7 @@ export const CLAUDE_IPC_CHANNELS = {
   sessionError: "claude:session-error",
   sessionUpdated: "claude:session-updated",
   activeSessionChanged: "claude:active-session-changed",
-  startUsageMonitor: "claude:start-usage-monitor",
-  stopUsageMonitor: "claude:stop-usage-monitor",
-  usageUpdate: "claude:usage-update",
+  getUsage: "claude:get-usage",
   openLogFolder: "claude:open-log-folder",
 } as const;
 
@@ -203,10 +201,6 @@ export type ClaudeUsageResult =
   | { ok: true; usage: ClaudeUsageData }
   | { ok: false; message: string };
 
-export interface ClaudeUsageUpdateEvent {
-  result: ClaudeUsageResult;
-}
-
 export interface ClaudeDesktopApi {
   selectFolder: () => Promise<string | null>;
   getSessions: () => Promise<ClaudeSessionsSnapshot>;
@@ -245,10 +239,6 @@ export interface ClaudeDesktopApi {
   onClaudeActiveSessionChanged: (
     callback: (payload: ClaudeActiveSessionChangedEvent) => void,
   ) => () => void;
-  startUsageMonitor: () => Promise<ClaudeUsageResult>;
-  stopUsageMonitor: () => Promise<void>;
-  onClaudeUsageUpdate: (
-    callback: (payload: ClaudeUsageUpdateEvent) => void,
-  ) => () => void;
+  getUsage: () => Promise<ClaudeUsageResult>;
   openLogFolder: () => Promise<void>;
 }

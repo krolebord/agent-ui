@@ -10,7 +10,6 @@ import {
   type ClaudeSessionUpdatedEvent,
   type ClaudeSessionsSnapshot,
   type ClaudeUsageResult,
-  type ClaudeUsageUpdateEvent,
   type DeleteClaudeProjectInput,
   type DeleteClaudeSessionInput,
   type ResizeClaudeSessionInput,
@@ -99,15 +98,8 @@ const claudeApi: ClaudeDesktopApi = {
       CLAUDE_IPC_CHANNELS.activeSessionChanged,
       callback,
     ),
-  startUsageMonitor: (): Promise<ClaudeUsageResult> =>
-    ipcRenderer.invoke(CLAUDE_IPC_CHANNELS.startUsageMonitor),
-  stopUsageMonitor: (): Promise<void> =>
-    ipcRenderer.invoke(CLAUDE_IPC_CHANNELS.stopUsageMonitor),
-  onClaudeUsageUpdate: (callback) =>
-    subscribe<ClaudeUsageUpdateEvent>(
-      CLAUDE_IPC_CHANNELS.usageUpdate,
-      callback,
-    ),
+  getUsage: (): Promise<ClaudeUsageResult> =>
+    ipcRenderer.invoke(CLAUDE_IPC_CHANNELS.getUsage),
   openLogFolder: (): Promise<void> =>
     ipcRenderer.invoke(CLAUDE_IPC_CHANNELS.openLogFolder),
 };
