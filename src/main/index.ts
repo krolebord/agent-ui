@@ -1,30 +1,18 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import fixPath from "fix-path";
-
 fixPath();
-import type {
-  AddClaudeProjectInput,
-  DeleteClaudeProjectInput,
-  DeleteClaudeSessionInput,
-  GetClaudeStateInput,
-  ResizeClaudeSessionInput,
-  SetActiveSessionInput,
-  SetClaudeProjectCollapsedInput,
-  SetClaudeProjectDefaultsInput,
-  StartClaudeSessionInput,
-  StopClaudeSessionInput,
-  WriteClaudeSessionInput,
-} from "../shared/claude-types";
-import { CLAUDE_IPC_CHANNELS } from "../shared/claude-types";
-import { ClaudeProjectStore } from "./claude-project-store";
-import { ClaudeSessionSnapshotStore } from "./claude-session-snapshot-store";
-import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
-import { getUsage } from "./claude-usage-service";
+
+import { onError } from "@orpc/server";
+import { RPCHandler } from "@orpc/server/message-port";
+import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { createServices } from "./create-services";
 import log from "./logger";
-import { SessionOrchestrator } from "./session-orchestrator";
-import { StateOrchestrator } from "./state-orchestrator";
+import { orpcRouter } from "./orpc-router";
+
+if (process.platform !== "darwin") {
+  throw new Error("Only macOS is supported");
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,27 +31,7 @@ const preload = path.join(__dirname, "../preload/index.mjs");
 const indexHtml = path.join(rendererDist, "index.html");
 
 let mainWindow: BrowserWindow | null = null;
-let sessionService: SessionOrchestrator | null = null;
-let stateService: StateOrchestrator | null = null;
-let managedPluginDir: string | null = null;
-let pluginWarning: string | null = null;
-
-function sendToRenderer(channel: string, payload: unknown): void {
-  mainWindow?.webContents.send(channel, payload);
-}
-
-async function initializeManagedPlugin(userDataPath: string): Promise<void> {
-  try {
-    managedPluginDir = await ensureManagedClaudeStatePlugin(userDataPath);
-    pluginWarning = null;
-  } catch (error) {
-    managedPluginDir = null;
-    pluginWarning =
-      error instanceof Error
-        ? `Hook monitoring plugin failed to load: ${error.message}`
-        : "Hook monitoring plugin failed to load.";
-  }
-}
+let services: Awaited<ReturnType<typeof createServices>> | null = null;
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -106,119 +74,15 @@ async function createWindow(): Promise<void> {
   });
 }
 
-function registerIpcHandlers(): void {
-  if (!sessionService || !stateService) {
-    throw new Error(
-      "registerIpcHandlers called before services were initialized",
-    );
-  }
-  const service = sessionService;
-  const stateOrchestrator = stateService;
+const handler = new RPCHandler(orpcRouter, {
+  interceptors: [
+    onError((error) => {
+      console.error(error);
+    }),
+  ],
+});
 
-  ipcMain.handle(CLAUDE_IPC_CHANNELS.selectFolder, async () => {
-    const options: Electron.OpenDialogOptions = {
-      title: "Select Project Folder",
-      properties: ["openDirectory"],
-    };
-    const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, options)
-      : await dialog.showOpenDialog(options);
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-
-    return result.filePaths[0] ?? null;
-  });
-
-  ipcMain.handle(CLAUDE_IPC_CHANNELS.getAllStates, () =>
-    stateOrchestrator.getAllStatesSnapshot(),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.getState,
-    (_event, input: GetClaudeStateInput) =>
-      stateOrchestrator.getStateSnapshot(input.key),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.addProject,
-    (_event, input: AddClaudeProjectInput) => service.addProject(input),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.setProjectCollapsed,
-    (_event, input: SetClaudeProjectCollapsedInput) =>
-      service.setProjectCollapsed(input),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.setProjectDefaults,
-    (_event, input: SetClaudeProjectDefaultsInput) =>
-      service.setProjectDefaults(input),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.deleteProject,
-    (_event, input: DeleteClaudeProjectInput) => service.deleteProject(input),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.startSession,
-    async (_event, input: StartClaudeSessionInput) =>
-      service.startSession(input),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.stopSession,
-    (_event, input: StopClaudeSessionInput) => service.stopSession(input),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.deleteSession,
-    (_event, input: DeleteClaudeSessionInput) => service.deleteSession(input),
-  );
-
-  ipcMain.handle(
-    CLAUDE_IPC_CHANNELS.setActiveSession,
-    (_event, input: SetActiveSessionInput) =>
-      service.setActiveSession(input.sessionId),
-  );
-
-  ipcMain.on(
-    CLAUDE_IPC_CHANNELS.writeSession,
-    (_event, input: WriteClaudeSessionInput) => {
-      service.writeToSession(input.sessionId, input.data);
-    },
-  );
-
-  ipcMain.on(
-    CLAUDE_IPC_CHANNELS.resizeSession,
-    (_event, input: ResizeClaudeSessionInput) => {
-      service.resizeSession(input.sessionId, input.cols, input.rows);
-    },
-  );
-
-  ipcMain.handle(CLAUDE_IPC_CHANNELS.getUsage, () => getUsage());
-
-  ipcMain.handle(CLAUDE_IPC_CHANNELS.openLogFolder, async () => {
-    const logPath = app.getPath("logs");
-    await shell.openPath(logPath);
-  });
-
-  ipcMain.handle(CLAUDE_IPC_CHANNELS.openStatePluginFolder, async () => {
-    const pluginPath = path.join(
-      app.getPath("userData"),
-      "claude-state-plugin",
-    );
-    await shell.openPath(pluginPath);
-  });
-
-  ipcMain.handle(CLAUDE_IPC_CHANNELS.openSessionFilesFolder, async () => {
-    const stateDir = path.join(app.getPath("userData"), "claude-state");
-    await shell.openPath(stateDir);
-  });
-}
+const disposeController = new AbortController();
 
 app.whenReady().then(async () => {
   const userDataPath = app.getPath("userData");
@@ -227,49 +91,36 @@ app.whenReady().then(async () => {
     userDataPath,
   });
 
-  await initializeManagedPlugin(userDataPath);
-  log.info("Plugin initialization result", {
-    pluginDir: managedPluginDir,
-    pluginWarning,
-  });
-
-  sessionService = new SessionOrchestrator({
+  services = await createServices({
     userDataPath,
-    pluginDir: managedPluginDir,
-    pluginWarning,
-    projectStore: new ClaudeProjectStore(),
-    sessionSnapshotStore: new ClaudeSessionSnapshotStore(),
-    callbacks: {
-      emitSessionData: (payload) =>
-        sendToRenderer(CLAUDE_IPC_CHANNELS.sessionData, payload),
-      emitSessionExit: (payload) =>
-        sendToRenderer(CLAUDE_IPC_CHANNELS.sessionExit, payload),
-      emitSessionError: (payload) =>
-        sendToRenderer(CLAUDE_IPC_CHANNELS.sessionError, payload),
-    },
+    getMainWindow: () => mainWindow,
+    disposeSignal: disposeController.signal,
   });
 
-  stateService = new StateOrchestrator({
-    serviceStates: sessionService.getServiceStates(),
-    callbacks: {
-      emitStateSet: (payload) =>
-        sendToRenderer(CLAUDE_IPC_CHANNELS.stateSet, payload),
-      emitStateUpdate: (payload) =>
-        sendToRenderer(CLAUDE_IPC_CHANNELS.stateUpdate, payload),
-    },
+  log.info("Plugin initialization result", {
+    pluginDir: services.managedPluginDir,
+    pluginWarning: services.pluginWarning,
   });
 
   log.info("Session service created");
 
-  registerIpcHandlers();
+  ipcMain.on("start-orpc-server", async (event) => {
+    if (!services) {
+      return;
+    }
+
+    const [serverPort] = event.ports;
+    handler.upgrade(serverPort, {
+      context: services,
+    });
+    serverPort.start();
+  });
+
   await createWindow();
-  stateService.emitAllStateSets();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      void createWindow().then(() => {
-        stateService?.emitAllStateSets();
-      });
+      void createWindow();
     }
   });
 });
@@ -280,7 +131,32 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.on("before-quit", () => {
-  sessionService?.dispose();
-  stateService?.dispose();
+let isHandlingBeforeQuit = false;
+let hasCompletedShutdown = false;
+let shutdownPromise: Promise<void> | null = null;
+
+app.on("before-quit", (event) => {
+  if (hasCompletedShutdown) {
+    return;
+  }
+
+  event.preventDefault();
+
+  if (isHandlingBeforeQuit) {
+    return;
+  }
+  isHandlingBeforeQuit = true;
+
+  disposeController.abort();
+
+  shutdownPromise ??= (async () => {
+    try {
+      await services?.shutdown();
+    } catch (error) {
+      log.error("Failed during app shutdown", { error });
+    } finally {
+      hasCompletedShutdown = true;
+      app.quit();
+    }
+  })();
 });

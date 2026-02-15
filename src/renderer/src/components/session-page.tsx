@@ -2,59 +2,91 @@ import {
   type TerminalPaneHandle,
   TerminalPane,
 } from "@renderer/components/terminal-pane";
-import { useTerminalSession } from "@renderer/services/use-terminal-session";
 import { AlertCircle } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
-import { Redirect } from "wouter";
+import { useAppState } from "./sync-state-provider";
+import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
+import { consumeEventIterator } from "@orpc/client";
+import { orpc } from "@renderer/orpc-client";
+import { toast } from "sonner";
 
-interface SessionPageProps {
-  sessionId: string;
+function useActiveSession() {
+  const activeSessionId = useActiveSessionId();
+  const sessions = useAppState((state) => state.sessions);
+  return activeSessionId ? (sessions[activeSessionId] ?? null) : null;
 }
 
-export function SessionPage({ sessionId }: SessionPageProps) {
-  const { state, actions } = useTerminalSession();
+type Session = Exclude<ReturnType<typeof useActiveSession>, null>;
+
+export function SessionPage() {
+  const session = useActiveSession();
+
+  if (!session) {
+    return null;
+  }
+
+  return <TerminalPage session={session} />;
+}
+
+function TerminalPage({ session }: { session: Session }) {
   const terminalRef = useRef<TerminalPaneHandle | null>(null);
 
-  const sessionExists = Object.prototype.hasOwnProperty.call(
-    state.sessionsById,
-    sessionId,
-  );
-
-  // Route → State sync: activate this session if it isn't already active
   useEffect(() => {
-    if (sessionExists && sessionId && state.activeSessionId !== sessionId) {
-      void actions.setActiveSession(sessionId);
-    }
-  }, [sessionId, sessionExists, state.activeSessionId, actions]);
+    terminalRef.current?.clear();
 
-  const handleTerminalRef = useCallback(
-    (handle: TerminalPaneHandle | null) => {
-      terminalRef.current = handle;
-      actions.attachTerminal(handle);
-    },
-    [actions],
-  );
+    const cancel = consumeEventIterator(
+      orpc.sessions.subscribeToSessionTerminal
+        .call({
+          sessionId: session.sessionId,
+        })
+        .then((stream) => {
+          terminalRef.current?.focus();
+          return stream;
+        }),
+      {
+        onEvent(event) {
+          switch (event.type) {
+            case "data":
+              terminalRef.current?.write(event.data);
+              break;
+            case "clear":
+              terminalRef.current?.clear();
+              break;
+          }
+        },
+        onError(error) {
+          const message =
+            error instanceof Error ? error.message : "Unknown error";
+          toast.error(`Terminal stream disconnected: ${message}`);
+        },
+      },
+    );
+    return () => void cancel();
+  }, [session.sessionId]);
 
   const handleTerminalInput = useCallback(
     (data: string) => {
-      actions.writeToActiveSession(data);
+      void orpc.sessions.writeToSessionTerminal.call({
+        sessionId: session.sessionId,
+        data,
+      });
     },
-    [actions],
+    [session.sessionId],
   );
 
   const handleTerminalResize = useCallback(
     (cols: number, rows: number) => {
-      actions.resizeActiveSession(cols, rows);
+      void orpc.sessions.resizeSessionTerminal.call({
+        sessionId: session.sessionId,
+        cols,
+        rows,
+      });
     },
-    [actions],
+    [session.sessionId],
   );
 
-  if (!sessionExists) {
-    return <Redirect to="/" replace />;
-  }
-
-  const session = state.sessionsById[sessionId];
-  const errorMessage = state.errorMessage || session?.lastError || "";
+  const errorMessage =
+    session.terminal.errorMessage || session.activity.warning || "";
 
   return (
     <>
@@ -67,7 +99,7 @@ export function SessionPage({ sessionId }: SessionPageProps) {
 
       <div className="min-h-0 flex-1 overflow-hidden">
         <TerminalPane
-          ref={handleTerminalRef}
+          ref={terminalRef}
           onInput={handleTerminalInput}
           onResize={handleTerminalResize}
         />

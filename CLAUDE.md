@@ -1,128 +1,59 @@
-# Claude UI
+# CLAUDE.md
 
-## Project Description
-Desktop Electron app that embeds Claude CLI in an xterm terminal. Runtime state and session lifecycle are orchestrated through Electron IPC, with a multi-session backend and a single active terminal pane in the renderer.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-`AGENTS.md` is a symlink to this file, so keep this document accurate and implementation-specific.
+## Commands
 
-## Tech Stack
-- Electron + Vite + React + TypeScript
-- Tailwind CSS + Radix UI primitives
-- `node-pty` for Claude CLI terminal process management
-- xterm.js (`@xterm/xterm`, `@xterm/addon-fit`) for terminal rendering
-- `electron-store` for persisted local UI/session metadata
-- `nano-spawn` for generated session title requests
-- Biome for lint/format
-- Vitest for unit tests
-- pnpm for package management
-
-## High-Level Architecture
-### Process boundaries
-- Main process (`src/main`): owns session lifecycle, Claude process management, hook/event monitoring, persistence, and IPC handlers.
-- Preload (`src/preload/index.ts`): exposes a typed `window.claude` bridge with `invoke/send/on` wrappers.
-- Shared contracts (`src/shared/claude-types.ts`): canonical IPC channels, DTOs, and event payload types.
-- Renderer (`src/renderer/src`): state service + React UI; no direct Node/Electron main APIs.
-
-### Core services
-- `src/main/session-orchestrator.ts`
-  - Source of truth for sessions/projects/active session.
-  - Creates and coordinates one `ClaudeSessionManager` and one `ClaudeActivityMonitor` per session.
-  - Hydrates persisted snapshots at startup.
-  - Emits scoped session events back to renderer.
-- `src/main/claude-session.ts`
-  - Wraps `node-pty` spawn/write/resize/stop lifecycle.
-  - Launches `claude` in interactive shell (`-ilc` on Unix, `cmd /c` on Windows).
-  - Supports `--session-id`, `--resume`, `--model`, and `--dangerously-skip-permissions`.
-- `src/main/claude-activity-monitor.ts`
-  - Watches NDJSON state file written by Claude hook plugin.
-  - Watch-first with polling fallback.
-  - Reduces hook events into activity states (`working`, `awaiting_approval`, etc.).
-- `src/main/claude-state-plugin.ts`
-  - Creates managed Claude plugin under app user data.
-  - Registers Claude hook events and writes normalized NDJSON events.
-- `src/main/claude-project-store.ts`
-  - Persists project list/collapse state in `electron-store`.
-- `src/main/claude-session-snapshot-store.ts`
-  - Persists session snapshots and `activeSessionId` in `electron-store`.
-- `src/renderer/src/services/session-store.ts`
-  - Renderer-side reactive state store (React-independent).
-  - Handles all IPC calls/events and terminal attachment.
-  - Maintains per-session output ring buffers (10,000 lines, 2MB cap).
-- `src/renderer/src/services/use-terminal-session.ts`
-  - React binding via `useSyncExternalStore`.
-
-## Session Lifecycle and Data Flow
-1. Renderer calls `startClaudeSession` with cwd + terminal size (+ optional session config).
-2. Main service creates session record, monitor, and PTY manager.
-3. Main service creates state file and starts monitor.
-4. PTY manager launches `claude`; service marks session active when startup succeeds.
-5. Main emits session events (`data/status/error/exit/activity/hook/title`) via IPC.
-6. Renderer updates local state and routes output only for `activeSessionId`.
-7. Session switching is authoritative from main: renderer requests switch, then updates only after `active-session-changed` event.
-
-## Persistence Model
-- Projects (`projects`): normalized unique paths + `collapsed` flag.
-- Sessions (`sessionSnapshots`): session metadata (`status`, `activityState`, `sessionName`, timestamps, errors).
-- Active session (`activeSessionId`): persisted if it still exists.
-- On app restart:
-  - Snapshots are hydrated as stopped sessions (`status: "stopped"`, `activityState: "idle"`).
-  - Existing IDs remain resumable through `resumeSessionId`.
-
-## Important Implementation Invariants
-- Shared types in `src/shared/claude-types.ts` are the IPC contract. Keep preload/main/renderer in sync.
-- Session operations are always `sessionId` scoped.
-- Terminal writes are sent only for the active session; inactive session output is buffered for replay on activation.
-- Session switch UI state changes only after main emits `active-session-changed`.
-- Renderer business logic belongs in `session-store`; components stay presentation-focused.
-- Session title auto-generation triggers once, only for unnamed sessions, on first non-empty `UserPromptSubmit`.
-
-## Directory Structure
-```text
-src/
-  main/
-    index.ts                           # Electron bootstrap + IPC wiring
-    session-orchestrator.ts            # Main orchestration / source of truth
-    claude-session.ts                  # PTY lifecycle for claude process
-    claude-activity-monitor.ts         # Hook event file monitor
-    claude-state-plugin.ts             # Managed plugin generator
-    claude-project-store.ts            # Persisted project list
-    claude-session-snapshot-store.ts   # Persisted session snapshots
-    generate-session-title.ts          # Optional auto-title generation
-  preload/
-    index.ts                           # window.claude bridge
-  shared/
-    claude-types.ts                    # IPC channels and shared contracts
-  renderer/src/
-    services/
-      session-store.ts                 # Renderer reactive state store
-      use-terminal-session.ts          # React store subscription
-    components/
-      terminal-pane.tsx                # xterm integration
-      session-sidebar.tsx              # Project/session navigation
-      new-session-dialog.tsx           # Session creation options
+```bash
+pnpm dev              # Start dev server with hot reload
+pnpm build            # TypeScript check + Vite build
+pnpm test             # Run all tests (Vitest)
+pnpm exec vitest run test/main/session-service.spec.ts  # Run single test file
+pnpm exec vitest --watch   # Watch mode
+pnpm format           # Lint and format with Biome
+pnpm typecheck        # TypeScript validation only
+pnpm app:dist:mac     # Build and package macOS DMG/ZIP
 ```
 
-## Test Coverage Map
-- `test/main/session-orchestrator.spec.ts`
-  - Multi-session behavior, persistence, resume/delete/active transitions, event scoping, title generation triggers.
-- `test/main/claude-activity-monitor.spec.ts`
-  - Watch-first flow, polling fallback, malformed line handling, state transitions.
-- `test/renderer/session-store.spec.ts`
-  - Renderer state actions, IPC bridging, active-session replay semantics, output ring-buffer limits.
+## Architecture
 
-## Logs
-- App logs (via `electron-log`): `~/Library/Logs/claude-ui/main.log`
-- Both dev (`pnpm dev`) and production (built app) logs go to the same file.
-- Unit tests also write to this log file.
+Electron app for managing Claude CLI sessions. Three process layers: **main** (Node/Electron), **preload** (secure bridge), **renderer** (React).
 
-## Common Commands
-- Install deps: `pnpm install`
-- Run app (dev): `pnpm dev`
-- Build: `pnpm build`
-- Type check: `pnpm typecheck`
-- Format (lint + format fix): `pnpm format`
-- Run unit tests: `pnpm exec vitest --run`
-- Run targeted tests:
-  - `pnpm exec vitest --run test/main/session-orchestrator.spec.ts`
-  - `pnpm exec vitest --run test/main/claude-activity-monitor.spec.ts`
-  - `pnpm exec vitest --run test/renderer/session-store.spec.ts`
+### IPC: oRPC over MessageChannel
+
+Instead of Electron's built-in IPC, the app uses **oRPC** (`@orpc/server` + `@orpc/client`) over a `MessageChannel` port pair. The preload script forwards the server port from renderer to main — no Node APIs are exposed to the renderer.
+
+- **Main**: `src/main/orpc.ts` defines typed procedures with a `Services` context. `src/main/orpc-router.ts` composes sub-routers from service modules (sessions, projects, fs, stateSync).
+- **Renderer**: `src/renderer/src/orpc-client.ts` creates the client and wraps it with `createTanstackQueryUtils` for TanStack Query integration.
+- Calling RPCs: `orpc.sessions.startSession.call({ ... })`. Event streams use `consumeEventIterator`.
+
+### State Sync: Immer patches → Event streams → Zustand
+
+State flows from main to renderer via JSON Patches:
+
+1. `defineServiceState()` (`src/shared/service-state.ts`) creates Immer-based state containers that emit typed patch events on update.
+2. `StateOrchestrator` (`src/main/state-orchestrator.ts`) aggregates service states, scopes patches by service key, tracks versions, and exposes an async iterator for subscribers.
+3. `state-sync-client.ts` (renderer) bootstraps by fetching a full snapshot, then applies incremental patches to a Zustand store with version gating and re-sync fallback.
+4. Components consume state via `useAppState(selector)` from the `SyncStateProvider` context.
+
+### Persistence
+
+`PersistenceOrchestrator` registers `ServiceState` instances with Zod schemas, debounces writes (75ms default) to `electron-store`, and hydrates state on boot.
+
+### Services Lifecycle
+
+`create-services.ts` initializes all services (plugin, session state file manager, persistence, project/session states, state orchestrator) and returns a services object with a `shutdown()` hook. Shutdown flushes pending persistence and aborts subscriptions via `disposeSignal`.
+
+### Terminal
+
+xterm.js in the renderer with `node-pty` spawning in main. `TerminalSession` wraps PTY with input/output handling and activity monitoring.
+
+## Key Conventions
+
+- **Biome** for linting/formatting (no ESLint). 2-space indents.
+- **Zod 4** for runtime validation schemas (`src/shared/claude-schemas.ts`).
+- **Path aliases**: `@renderer` → `src/renderer/src`, `@shared` → `src/shared`.
+- **shadcn/ui** components in `src/renderer/src/components/ui/`.
+- **Tailwind CSS 4** for styling (via Vite plugin).
+- Tests live in `test/` mirroring `src/` structure. Tests use `vi.hoisted()` for module-level mocks.
+- **Lefthook** for git pre-commit hooks.

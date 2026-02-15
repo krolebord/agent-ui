@@ -1,239 +1,181 @@
-import type {
-  ClaudeAllStatesSnapshot,
-  ClaudeStateSetEvent,
-  ClaudeStateUpdateEvent,
-  ClaudeUsageResult,
-} from "../../src/shared/claude-types";
+import { enablePatches, type Patch } from "immer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StateSyncClient } from "../../src/renderer/src/services/state-sync-client";
 
-const ipcHarness = vi.hoisted(() => {
-  const listeners = {
-    stateSet: new Set<(payload: ClaudeStateSetEvent) => void>(),
-    stateUpdate: new Set<(payload: ClaudeStateUpdateEvent) => void>(),
-  };
+enablePatches();
 
-  const register = <T>(bucket: Set<(payload: T) => void>) =>
-    vi.fn((callback: (payload: T) => void) => {
-      bucket.add(callback);
-      return () => {
-        bucket.delete(callback);
-      };
-    });
+type StateUpdateEvent = { version: number; patch: Patch[] };
+type FullSnapshot<TState extends object> = {
+  version: number;
+  state: TState;
+};
+type BufferedStream = {
+  bufferedEvents: StateUpdateEvent[];
+  onEvent: ((event: StateUpdateEvent) => void) | null;
+};
 
-  const claudeIpc = {
-    selectFolder: vi.fn(),
-    getAllStates: vi.fn<() => Promise<ClaudeAllStatesSnapshot>>(),
-    getState: vi.fn<() => Promise<ClaudeStateSetEvent>>(),
-    addClaudeProject: vi.fn(),
-    setClaudeProjectCollapsed: vi.fn(),
-    setClaudeProjectDefaults: vi.fn(),
-    startClaudeSession: vi.fn(),
-    stopClaudeSession: vi.fn(),
-    deleteClaudeProject: vi.fn(),
-    deleteClaudeSession: vi.fn(),
-    setActiveSession: vi.fn(),
-    writeToClaudeSession: vi.fn(),
-    resizeClaudeSession: vi.fn(),
-    onClaudeSessionData: vi.fn(),
-    onClaudeStateSet: register(listeners.stateSet),
-    onClaudeStateUpdate: register(listeners.stateUpdate),
-    onClaudeSessionExit: vi.fn(),
-    onClaudeSessionError: vi.fn(),
-    getUsage: vi.fn<() => Promise<ClaudeUsageResult>>(),
-    openLogFolder: vi.fn(),
-    openStatePluginFolder: vi.fn(),
-    openSessionFilesFolder: vi.fn(),
-  };
-
-  const emit = {
-    stateSet: (payload: ClaudeStateSetEvent) => {
-      for (const callback of listeners.stateSet) {
-        callback(payload);
-      }
-    },
-    stateUpdate: (payload: ClaudeStateUpdateEvent) => {
-      for (const callback of listeners.stateUpdate) {
-        callback(payload);
-      }
-    },
-  };
-
-  const reset = () => {
-    vi.clearAllMocks();
-    Object.values(listeners).forEach((bucket) => bucket.clear());
-  };
-
-  return { claudeIpc, emit, reset };
-});
-
-vi.mock("@renderer/lib/ipc", () => ({
-  claudeIpc: ipcHarness.claudeIpc,
+const orpcSpies = vi.hoisted(() => ({
+  getFullStateSnapshot: vi.fn(),
+  subscribeToStateUpdates: vi.fn(),
 }));
 
-function createAllStates(): ClaudeAllStatesSnapshot {
+const streamSpies = vi.hoisted(() => {
+  const unsubscribe = vi.fn();
+
   return {
-    projects: {
-      key: "projects",
-      version: 0,
-      state: [],
+    createStream(): BufferedStream {
+      return { bufferedEvents: [], onEvent: null };
     },
-    sessions: {
-      key: "sessions",
-      version: 0,
-      state: {},
+    consumeEventIterator: vi.fn((stream: BufferedStream, handlers) => {
+      for (const event of stream.bufferedEvents) {
+        handlers.onEvent(event);
+      }
+      stream.bufferedEvents = [];
+      stream.onEvent = handlers.onEvent;
+      return unsubscribe;
+    }),
+    emit(stream: BufferedStream, event: StateUpdateEvent) {
+      if (stream.onEvent) {
+        stream.onEvent(event);
+        return;
+      }
+      stream.bufferedEvents.push(event);
     },
-    activeSession: {
-      key: "activeSession",
-      version: 0,
-      state: { activeSessionId: null },
-    },
+    unsubscribe,
   };
-}
-
-describe("StateSyncClient", () => {
-  beforeEach(() => {
-    ipcHarness.reset();
-    ipcHarness.claudeIpc.getAllStates.mockResolvedValue(createAllStates());
-    ipcHarness.claudeIpc.getState.mockResolvedValue({
-      key: "projects",
-      version: 0,
-      state: [],
-    });
-  });
-
-  it("bootstraps by hydrating all required keys", async () => {
-    const onStateChanged = vi.fn();
-    const client = new StateSyncClient({ onStateChanged });
-
-    await client.initialize();
-
-    expect(ipcHarness.claudeIpc.getAllStates).toHaveBeenCalledTimes(1);
-    expect(onStateChanged).toHaveBeenCalledTimes(1);
-    expect(client.getState("activeSession")?.activeSessionId).toBeNull();
-  });
-
-  it("replays incremental ops when versions are contiguous", async () => {
-    const client = new StateSyncClient({ onStateChanged: vi.fn() });
-    await client.initialize();
-
-    ipcHarness.emit.stateUpdate({
-      key: "projects",
-      version: 1,
-      ops: [
-        [
-          "set",
-          ["0"],
-          { path: "/workspace", collapsed: false },
-          undefined,
-        ],
-      ],
-    });
-
-    await vi.waitFor(() => {
-      expect(client.getState("projects")).toEqual([
-        { path: "/workspace", collapsed: false },
-      ]);
-    });
-  });
-
-  it("requests keyed full-state resync on version gaps", async () => {
-    ipcHarness.claudeIpc.getState.mockResolvedValueOnce({
-      key: "projects",
-      version: 3,
-      state: [{ path: "/resynced", collapsed: false }],
-    });
-
-    const client = new StateSyncClient({ onStateChanged: vi.fn() });
-    await client.initialize();
-
-    ipcHarness.emit.stateUpdate({
-      key: "projects",
-      version: 2,
-      ops: [
-        [
-          "set",
-          ["0"],
-          { path: "/gap", collapsed: false },
-          undefined,
-        ],
-      ],
-    });
-
-    await vi.waitFor(() => {
-      expect(ipcHarness.claudeIpc.getState).toHaveBeenCalledWith({
-        key: "projects",
-      });
-    });
-    expect(client.getState("projects")).toEqual([
-      { path: "/resynced", collapsed: false },
-    ]);
-  });
-
-  it("ignores stale bootstrap state after a newer pre-bootstrap resync", async () => {
-    let resolveBootstrap: ((snapshot: ClaudeAllStatesSnapshot) => void) | null =
-      null;
-    const bootstrapPromise = new Promise<ClaudeAllStatesSnapshot>((resolve) => {
-      resolveBootstrap = resolve;
-    });
-    ipcHarness.claudeIpc.getAllStates.mockReturnValueOnce(bootstrapPromise);
-    ipcHarness.claudeIpc.getState.mockResolvedValueOnce({
-      key: "projects",
-      version: 2,
-      state: [{ path: "/newer", collapsed: false }],
-    });
-
-    const client = new StateSyncClient({ onStateChanged: vi.fn() });
-    const initializePromise = client.initialize();
-
-    ipcHarness.emit.stateUpdate({
-      key: "projects",
-      version: 1,
-      ops: [
-        [
-          "set",
-          ["0"],
-          { path: "/from-op", collapsed: false },
-          undefined,
-        ],
-      ],
-    });
-
-    await vi.waitFor(() => {
-      expect(ipcHarness.claudeIpc.getState).toHaveBeenCalledWith({
-        key: "projects",
-      });
-    });
-    expect(client.getState("projects")).toEqual([
-      { path: "/newer", collapsed: false },
-    ]);
-
-    if (!resolveBootstrap) {
-      throw new Error("Expected bootstrap resolver to be initialized.");
-    }
-
-    resolveBootstrap({
-      projects: {
-        key: "projects",
-        version: 0,
-        state: [{ path: "/stale", collapsed: false }],
-      },
-      sessions: {
-        key: "sessions",
-        version: 0,
-        state: {},
-      },
-      activeSession: {
-        key: "activeSession",
-        version: 0,
-        state: { activeSessionId: null },
-      },
-    });
-
-    await initializePromise;
-    expect(client.getState("projects")).toEqual([
-      { path: "/newer", collapsed: false },
-    ]);
-  });
 });
 
+vi.mock("@renderer/orpc-client", () => ({
+  orpc: {
+    stateSync: {
+      getFullStateSnapshot: { call: orpcSpies.getFullStateSnapshot },
+      subscribeToStateUpdates: { call: orpcSpies.subscribeToStateUpdates },
+    },
+  },
+}));
+
+vi.mock("@orpc/client", () => ({
+  consumeEventIterator: streamSpies.consumeEventIterator,
+}));
+
+import { createSyncStateStore } from "../../src/renderer/src/services/state-sync-client";
+
+describe("createSyncStateStore", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("skips buffered updates already covered by the bootstrap snapshot version", async () => {
+    const stream = streamSpies.createStream();
+    let resolveSnapshot:
+      | ((value: FullSnapshot<{ items: string[] }>) => void)
+      | null = null;
+    const snapshotPromise = new Promise<FullSnapshot<{ items: string[] }>>(
+      (resolve) => {
+        resolveSnapshot = resolve;
+      },
+    );
+
+    orpcSpies.subscribeToStateUpdates.mockResolvedValue(stream);
+    orpcSpies.getFullStateSnapshot.mockReturnValue(snapshotPromise);
+
+    const resultPromise = createSyncStateStore();
+
+    expect(orpcSpies.subscribeToStateUpdates).toHaveBeenCalledTimes(1);
+    expect(streamSpies.consumeEventIterator).not.toHaveBeenCalled();
+
+    streamSpies.emit(stream, {
+      version: 1,
+      patch: [{ op: "add", path: ["items", 1], value: "draft" }],
+    });
+
+    resolveSnapshot?.({
+      version: 1,
+      state: { items: ["draft"] },
+    });
+
+    const { store, unsubscribe } = await resultPromise;
+
+    expect(streamSpies.consumeEventIterator).toHaveBeenCalledWith(
+      stream,
+      expect.any(Object),
+    );
+    expect(store.getState()).toEqual({ items: ["draft"] });
+    expect(unsubscribe).toBe(streamSpies.unsubscribe);
+  });
+
+  it("applies only the next update version", async () => {
+    const stream = streamSpies.createStream();
+
+    orpcSpies.subscribeToStateUpdates.mockResolvedValue(stream);
+    orpcSpies.getFullStateSnapshot.mockResolvedValue({
+      version: 1,
+      state: { count: 1 },
+    });
+
+    const { store } = await createSyncStateStore();
+
+    streamSpies.emit(stream, {
+      version: 1,
+      patch: [{ op: "replace", path: ["count"], value: 99 }],
+    });
+    streamSpies.emit(stream, {
+      version: 3,
+      patch: [{ op: "replace", path: ["count"], value: 3 }],
+    });
+    streamSpies.emit(stream, {
+      version: 2,
+      patch: [{ op: "replace", path: ["count"], value: 2 }],
+    });
+
+    await vi.waitFor(() => {
+      expect(store.getState()).toEqual({ count: 2 });
+    });
+  });
+
+  it("re-downloads snapshot when stream version has a gap", async () => {
+    const stream = streamSpies.createStream();
+
+    orpcSpies.subscribeToStateUpdates.mockResolvedValue(stream);
+    orpcSpies.getFullStateSnapshot
+      .mockResolvedValueOnce({
+        version: 1,
+        state: { count: 1 },
+      })
+      .mockResolvedValueOnce({
+        version: 4,
+        state: { count: 4 },
+      });
+
+    const { store } = await createSyncStateStore();
+
+    streamSpies.emit(stream, {
+      version: 4,
+      patch: [{ op: "replace", path: ["count"], value: 4 }],
+    });
+
+    await vi.waitFor(() => {
+      expect(orpcSpies.getFullStateSnapshot).toHaveBeenCalledTimes(2);
+      expect(store.getState()).toEqual({ count: 4 });
+    });
+  });
+
+  it("applies updates that arrive after bootstrap", async () => {
+    const stream = streamSpies.createStream();
+    orpcSpies.subscribeToStateUpdates.mockResolvedValue(stream);
+    orpcSpies.getFullStateSnapshot.mockResolvedValue({
+      version: 0,
+      state: { count: 0 },
+    });
+
+    const { store } = await createSyncStateStore();
+
+    streamSpies.emit(stream, {
+      version: 1,
+      patch: [{ op: "replace", path: ["count"], value: 2 }],
+    });
+
+    await vi.waitFor(() => {
+      expect(store.getState()).toEqual({ count: 2 });
+    });
+  });
+});

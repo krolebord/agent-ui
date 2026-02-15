@@ -1,6 +1,5 @@
 import { UsagePanel } from "@renderer/components/usage-panel";
 import { cn } from "@renderer/lib/utils";
-import { useTerminalSession } from "@renderer/services/use-terminal-session";
 import type {
   ProjectSessionGroup,
   SessionSidebarIndicatorState,
@@ -9,12 +8,12 @@ import {
   buildProjectSessionGroups,
   getSessionLastActivityLabel,
   getSessionSidebarIndicatorState,
-  getSessionTitle,
 } from "@renderer/services/terminal-session-selectors";
-import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
-import type { SessionId } from "@shared/claude-types";
-import { useEffect, useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import {
+  useActiveSessionId,
+  useActiveSessionStore,
+} from "@renderer/hooks/use-active-session-id";
+import { useMemo } from "react";
 import {
   CircleDot,
   ChevronDown,
@@ -43,6 +42,12 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@renderer/components/ui/context-menu";
+import { useAppState } from "./sync-state-provider";
+import { useSettingsStore } from "./settings-dialog";
+import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
+import { useMutation } from "@tanstack/react-query";
+import { orpc } from "@renderer/orpc-client";
+import { useNewSessionDialogStore } from "./new-session-dialog";
 
 const statusIndicatorMeta: Record<
   SessionSidebarIndicatorState,
@@ -68,6 +73,12 @@ const statusIndicatorMeta: Record<
     icon: LoaderCircle,
     label: "Pending",
     className: "text-sky-400",
+    animate: true,
+  },
+  stopping: {
+    icon: LoaderCircle,
+    label: "Stopping",
+    className: "text-amber-300",
     animate: true,
   },
   running: {
@@ -98,35 +109,52 @@ const statusIndicatorMeta: Record<
 };
 
 export function SessionSidebar() {
-  const { state, actions } = useTerminalSession();
-  const [, navigate] = useLocation();
-  const activeSessionId = useActiveSessionId();
+  const projects = useAppState((x) => x.projects);
+  const sessions = useAppState((x) => x.sessions);
+
+  const openSettingsDialog = useSettingsStore((x) => x.openSettingsDialog);
+
   const groups: ProjectSessionGroup[] = useMemo(
     () =>
       buildProjectSessionGroups({
-        projects: state.projects,
-        sessionsById: state.sessionsById,
+        projects,
+        sessionsById: sessions,
       }),
-    [state.projects, state.sessionsById],
+    [projects, sessions],
   );
-  const [now, setNow] = useState(() => Date.now());
+  const setOpenProjectCwd = useProjectDefaultsDialogStore(
+    (x) => x.setOpenProjectCwd,
+  );
 
-  useEffect(() => {
-    const timerId = setInterval(() => {
-      setNow(Date.now());
-    }, 30_000);
+  const createProjectMutation = useMutation({
+    mutationFn: async () => {
+      const cwd = await orpc.fs.selectFolder.call();
+      if (!cwd) return;
+      const { path } = await orpc.projects.addProject.call({ path: cwd });
+      setOpenProjectCwd(path);
+    },
+  });
 
-    return () => {
-      clearInterval(timerId);
-    };
-  }, []);
+  const toggleProjectCollapsed = useMutation(
+    orpc.projects.setProjectCollapsed.mutationOptions(),
+  );
+
+  const deleteProjectMutation = useMutation({
+    mutationFn: async (path: string) => {
+      await orpc.projects.deleteProject.call({ path });
+    },
+  });
+
+  const setOpenNewSessionDialogCwd = useNewSessionDialogStore(
+    (x) => x.setOpenProjectCwd,
+  );
 
   return (
     <aside className="flex h-full w-[304px] shrink-0 flex-col border-r border-border/70 bg-black/35 backdrop-blur-xl">
       <div className="flex items-center gap-1.5 border-b border-border/70 p-2">
         <button
           type="button"
-          onClick={actions.openSettingsDialog}
+          onClick={openSettingsDialog}
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-zinc-300 transition hover:bg-white/10 hover:text-white"
           aria-label="Settings"
         >
@@ -134,12 +162,14 @@ export function SessionSidebar() {
         </button>
         <button
           type="button"
-          onClick={() => void actions.addProject()}
-          disabled={state.isSelecting}
+          onClick={() => createProjectMutation.mutate()}
+          disabled={createProjectMutation.isPending}
           className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <FolderPlus className="size-3.5" />
-          {state.isSelecting ? "Selecting project..." : "Add new project"}
+          {createProjectMutation.isPending
+            ? "Selecting project..."
+            : "Add new project"}
         </button>
       </div>
 
@@ -153,11 +183,14 @@ export function SessionSidebar() {
               <div className="flex items-center gap-1.5 rounded-md px-0.5 py-0.5">
                 <button
                   type="button"
-                    onClick={() => {
-                      if (group.fromProjectList) {
-                        void actions.toggleProjectCollapsed(group.path);
-                      }
-                    }}
+                  onClick={() => {
+                    if (group.fromProjectList) {
+                      toggleProjectCollapsed.mutate({
+                        path: group.path,
+                        collapsed: !group.collapsed,
+                      });
+                    }
+                  }}
                   className={cn(
                     "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-sm font-medium text-zinc-100 transition",
                     group.fromProjectList
@@ -188,7 +221,7 @@ export function SessionSidebar() {
                       <button
                         type="button"
                         onClick={() => {
-                          void actions.deleteProject(group.path);
+                          deleteProjectMutation.mutate(group.path);
                         }}
                         className="inline-flex size-6 items-center justify-center rounded-md text-zinc-300 opacity-0 transition hover:bg-white/10 hover:text-rose-300 focus-visible:opacity-100 group-hover/project:opacity-100"
                         aria-label={`Delete project ${group.name}`}
@@ -199,7 +232,7 @@ export function SessionSidebar() {
                     <button
                       type="button"
                       onClick={() => {
-                        actions.openProjectDefaultsDialog(group.path);
+                        setOpenProjectCwd(group.path);
                       }}
                       className="inline-flex size-6 items-center justify-center rounded-md text-zinc-300 opacity-0 transition hover:bg-white/10 hover:text-white focus-visible:opacity-100 group-hover/project:opacity-100"
                       aria-label={`Project defaults for ${group.name}`}
@@ -209,7 +242,7 @@ export function SessionSidebar() {
                     <button
                       type="button"
                       onClick={() => {
-                        actions.openNewSessionDialog(group.path);
+                        setOpenNewSessionDialogCwd(group.path);
                       }}
                       className="inline-flex size-6 items-center justify-center rounded-md text-zinc-300 opacity-0 transition hover:bg-white/10 hover:text-white focus-visible:opacity-100 group-hover/project:opacity-100"
                       aria-label={`New session in ${group.name}`}
@@ -223,226 +256,12 @@ export function SessionSidebar() {
               {!group.collapsed ? (
                 <ul className="space-y-0.5 px-1 pb-1">
                   {group.sessions.length > 0 ? (
-                    group.sessions.map((session) => {
-                      const isActive = activeSessionId === session.sessionId;
-                      const isLoading = state.loadingSessionIds.has(
-                        session.sessionId,
-                      );
-                      const statusState = getSessionSidebarIndicatorState(
-                        session,
-                        { isLoading },
-                      );
-                      const statusMeta = statusIndicatorMeta[statusState];
-                      const StatusIcon = statusMeta.icon;
-                      const sessionTitle = getSessionTitle(session);
-                      const lastActivity = getSessionLastActivityLabel(
-                        session,
-                        now,
-                      );
-                      const ariaLabel = `${sessionTitle} (${statusMeta.label})`;
-                      const canStop =
-                        !isLoading &&
-                        (session.status === "starting" ||
-                          session.status === "running");
-                      const canResume = session.status === "stopped";
-                      const canControl = canStop || canResume;
-                      const canFork =
-                        session.status === "running" ||
-                        session.status === "stopped" ||
-                        session.status === "starting";
-                      const ControlIcon = canResume ? Play : Square;
-                      const controlTitle = canResume
-                        ? "Resume session"
-                        : "Stop session";
-                      const controlAriaLabel = canResume
-                        ? `Resume ${sessionTitle}`
-                        : `Stop ${sessionTitle}`;
-
-                      return (
-                        <li
-                          key={session.sessionId}
-                          className="group/session relative"
-                        >
-                          <ContextMenu>
-                            <ContextMenuTrigger asChild>
-                              <div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    void actions
-                                      .setActiveSession(session.sessionId)
-                                      .then(() => {
-                                        navigate(`/session/${session.sessionId}`);
-                                      });
-                                  }}
-                                  className={cn(
-                                    "flex w-full items-center justify-start gap-1.5 rounded-md px-1.5 py-1 pr-[3rem] text-sm transition",
-                                    isActive
-                                      ? "bg-white/15 text-white"
-                                      : "text-zinc-300 hover:bg-white/8 hover:text-zinc-100",
-                                  )}
-                                  aria-label={ariaLabel}
-                                >
-                                  <span
-                                    className="inline-flex shrink-0"
-                                    title={statusMeta.label}
-                                  >
-                                    <StatusIcon
-                                      className={cn(
-                                        "size-3",
-                                        statusMeta.className,
-                                        statusMeta.animate && "animate-spin",
-                                      )}
-                                      aria-hidden="true"
-                                    />
-                                  </span>
-                                  <span className="min-w-0 flex-1 truncate text-left">
-                                    {sessionTitle}
-                                  </span>
-                                </button>
-                                <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs tabular-nums text-zinc-400 transition group-hover/session:opacity-0 group-focus-within/session:opacity-0">
-                                  {lastActivity}
-                                </span>
-                                <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition group-hover/session:opacity-100 group-focus-within/session:opacity-100">
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      if (canResume) {
-                                        void actions
-                                          .resumeSession(session.sessionId)
-                                          .then((newId) => {
-                                            if (newId) {
-                                              navigate(`/session/${newId}`);
-                                            }
-                                          });
-                                        return;
-                                      }
-                                      void actions.stopSession(
-                                        session.sessionId,
-                                      );
-                                    }}
-                                    className={cn(
-                                      "pointer-events-auto inline-flex size-5 items-center justify-center rounded text-zinc-300 transition",
-                                      canControl
-                                        ? "hover:bg-white/10 hover:text-white"
-                                        : "cursor-not-allowed opacity-40",
-                                    )}
-                                    aria-label={controlAriaLabel}
-                                    title={controlTitle}
-                                    disabled={!canControl || isLoading}
-                                  >
-                                    <ControlIcon className="size-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      if (activeSessionId === session.sessionId) {
-                                        navigate("/", { replace: true });
-                                      }
-                                      void actions.deleteSession(session.sessionId);
-                                    }}
-                                    disabled={isLoading}
-                                    className={cn(
-                                      "pointer-events-auto inline-flex size-5 items-center justify-center rounded text-zinc-300 transition",
-                                      isLoading
-                                        ? "cursor-not-allowed opacity-40"
-                                        : "hover:bg-white/10 hover:text-rose-300",
-                                    )}
-                                    aria-label={`Delete ${sessionTitle}`}
-                                    title="Delete session"
-                                  >
-                                    <Trash2 className="size-3" />
-                                  </button>
-                                </div>
-                              </div>
-                            </ContextMenuTrigger>
-                            <ContextMenuContent>
-                              {canControl ? (
-                                <ContextMenuItem
-                                  disabled={isLoading}
-                                  onClick={() => {
-                                    if (canResume) {
-                                      void actions
-                                        .resumeSession(session.sessionId)
-                                        .then((newId) => {
-                                          if (newId) {
-                                            navigate(`/session/${newId}`);
-                                          }
-                                        });
-                                    } else {
-                                      void actions.stopSession(
-                                        session.sessionId,
-                                      );
-                                    }
-                                  }}
-                                >
-                                  <ControlIcon className="size-3.5" />
-                                  {canResume ? "Resume" : "Stop"}
-                                </ContextMenuItem>
-                              ) : null}
-                              {canFork ? (
-                                <ContextMenuItem
-                                  disabled={isLoading}
-                                  onClick={() => {
-                                    void actions
-                                      .forkSession(session.sessionId)
-                                      .then((newId) => {
-                                        if (newId) {
-                                          navigate(`/session/${newId}`);
-                                        }
-                                      });
-                                  }}
-                                >
-                                  <GitFork className="size-3.5" />
-                                  Fork session
-                                </ContextMenuItem>
-                              ) : null}
-                              {canControl || canFork ? (
-                                <ContextMenuSeparator />
-                              ) : null}
-                              <ContextMenuItem
-                                onClick={() => {
-                                  void navigator.clipboard.writeText(
-                                    session.sessionId,
-                                  );
-                                  toast.success("Session ID copied");
-                                }}
-                              >
-                                <Copy className="size-3.5" />
-                                Copy session ID
-                              </ContextMenuItem>
-                              <ContextMenuItem
-                                onClick={() => {
-                                  void navigator.clipboard.writeText(
-                                    session.cwd,
-                                  );
-                                  toast.success("Working directory copied");
-                                }}
-                              >
-                                <Copy className="size-3.5" />
-                                Copy working directory
-                              </ContextMenuItem>
-                              <ContextMenuSeparator />
-                              <ContextMenuItem
-                                variant="destructive"
-                                disabled={isLoading}
-                                onClick={() => {
-                                  if (activeSessionId === session.sessionId) {
-                                    navigate("/", { replace: true });
-                                  }
-                                  void actions.deleteSession(session.sessionId);
-                                }}
-                              >
-                                <Trash2 className="size-3.5" />
-                                Delete session
-                              </ContextMenuItem>
-                            </ContextMenuContent>
-                          </ContextMenu>
-                        </li>
-                      );
-                    })
+                    group.sessions.map((session) => (
+                      <SessionSidebarItem
+                        key={session.sessionId}
+                        sessionId={session.sessionId}
+                      />
+                    ))
                   ) : (
                     <li className="px-1.5 py-1 text-xs text-zinc-500">
                       No sessions yet
@@ -456,5 +275,193 @@ export function SessionSidebar() {
       </div>
       <UsagePanel />
     </aside>
+  );
+}
+
+function SessionSidebarItem({ sessionId }: { sessionId: string }) {
+  const activeSessionId = useActiveSessionId();
+  const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
+
+  const session = useAppState((x) => x.sessions[sessionId]);
+
+  const isActive = activeSessionId === sessionId;
+
+  const statusState = getSessionSidebarIndicatorState(session);
+  const statusMeta = statusIndicatorMeta[statusState];
+  const StatusIcon = statusMeta.icon;
+  const lastActivity = getSessionLastActivityLabel(session);
+  const ariaLabel = `${session.title} (${statusMeta.label})`;
+  const canStop =
+    session.terminal.status === "starting" ||
+    session.terminal.status === "running";
+  const canResume = session.terminal.status === "stopped";
+  const canControl = canStop || canResume;
+  const canFork =
+    session.terminal.status === "running" ||
+    session.terminal.status === "stopped" ||
+    session.terminal.status === "starting";
+  const ControlIcon = canResume ? Play : Square;
+  const controlTitle =
+    session.terminal.status === "stopping"
+      ? "Stopping session"
+      : canResume
+        ? "Resume session"
+        : "Stop session";
+  const controlAriaLabel =
+    session.terminal.status === "stopping"
+      ? `${session.title} is stopping`
+      : canResume
+        ? `Resume ${session.title}`
+        : `Stop ${session.title}`;
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.deleteSession.call({ sessionId });
+    },
+  });
+
+  return (
+    <li className="group/session relative">
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSessionId(sessionId);
+              }}
+              className={cn(
+                "flex w-full items-center justify-start gap-1.5 rounded-md px-1.5 py-1 pr-[3rem] text-sm transition",
+                isActive
+                  ? "bg-white/15 text-white"
+                  : "text-zinc-300 hover:bg-white/8 hover:text-zinc-100",
+              )}
+              aria-label={ariaLabel}
+            >
+              <span className="inline-flex shrink-0" title={statusMeta.label}>
+                <StatusIcon
+                  className={cn(
+                    "size-3",
+                    statusMeta.className,
+                    statusMeta.animate && "animate-spin",
+                  )}
+                  aria-hidden="true"
+                />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-left">
+                {session.title}
+              </span>
+            </button>
+            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs tabular-nums text-zinc-400 transition group-hover/session:opacity-0 group-focus-within/session:opacity-0">
+              {lastActivity}
+            </span>
+            <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition group-hover/session:opacity-100 group-focus-within/session:opacity-100">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (canResume) {
+                    void orpc.sessions.resumeSession
+                      .call({ sessionId })
+                      .then((newId) => {
+                        setActiveSessionId(newId);
+                      });
+                  } else {
+                    void orpc.sessions.stopLiveSession.call({ sessionId });
+                  }
+                }}
+                className={cn(
+                  "pointer-events-auto inline-flex size-5 items-center justify-center rounded text-zinc-300 transition",
+                  canControl
+                    ? "hover:bg-white/10 hover:text-white"
+                    : "cursor-not-allowed opacity-40",
+                )}
+                aria-label={controlAriaLabel}
+                title={controlTitle}
+                disabled={!canControl}
+              >
+                <ControlIcon className="size-3" />
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const wasActive = activeSessionId === sessionId;
+                  void orpc.sessions.deleteSession
+                    .call({ sessionId })
+                    .then(() => {
+                      if (wasActive) {
+                        setActiveSessionId(null);
+                      }
+                    });
+                }}
+                disabled={deleteSessionMutation.isPending}
+                className={cn(
+                  "pointer-events-auto inline-flex size-5 items-center justify-center rounded text-zinc-300 transition",
+                  deleteSessionMutation.isPending
+                    ? "cursor-not-allowed opacity-40"
+                    : "hover:bg-white/10 hover:text-rose-300",
+                )}
+                aria-label={`Delete ${session.title}`}
+                title="Delete session"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {canFork ? (
+            <ContextMenuItem
+              onClick={() => {
+                void orpc.sessions.forkSession
+                  .call({ sessionId })
+                  .then((newId) => {
+                    setActiveSessionId(newId);
+                  });
+              }}
+            >
+              <GitFork className="size-3.5" />
+              Fork session
+            </ContextMenuItem>
+          ) : null}
+          {canControl || canFork ? <ContextMenuSeparator /> : null}
+          <ContextMenuItem
+            onClick={() => {
+              void navigator.clipboard.writeText(session.sessionId);
+              toast.success("Session ID copied");
+            }}
+          >
+            <Copy className="size-3.5" />
+            Copy session ID
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              void navigator.clipboard.writeText(session.startupConfig.cwd);
+              toast.success("Working directory copied");
+            }}
+          >
+            <Copy className="size-3.5" />
+            Copy working directory
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            variant="destructive"
+            onClick={() => {
+              deleteSessionMutation.mutate(sessionId, {
+                onSuccess: () => {
+                  if (activeSessionId === sessionId) {
+                    setActiveSessionId(null);
+                  }
+                },
+              });
+            }}
+          >
+            <Trash2 className="size-3.5" />
+            Delete session
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+    </li>
   );
 }

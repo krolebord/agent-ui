@@ -1,6 +1,5 @@
 import spawn from "nano-spawn";
 import * as z from "zod";
-import type { ClaudeUsageResult } from "../shared/claude-types";
 import log from "./logger";
 
 const CredentialsSchema = z.object({
@@ -36,7 +35,9 @@ const UsageResponseSchema = z.object({
   extra_usage: ExtraUsageSchema,
 });
 
-export async function getUsage(): Promise<ClaudeUsageResult> {
+export type UsageData = z.infer<typeof UsageResponseSchema>;
+
+export async function getUsage() {
   let credentialsJson: string;
   try {
     const { output } = await spawn(

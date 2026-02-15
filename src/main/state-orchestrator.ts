@@ -1,73 +1,79 @@
-import { type INTERNAL_Op, subscribe, unstable_enableOp } from "valtio/vanilla";
+import { EventPublisher } from "@orpc/server";
+import type { TypedEvent } from "@shared/typed-event-target";
+import type { Patch } from "immer";
 import type {
-  ClaudeAllStatesSnapshot,
-  ClaudeStateKey,
-  ClaudeStateSetEvent,
-  ClaudeStateUpdateEvent,
-} from "../shared/claude-types";
-import { CLAUDE_STATE_KEYS } from "../shared/claude-types";
-import {
-  type ServiceState,
-  getServiceStateSnapshot,
+  ServiceState,
+  ServiceStateUpdateEvent,
 } from "../shared/service-state";
-import log from "./logger";
+import { procedure } from "./orpc";
 
 interface RegisteredState {
-  serviceState: ServiceState;
-  version: number;
+  serviceState: ServiceState<string, object>;
   unsubscribe: () => void;
 }
 
-export interface StateOrchestratorCallbacks {
-  emitStateSet: (payload: ClaudeStateSetEvent) => void;
-  emitStateUpdate: (payload: ClaudeStateUpdateEvent) => void;
+interface StateOrchestratorOptions<StateMap extends SyncStateMap> {
+  serviceStates: StateMap;
 }
 
-interface StateOrchestratorOptions {
-  serviceStates: ServiceState[];
-  callbacks: StateOrchestratorCallbacks;
-}
+// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+type SyncStateMap = Record<string, ServiceState<string, any>>;
 
-export class StateOrchestrator {
-  private readonly callbacks: StateOrchestratorCallbacks;
-  private readonly states = new Map<ClaudeStateKey, RegisteredState>();
+export type SyncStateUpdateEvent = {
+  version: number;
+  patch: Patch[];
+};
 
-  constructor(options: StateOrchestratorOptions) {
-    this.callbacks = options.callbacks;
-    unstable_enableOp(true);
+type SyncStateValuesSnapshot<StateMap extends SyncStateMap> = {
+  [K in keyof StateMap & string]: StateMap[K]["~snapshot"];
+};
 
-    for (const serviceState of options.serviceStates) {
+export type SyncStateSnapshot<StateMap extends SyncStateMap> = {
+  version: number;
+  state: SyncStateValuesSnapshot<StateMap>;
+};
+
+export const stateSyncRouter = {
+  getFullStateSnapshot: procedure.handler(({ context }) =>
+    context.stateService.getAllStatesSnapshot(),
+  ),
+  subscribeToStateUpdates: procedure.handler(async function* ({
+    signal,
+    context,
+  }) {
+    for await (const payload of context.stateService.eventPublisher.subscribe(
+      "state-update",
+      { signal },
+    )) {
+      yield payload;
+    }
+  }),
+};
+
+export class StateOrchestrator<State extends SyncStateMap> {
+  private readonly states = new Map<string, RegisteredState>();
+  private stateVersion = 0;
+  readonly eventPublisher = new EventPublisher<{
+    "state-update": SyncStateUpdateEvent;
+  }>({ maxBufferedEvents: Number.POSITIVE_INFINITY });
+
+  constructor(options: StateOrchestratorOptions<State>) {
+    for (const serviceState of Object.values(options.serviceStates)) {
       this.registerServiceState(serviceState);
     }
   }
 
-  getAllStatesSnapshot(): ClaudeAllStatesSnapshot {
-    return {
-      projects: this.getStateSnapshot("projects"),
-      sessions: this.getStateSnapshot("sessions"),
-      activeSession: this.getStateSnapshot("activeSession"),
-    };
-  }
-
-  getStateSnapshot<K extends ClaudeStateKey>(key: K): ClaudeStateSetEvent<K> {
-    const registered = this.states.get(key);
-    if (!registered) {
-      throw new Error(`Unknown state key: ${key}`);
+  getAllStatesSnapshot(): SyncStateSnapshot<State> {
+    const snapshot = {} as unknown as SyncStateValuesSnapshot<State>;
+    for (const [key, serviceState] of this.states.entries()) {
+      snapshot[key as keyof State & string] = structuredClone(
+        serviceState.serviceState.state,
+      );
     }
-
     return {
-      key,
-      state: getServiceStateSnapshot(
-        registered.serviceState,
-      ) as ClaudeStateSetEvent<K>["state"],
-      version: registered.version,
+      version: this.stateVersion,
+      state: snapshot,
     };
-  }
-
-  emitAllStateSets(): void {
-    for (const key of CLAUDE_STATE_KEYS) {
-      this.callbacks.emitStateSet(this.getStateSnapshot(key));
-    }
   }
 
   dispose(): void {
@@ -77,44 +83,47 @@ export class StateOrchestrator {
     this.states.clear();
   }
 
-  private registerServiceState(serviceState: ServiceState): void {
+  private registerServiceState(
+    serviceState: ServiceState<string, object>,
+  ): void {
     if (this.states.has(serviceState.key)) {
       throw new Error(`Duplicate state key registration: ${serviceState.key}`);
     }
 
-    const unsubscribe = subscribe(serviceState.state, (ops) => {
-      this.handleStateMutation(serviceState.key, ops);
-    });
+    const handleStateChange = (
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+      event: TypedEvent<ServiceStateUpdateEvent<any>>,
+    ) => {
+      const scopedPatch = event.payload.patch.map((patch) => ({
+        ...patch,
+        path: [serviceState.key, ...patch.path],
+      }));
+      this.stateVersion += 1;
+      this.eventPublisher.publish("state-update", {
+        version: this.stateVersion,
+        patch: scopedPatch,
+      });
+    };
+
+    serviceState.eventTarget.addEventListener(
+      "state-update",
+      handleStateChange,
+    );
+
+    const unsubscribe = () => {
+      serviceState.eventTarget.removeEventListener(
+        "state-update",
+        handleStateChange,
+      );
+    };
 
     this.states.set(serviceState.key, {
       serviceState,
-      version: 0,
       unsubscribe,
     });
   }
 
-  private handleStateMutation(key: ClaudeStateKey, ops: INTERNAL_Op[]): void {
-    const registered = this.states.get(key);
-    if (!registered) {
-      return;
-    }
-
-    try {
-      getServiceStateSnapshot(registered.serviceState);
-      const nextVersion = registered.version + 1;
-      const payload: ClaudeStateUpdateEvent = {
-        key,
-        version: nextVersion,
-        ops,
-      };
-
-      registered.version = nextVersion;
-      this.callbacks.emitStateUpdate(payload);
-    } catch (error) {
-      log.error("Failed to serialize state update", {
-        key,
-        error,
-      });
-    }
+  get "~stateMap"(): State {
+    throw new Error("~stateMap should not be accessed directly");
   }
 }

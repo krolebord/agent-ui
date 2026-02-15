@@ -5,32 +5,41 @@ import { SessionSidebar } from "@renderer/components/session-sidebar";
 import { SettingsDialog } from "@renderer/components/settings-dialog";
 import { WelcomePage } from "@renderer/components/welcome-page";
 import { Toaster } from "@renderer/components/ui/sonner";
-import { useKeyboardShortcuts } from "@renderer/hooks/use-keyboard-shortcuts";
+import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
+import { useEffect } from "react";
 import {
-  useTerminalSession,
-} from "@renderer/services/use-terminal-session";
-import { Router, Switch, Route, Redirect } from "wouter";
-import { useHashLocation } from "wouter/use-hash-location";
+  useActiveSessionId,
+  useActiveSessionStore,
+} from "./hooks/use-active-session-id";
+import { useAppState } from "./components/sync-state-provider";
 
-function AppRoutes() {
-  const { state } = useTerminalSession();
-  useKeyboardShortcuts();
+function useValidateActiveSession() {
+  const activeSessionId = useActiveSessionId();
+  const sessions = useAppState((state) => state.sessions);
+
+  useEffect(() => {
+    if (activeSessionId && !sessions[activeSessionId]) {
+      useActiveSessionStore.getState().setActiveSessionId(null);
+    }
+  }, [activeSessionId, sessions]);
+}
+
+function useMainPage() {
+  const activeSessionId = useActiveSessionId();
+
+  return activeSessionId ? <SessionPage /> : <WelcomePage />;
+}
+
+function App() {
+  useAppShortcuts();
+  useValidateActiveSession();
 
   return (
     <div className="flex h-screen overflow-hidden">
       <SessionSidebar />
 
       <main className="flex min-w-0 flex-1 flex-col bg-black/15">
-        <Switch>
-          <Route path="/session/:sessionId">
-            {(params) => <SessionPage sessionId={params.sessionId} />}
-          </Route>
-          <Route>
-            {state.activeSessionId
-              ? <Redirect to={`/session/${state.activeSessionId}`} replace />
-              : <WelcomePage />}
-          </Route>
-        </Switch>
+        {useMainPage()}
       </main>
 
       <NewSessionDialog />
@@ -41,14 +50,6 @@ function AppRoutes() {
 
       <Toaster />
     </div>
-  );
-}
-
-function App() {
-  return (
-    <Router hook={useHashLocation}>
-      <AppRoutes />
-    </Router>
   );
 }
 

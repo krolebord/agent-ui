@@ -16,13 +16,14 @@ export default defineConfig(({ command }) => {
   const isBuild = command === "build";
   const sourcemap = isServe || !!process.env.VSCODE_DEBUG;
   const externalDependencies = Object.keys(pkg.dependencies ?? {});
+  const aliases = {
+    "@renderer": path.join(__dirname, "src/renderer/src"),
+    "@shared": path.join(__dirname, "src/shared"),
+  };
 
   return {
     resolve: {
-      alias: {
-        "@renderer": path.join(__dirname, "src/renderer/src"),
-        "@shared": path.join(__dirname, "src/shared"),
-      },
+      alias: aliases,
     },
     plugins: [
       react(),
@@ -31,6 +32,9 @@ export default defineConfig(({ command }) => {
         main: {
           entry: "src/main/index.ts",
           vite: {
+            resolve: {
+              alias: aliases,
+            },
             build: {
               sourcemap,
               minify: isBuild,
@@ -44,6 +48,9 @@ export default defineConfig(({ command }) => {
         preload: {
           input: "src/preload/index.ts",
           vite: {
+            resolve: {
+              alias: aliases,
+            },
             build: {
               sourcemap: sourcemap ? "inline" : undefined,
               minify: isBuild,

@@ -1,9 +1,8 @@
 import { cn } from "@renderer/lib/utils";
-import { claudeIpc } from "@renderer/lib/ipc";
-import type { ClaudeUsageData, ClaudeUsageBucket } from "@shared/claude-types";
 import { useQuery } from "@tanstack/react-query";
 import { BarChart3, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
+import { orpc } from "@renderer/orpc-client";
 
 type UsageBucketKey = "five_hour" | "seven_day" | "seven_day_sonnet";
 
@@ -21,9 +20,7 @@ function getTextColor(pct: number): string {
   return pct >= 100 ? "text-[#DE7356]" : "text-zinc-400";
 }
 
-function formatResetsAt(
-  resetsAt: ClaudeUsageBucket["resets_at"],
-): string | null {
+function formatResetsAt(resetsAt: string | null): string | null {
   if (!resetsAt) {
     return null;
   }
@@ -41,29 +38,23 @@ function formatResetsAt(
   }).format(date);
 }
 
-async function fetchUsage(): Promise<ClaudeUsageData> {
-  const result = await claudeIpc.getUsage();
-  if (!result.ok) throw new Error(result.message);
-  return result.usage;
-}
-
 export function UsagePanel() {
-  const query = useQuery({
-    queryKey: ["usage"],
-    queryFn: fetchUsage,
-    retry: false,
-    refetchInterval: 60_000,
-  });
+  const query = useQuery(
+    orpc.getUsage.queryOptions({
+      retry: false,
+      refetchInterval: 60_000,
+    }),
+  );
 
-  const handleStart = async () => {
+  const handleRefetch = async () => {
     const result = await query.refetch();
     if (result.error) {
       toast.error(result.error.message);
     }
   };
 
-  if (query.data) {
-    const usage = query.data;
+  if (query.data && query.data.ok && query.data.usage) {
+    const usage = query.data.usage;
     return (
       <div className="border-t border-border/70 p-2">
         <div className="space-y-1.5">
@@ -147,7 +138,7 @@ export function UsagePanel() {
     <div className="border-t border-border/70 p-2">
       <button
         type="button"
-        onClick={() => void handleStart()}
+        onClick={() => void handleRefetch()}
         className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/10"
       >
         <BarChart3 className="size-3.5" />

@@ -1,21 +1,18 @@
-import type {
-  ClaudeModel,
-  ClaudeProject,
-  ClaudeSessionSnapshot,
-  SessionId,
-} from "@shared/claude-types";
+import type { ClaudeModel, ClaudeProject } from "@shared/claude-types";
+import type { ClaudeSession } from "src/main/session-service";
 
 export interface ProjectSessionGroup {
   path: string;
   name: string;
   collapsed: boolean;
   fromProjectList: boolean;
-  sessions: ClaudeSessionSnapshot[];
+  sessions: ClaudeSession[];
 }
 
 export type SessionSidebarIndicatorState =
   | "idle"
   | "loading"
+  | "stopping"
   | "pending"
   | "running"
   | "awaiting_approval"
@@ -31,19 +28,14 @@ export const MODEL_OPTIONS: { value: ClaudeModel; label: string }[] = [
 
 interface BuildProjectSessionGroupsInput {
   projects: ClaudeProject[];
-  sessionsById: Record<SessionId, ClaudeSessionSnapshot>;
-}
-
-function toTimestamp(value: string): number {
-  const timestamp = Date.parse(value);
-  return Number.isNaN(timestamp) ? 0 : timestamp;
+  sessionsById: Record<string, ClaudeSession>;
 }
 
 function compareSessionsByCreatedAtDesc(
-  a: ClaudeSessionSnapshot,
-  b: ClaudeSessionSnapshot,
+  a: ClaudeSession,
+  b: ClaudeSession,
 ): number {
-  return toTimestamp(b.createdAt) - toTimestamp(a.createdAt);
+  return b.createdAt - a.createdAt;
 }
 
 export function getProjectNameFromPath(path: string): string {
@@ -53,20 +45,11 @@ export function getProjectNameFromPath(path: string): string {
   return segments[segments.length - 1] ?? path;
 }
 
-export function getSessionTitle(session: ClaudeSessionSnapshot): string {
-  const sessionName = session.sessionName?.trim() ?? "";
-  if (sessionName.length > 0) {
-    return sessionName;
-  }
-
-  return `Session ${session.sessionId.slice(0, 8)}`;
-}
-
 export function getSessionLastActivityLabel(
-  session: ClaudeSessionSnapshot,
+  session: ClaudeSession,
   now = Date.now(),
 ): string {
-  const timestamp = toTimestamp(session.lastActivityAt);
+  const timestamp = session.lastActivityAt;
   if (timestamp <= 0) {
     return "";
   }
@@ -112,34 +95,37 @@ export function getSessionLastActivityLabel(
 }
 
 export function getSessionSidebarIndicatorState(
-  session: ClaudeSessionSnapshot,
-  options?: { isLoading?: boolean },
+  session: ClaudeSession,
 ): SessionSidebarIndicatorState {
-  if (options?.isLoading || session.status === "starting") {
+  if (session.terminal.status === "starting") {
     return "loading";
   }
 
-  if (session.status === "error") {
+  if (session.terminal.status === "stopping") {
+    return "stopping";
+  }
+
+  if (session.terminal.status === "error") {
     return "error";
   }
 
-  if (session.status === "stopped") {
+  if (session.terminal.status === "stopped") {
     return "stopped";
   }
 
-  if (session.activityState === "awaiting_approval") {
+  if (session.activity.state === "awaiting_approval") {
     return "awaiting_approval";
   }
 
-  if (session.activityState === "awaiting_user_response") {
+  if (session.activity.state === "awaiting_user_response") {
     return "awaiting_user_response";
   }
 
-  if (session.activityState === "working") {
+  if (session.activity.state === "working") {
     return "pending";
   }
 
-  if (session.status === "running") {
+  if (session.terminal.status === "running") {
     return "running";
   }
 
@@ -153,15 +139,15 @@ export function buildProjectSessionGroups(
     compareSessionsByCreatedAtDesc,
   );
 
-  const sessionsByPath = new Map<string, ClaudeSessionSnapshot[]>();
+  const sessionsByPath = new Map<string, ClaudeSession[]>();
   for (const session of allSessions) {
-    const bucket = sessionsByPath.get(session.cwd);
+    const bucket = sessionsByPath.get(session.startupConfig.cwd);
     if (bucket) {
       bucket.push(session);
       continue;
     }
 
-    sessionsByPath.set(session.cwd, [session]);
+    sessionsByPath.set(session.startupConfig.cwd, [session]);
   }
 
   const groups: ProjectSessionGroup[] = [];

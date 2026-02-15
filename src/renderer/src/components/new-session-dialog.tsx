@@ -1,4 +1,5 @@
 import { PermissionModeToggleGroup } from "@renderer/components/permission-mode-toggle-group";
+import { useAppState } from "@renderer/components/sync-state-provider";
 import { Button } from "@renderer/components/ui/button";
 import {
   Dialog,
@@ -18,48 +19,127 @@ import {
   SelectValue,
 } from "@renderer/components/ui/select";
 import { Textarea } from "@renderer/components/ui/textarea";
-import { useTerminalSession } from "@renderer/services/use-terminal-session";
+import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
+import { orpc } from "@renderer/orpc-client";
 import {
   MODEL_OPTIONS,
   getProjectNameFromPath,
 } from "@renderer/services/terminal-session-selectors";
-import type { ClaudeModel } from "@shared/claude-types";
+import type { ClaudeModel, ClaudePermissionMode } from "@shared/claude-types";
+import { useMutation } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
-import { useLocation } from "wouter";
+import { useEffect, useState } from "react";
+import { create } from "zustand";
+import { combine } from "zustand/middleware";
+
+export const useNewSessionDialogStore = create(
+  combine(
+    {
+      openProjectCwd: null as string | null,
+    },
+    (set) => ({
+      setOpenProjectCwd: (openProjectCwd: string | null) => {
+        set({ openProjectCwd });
+      },
+    }),
+  ),
+);
 
 export function NewSessionDialog() {
-  const { state, actions } = useTerminalSession();
-  const [, navigate] = useLocation();
-  const { newSessionDialog } = state;
-  const {
-    open,
-    projectPath,
-    initialPrompt,
-    sessionName,
-    model,
-    permissionMode,
-  } = newSessionDialog;
+  const openProjectCwd = useNewSessionDialogStore((s) => s.openProjectCwd);
+  const setOpenProjectCwd = useNewSessionDialogStore(
+    (s) => s.setOpenProjectCwd,
+  );
+  const project = useAppState((state) => {
+    if (!openProjectCwd) {
+      return null;
+    }
+    return state.projects.find((item) => item.path === openProjectCwd) ?? null;
+  });
 
-  if (!open || !projectPath) {
+  const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
+
+  const [initialPrompt, setInitialPrompt] = useState("");
+  const [sessionName, setSessionName] = useState("");
+  const [model, setModel] = useState<ClaudeModel>("opus");
+  const [permissionMode, setPermissionMode] =
+    useState<ClaudePermissionMode>("default");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const ensureProject = useMutation(orpc.projects.addProject.mutationOptions());
+  const startSession = useMutation(
+    orpc.sessions.startSession.mutationOptions(),
+  );
+
+  useEffect(() => {
+    if (!openProjectCwd) {
+      return;
+    }
+
+    setInitialPrompt("");
+    setSessionName("");
+    setModel(project?.defaultModel ?? "opus");
+    setPermissionMode(project?.defaultPermissionMode ?? "default");
+    setErrorMessage(null);
+  }, [openProjectCwd, project]);
+
+  if (!openProjectCwd) {
     return null;
   }
 
+  const projectPath = project?.path ?? openProjectCwd;
   const projectName = getProjectNameFromPath(projectPath);
 
+  const isPending = ensureProject.isPending || startSession.isPending;
+
+  const closeDialog = () => {
+    if (isPending) {
+      return;
+    }
+    setErrorMessage(null);
+    setOpenProjectCwd(null);
+  };
+
   const handleSubmit = () => {
-    void actions.startNewSession().then((nextSessionId) => {
-      if (nextSessionId) {
-        navigate(`/session/${nextSessionId}`);
-      }
-    });
+    const normalizedProjectPath = projectPath.trim();
+    if (!normalizedProjectPath) {
+      setErrorMessage("Project path is required.");
+      return;
+    }
+
+    setErrorMessage(null);
+
+    void ensureProject
+      .mutateAsync({ path: normalizedProjectPath })
+      .then(async () => {
+        const sessionId = await startSession.mutateAsync({
+          cwd: normalizedProjectPath,
+          cols: 80,
+          rows: 24,
+          initialPrompt: initialPrompt || undefined,
+          sessionName: sessionName || undefined,
+          model,
+          permissionMode,
+        });
+
+        setActiveSessionId(sessionId);
+        closeDialog();
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.message.trim()) {
+          setErrorMessage(error.message);
+          return;
+        }
+        setErrorMessage("Failed to start session.");
+      });
   };
 
   return (
     <Dialog
-      open={open}
+      open
       onOpenChange={(isOpen) => {
         if (!isOpen) {
-          actions.closeNewSessionDialog();
+          closeDialog();
         }
       }}
     >
@@ -90,7 +170,7 @@ export function NewSessionDialog() {
               placeholder="What would you like Claude to do?"
               value={initialPrompt}
               onChange={(event) => {
-                actions.updateNewSessionDialog("initialPrompt", event.target.value);
+                setInitialPrompt(event.target.value);
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
@@ -106,7 +186,7 @@ export function NewSessionDialog() {
             label="Permission mode"
             permissionMode={permissionMode}
             onPermissionModeChange={(value) => {
-              actions.updateNewSessionDialog("permissionMode", value);
+              setPermissionMode(value);
             }}
           />
 
@@ -117,7 +197,7 @@ export function NewSessionDialog() {
               placeholder="Leave blank for generated name"
               value={sessionName}
               onChange={(event) => {
-                actions.updateNewSessionDialog("sessionName", event.target.value);
+                setSessionName(event.target.value);
               }}
             />
           </div>
@@ -127,7 +207,7 @@ export function NewSessionDialog() {
             <Select
               value={model}
               onValueChange={(value) => {
-                actions.updateNewSessionDialog("model", value as ClaudeModel);
+                setModel(value as ClaudeModel);
               }}
             >
               <SelectTrigger className="w-full">
@@ -143,10 +223,10 @@ export function NewSessionDialog() {
             </Select>
           </div>
 
-          {state.errorMessage ? (
+          {errorMessage ? (
             <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
               <AlertCircle className="size-4 shrink-0" />
-              <span>{state.errorMessage}</span>
+              <span>{errorMessage}</span>
             </div>
           ) : null}
 
@@ -154,13 +234,13 @@ export function NewSessionDialog() {
             <Button
               type="button"
               variant="outline"
-              onClick={actions.closeNewSessionDialog}
-              disabled={state.isStarting}
+              onClick={closeDialog}
+              disabled={isPending}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={state.isStarting}>
-              {state.isStarting ? "Starting..." : "Create"}
+            <Button type="submit" disabled={isPending}>
+              {isPending ? "Starting..." : "Create"}
             </Button>
           </DialogFooter>
         </form>
@@ -168,4 +248,3 @@ export function NewSessionDialog() {
     </Dialog>
   );
 }
-

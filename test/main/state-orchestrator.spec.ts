@@ -1,102 +1,55 @@
-import { describe, expect, it, vi } from "vitest";
-import { defineServiceState } from "../../src/shared/service-state";
+import { describe, expect, it } from "vitest";
 import { StateOrchestrator } from "../../src/main/state-orchestrator";
-
-function createServiceStates() {
-  return {
-    projects: defineServiceState("projects", []),
-    sessions: defineServiceState("sessions", {}),
-    activeSession: defineServiceState("activeSession", {
-      activeSessionId: null,
-    }),
-  };
-}
+import { defineServiceState } from "../../src/shared/service-state";
 
 describe("StateOrchestrator", () => {
-  it("returns all registered states with version 0", () => {
-    const states = createServiceStates();
+  it("buffers all queued state updates for async iterator subscribers", async () => {
+    const projectsState = defineServiceState({
+      key: "projects",
+      defaults: { count: 0 },
+    });
+
     const orchestrator = new StateOrchestrator({
-      serviceStates: [
-        states.projects,
-        states.sessions,
-        states.activeSession,
-      ],
-      callbacks: {
-        emitStateSet: vi.fn(),
-        emitStateUpdate: vi.fn(),
+      serviceStates: {
+        projects: projectsState,
       },
     });
 
-    const all = orchestrator.getAllStatesSnapshot();
-    expect(all.projects.version).toBe(0);
-    expect(all.sessions.version).toBe(0);
-    expect(all.activeSession.version).toBe(0);
-    expect(all.activeSession.state.activeSessionId).toBeNull();
-  });
+    const iterator = orchestrator.eventPublisher.subscribe("state-update");
 
-  it("emits monotonic state-update versions with raw ops", async () => {
-    const states = createServiceStates();
-    const updates: Array<{ version: number; ops: unknown[] }> = [];
-    const orchestrator = new StateOrchestrator({
-      serviceStates: [
-        states.projects,
-        states.sessions,
-        states.activeSession,
-      ],
-      callbacks: {
-        emitStateSet: vi.fn(),
-        emitStateUpdate: (payload) => {
-          if (payload.key === "projects") {
-            updates.push({
-              version: payload.version,
-              ops: payload.ops,
-            });
-          }
-        },
+    projectsState.updateState((draft) => {
+      draft.count = 1;
+    });
+    projectsState.updateState((draft) => {
+      draft.count = 2;
+    });
+
+    const first = await iterator.next();
+    const second = await iterator.next();
+
+    expect(orchestrator.getAllStatesSnapshot()).toEqual({
+      version: 2,
+      state: {
+        projects: { count: 2 },
       },
     });
 
-    states.projects.state.push({
-      path: "/workspace",
-      collapsed: false,
+    expect(first).toEqual({
+      done: false,
+      value: {
+        version: 1,
+        patch: [{ op: "replace", path: ["projects", "count"], value: 1 }],
+      },
     });
-    await Promise.resolve();
-
-    states.projects.state[0] = {
-      path: "/workspace",
-      collapsed: true,
-    };
-    await Promise.resolve();
-
-    expect(updates).toHaveLength(2);
-    expect(updates[0]?.version).toBe(1);
-    expect(updates[1]?.version).toBe(2);
-    expect(Array.isArray(updates[0]?.ops)).toBe(true);
-
-    const projectState = orchestrator.getStateSnapshot("projects");
-    expect(projectState.version).toBe(2);
-    expect(projectState.state[0]?.collapsed).toBe(true);
-  });
-
-  it("emits state-set events for all static keys", () => {
-    const states = createServiceStates();
-    const setEvents: string[] = [];
-    const orchestrator = new StateOrchestrator({
-      serviceStates: [
-        states.projects,
-        states.sessions,
-        states.activeSession,
-      ],
-      callbacks: {
-        emitStateSet: (payload) => {
-          setEvents.push(payload.key);
-        },
-        emitStateUpdate: vi.fn(),
+    expect(second).toEqual({
+      done: false,
+      value: {
+        version: 2,
+        patch: [{ op: "replace", path: ["projects", "count"], value: 2 }],
       },
     });
 
-    orchestrator.emitAllStateSets();
-    expect(setEvents).toEqual(["projects", "sessions", "activeSession"]);
+    await iterator.return(undefined);
+    orchestrator.dispose();
   });
 });
-

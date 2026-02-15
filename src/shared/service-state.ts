@@ -1,7 +1,20 @@
-import { proxy, snapshot } from "valtio/vanilla";
-import type { ClaudeStateByKey, ClaudeStateKey } from "./claude-types";
+import {
+  type Draft,
+  type Patch,
+  enablePatches,
+  produceWithPatches,
+} from "immer";
+import {
+  type TypedEventTarget,
+  createTypedEventTarget,
+} from "./typed-event-target";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
+
+export type ServiceStateUpdateEvent<TState extends object> = {
+  newState: TState;
+  patch: Patch[];
+};
 
 function assertJsonSerializable(value: unknown, path: string): void {
   if (!IS_DEV || typeof value !== "object" || value === null) {
@@ -16,29 +29,49 @@ function assertJsonSerializable(value: unknown, path: string): void {
   }
 }
 
-export interface ServiceState<
-  K extends ClaudeStateKey = ClaudeStateKey,
-  T extends ClaudeStateByKey[K] = ClaudeStateByKey[K],
-> {
+export interface ServiceState<K extends string, TState extends object> {
   key: K;
-  state: T;
+  get state(): Readonly<TState>;
+  updateState: (updater: (state: Draft<TState>) => void) => void;
+  eventTarget: TypedEventTarget<{
+    "state-update": ServiceStateUpdateEvent<TState>;
+  }>;
+  "~snapshot": TState;
 }
 
-export function defineServiceState<K extends ClaudeStateKey>(
-  key: K,
-  initialState: ClaudeStateByKey[K],
-): ServiceState<K> {
-  assertJsonSerializable(initialState, key);
+enablePatches();
+
+export function defineServiceState<K extends string, TState extends object>({
+  key,
+  defaults,
+}: {
+  key: K;
+  defaults: TState;
+}): ServiceState<K, TState> {
+  assertJsonSerializable(defaults, key);
+
+  const eventTarget = createTypedEventTarget<{
+    "state-update": ServiceStateUpdateEvent<TState>;
+  }>();
+
+  let state = structuredClone(defaults);
+
   return {
     key,
-    state: proxy(initialState),
+    eventTarget,
+    get state() {
+      return state;
+    },
+    updateState: (updater) => {
+      const [next, patch] = produceWithPatches(state, updater);
+      state = next;
+      eventTarget.dispatchEvent("state-update", {
+        newState: next,
+        patch,
+      });
+    },
+    get "~snapshot"(): TState {
+      throw new Error("~snapshot should not be accessed directly");
+    },
   };
-}
-
-export function getServiceStateSnapshot<K extends ClaudeStateKey>(
-  serviceState: ServiceState<K>,
-): ClaudeStateByKey[K] {
-  const plainSnapshot = snapshot(serviceState.state) as ClaudeStateByKey[K];
-  assertJsonSerializable(plainSnapshot, serviceState.key);
-  return plainSnapshot;
 }

@@ -26,7 +26,7 @@ interface TerminalPaneProps {
 
 function TerminalPaneComponent(
   { className, onInput, onResize }: TerminalPaneProps,
-  ref: ForwardedRef<TerminalPaneHandle>
+  ref: ForwardedRef<TerminalPaneHandle>,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -96,6 +96,8 @@ function TerminalPaneComponent(
 
       return true;
     });
+
+    fitAddon.fit();
 
     const fitAndNotify = () => {
       if (!container.clientWidth || !container.clientHeight) {

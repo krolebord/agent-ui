@@ -10,13 +10,13 @@ import log from "./logger";
 const POLL_INTERVAL_MS = 180;
 const POLL_CHECK_MIN_ELAPSED_MS = 250;
 
-interface ActivityMonitorCallbacks {
-  emitActivityState: (state: ClaudeActivityState) => void;
-  emitHookEvent: (event: ClaudeHookEvent) => void;
+interface ActivityMonitorEvents {
+  onStatusChange: (status: ClaudeActivityState) => void;
+  onHookEvent: (event: ClaudeHookEvent) => void;
 }
 
 export class ClaudeActivityMonitor {
-  private readonly callbacks: ActivityMonitorCallbacks;
+  private readonly callbacks: ActivityMonitorEvents;
   private state: ClaudeActivityState = "unknown";
   private stateFilePath: string | null = null;
   private fileOffset = 0;
@@ -28,7 +28,7 @@ export class ClaudeActivityMonitor {
   private lastPollingCheckAt = 0;
   private usingPollingFallback = false;
 
-  constructor(callbacks: ActivityMonitorCallbacks) {
+  constructor(callbacks: ActivityMonitorEvents) {
     this.callbacks = callbacks;
   }
 
@@ -208,7 +208,7 @@ export class ClaudeActivityMonitor {
       }
 
       const event: ClaudeHookEvent = result.data;
-      this.callbacks.emitHookEvent(event);
+      this.callbacks.onHookEvent(event);
       this.setState(this.reduceState(event));
     }
   }
@@ -260,6 +260,6 @@ export class ClaudeActivityMonitor {
     }
 
     this.state = nextState;
-    this.callbacks.emitActivityState(nextState);
+    this.callbacks.onStatusChange(nextState);
   }
 }

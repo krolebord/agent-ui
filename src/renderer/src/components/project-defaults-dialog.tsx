@@ -16,37 +16,86 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@renderer/components/ui/select";
-import { useTerminalSession } from "@renderer/services/use-terminal-session";
 import {
   MODEL_OPTIONS,
   getProjectNameFromPath,
 } from "@renderer/services/terminal-session-selectors";
-import type { ClaudeModel } from "@shared/claude-types";
+import { useAppState } from "@renderer/components/sync-state-provider";
+import { orpc } from "@renderer/orpc-client";
+import type { ClaudeModel, ClaudePermissionMode } from "@shared/claude-types";
+import { useMutation } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+import { create } from "zustand";
+import { combine } from "zustand/middleware";
+
+export const useProjectDefaultsDialogStore = create(
+  combine(
+    {
+      openProjectCwd: null as string | null,
+    },
+    (set) => ({
+      setOpenProjectCwd: (openProjectCwd: string | null) => {
+        set({ openProjectCwd });
+      },
+    }),
+  ),
+);
 
 export function ProjectDefaultsDialog() {
-  const { state, actions } = useTerminalSession();
-  const { projectDefaultsDialog } = state;
-  const {
-    open,
-    projectPath,
-    defaultModel,
-    defaultPermissionMode,
-  } = projectDefaultsDialog;
+  const openProjectCwd = useProjectDefaultsDialogStore((s) => s.openProjectCwd);
+  const setOpenProjectCwd = useProjectDefaultsDialogStore(
+    (s) => s.setOpenProjectCwd,
+  );
 
-  if (!open || !projectPath) {
+  const project = useAppState((state) => {
+    if (!openProjectCwd) {
+      return null;
+    }
+    return state.projects.find((item) => item.path === openProjectCwd) ?? null;
+  });
+
+  const [defaultModel, setDefaultModel] = useState<ClaudeModel>("opus");
+  const [defaultPermissionMode, setDefaultPermissionMode] =
+    useState<ClaudePermissionMode>("default");
+
+  const saveMutation = useMutation(
+    orpc.projects.setProjectDefaults.mutationOptions({
+      onSuccess: () => {
+        setOpenProjectCwd(null);
+      },
+    }),
+  );
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+    setDefaultModel(project.defaultModel ?? "opus");
+    setDefaultPermissionMode(project.defaultPermissionMode ?? "default");
+  }, [project]);
+
+  if (!openProjectCwd || !project) {
     return null;
   }
 
+  const projectPath = project.path;
   const projectName = getProjectNameFromPath(projectPath);
   const effectivePermissionMode = defaultPermissionMode ?? "default";
 
+  const closeDialog = () => {
+    if (saveMutation.isPending) {
+      return;
+    }
+    setOpenProjectCwd(null);
+  };
+
   return (
     <Dialog
-      open={open}
+      open
       onOpenChange={(isOpen) => {
         if (!isOpen) {
-          actions.closeProjectDefaultsDialog();
+          closeDialog();
         }
       }}
     >
@@ -65,15 +114,19 @@ export function ProjectDefaultsDialog() {
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
-            void actions.saveProjectDefaults();
+            saveMutation.mutate({
+              path: projectPath,
+              defaultModel,
+              defaultPermissionMode,
+            });
           }}
         >
           <div className="space-y-2">
             <Label>Default model</Label>
             <Select
-              value={defaultModel ?? "opus"}
+              value={defaultModel}
               onValueChange={(value) => {
-                actions.updateProjectDefaultsDialog("defaultModel", value as ClaudeModel);
+                setDefaultModel(value as ClaudeModel);
               }}
             >
               <SelectTrigger className="w-full">
@@ -93,14 +146,14 @@ export function ProjectDefaultsDialog() {
             label="Default permission mode"
             permissionMode={effectivePermissionMode}
             onPermissionModeChange={(value) => {
-              actions.updateProjectDefaultsDialog("defaultPermissionMode", value);
+              setDefaultPermissionMode(value);
             }}
           />
 
-          {state.errorMessage ? (
+          {saveMutation.error ? (
             <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
               <AlertCircle className="size-4 shrink-0" />
-              <span>{state.errorMessage}</span>
+              <span>{saveMutation.error.message}</span>
             </div>
           ) : null}
 
@@ -108,13 +161,13 @@ export function ProjectDefaultsDialog() {
             <Button
               type="button"
               variant="outline"
-              onClick={actions.closeProjectDefaultsDialog}
-              disabled={state.isSavingProjectDefaults}
+              onClick={closeDialog}
+              disabled={saveMutation.isPending}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={state.isSavingProjectDefaults}>
-              {state.isSavingProjectDefaults ? "Saving..." : "Save"}
+            <Button type="submit" disabled={saveMutation.isPending}>
+              {saveMutation.isPending ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </form>
@@ -122,4 +175,3 @@ export function ProjectDefaultsDialog() {
     </Dialog>
   );
 }
-
