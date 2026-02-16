@@ -51,6 +51,7 @@ export interface ClaudeProject {
   defaultEffort?: ClaudeEffort;
   defaultHaikuModelOverride?: ClaudeModel;
   defaultSubagentModelOverride?: ClaudeModel;
+  defaultSystemPrompt?: string;
 }
 
 export interface ClaudeHookEvent {

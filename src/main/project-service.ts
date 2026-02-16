@@ -17,6 +17,7 @@ export const claudeProjectSchema = z.object({
   defaultEffort: claudeEffortSchema.optional().catch(undefined),
   defaultHaikuModelOverride: claudeModelSchema.optional().catch(undefined),
   defaultSubagentModelOverride: claudeModelSchema.optional().catch(undefined),
+  defaultSystemPrompt: z.string().optional().catch(undefined),
 });
 
 function normalizeProjectPath(pathValue: string): string {
@@ -94,6 +95,7 @@ export const projectsRouter = {
         defaultEffort: claudeEffortSchema.optional(),
         defaultHaikuModelOverride: claudeModelSchema.optional(),
         defaultSubagentModelOverride: claudeModelSchema.optional(),
+        defaultSystemPrompt: z.string().optional(),
       }),
     )
     .handler(async ({ input, context }) => {
@@ -109,6 +111,7 @@ export const projectsRouter = {
         project.defaultHaikuModelOverride = input.defaultHaikuModelOverride;
         project.defaultSubagentModelOverride =
           input.defaultSubagentModelOverride;
+        project.defaultSystemPrompt = input.defaultSystemPrompt;
       });
     }),
   deleteProject: procedure

@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@renderer/components/ui/dialog";
 import { Label } from "@renderer/components/ui/label";
+import { Textarea } from "@renderer/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -71,6 +72,7 @@ export function ProjectDefaultsDialog() {
   >(undefined);
   const [defaultSubagentModelOverride, setDefaultSubagentModelOverride] =
     useState<ClaudeModel | undefined>(undefined);
+  const [defaultSystemPrompt, setDefaultSystemPrompt] = useState<string>("");
 
   const saveMutation = useMutation(
     orpc.projects.setProjectDefaults.mutationOptions({
@@ -89,6 +91,7 @@ export function ProjectDefaultsDialog() {
     setDefaultPermissionMode(project.defaultPermissionMode ?? "default");
     setDefaultHaikuModelOverride(project.defaultHaikuModelOverride);
     setDefaultSubagentModelOverride(project.defaultSubagentModelOverride);
+    setDefaultSystemPrompt(project.defaultSystemPrompt ?? "");
   }, [project]);
 
   if (!openProjectCwd || !project) {
@@ -137,6 +140,7 @@ export function ProjectDefaultsDialog() {
               defaultPermissionMode,
               defaultHaikuModelOverride,
               defaultSubagentModelOverride,
+              defaultSystemPrompt: defaultSystemPrompt || undefined,
             });
           }}
         >
@@ -221,6 +225,21 @@ export function ProjectDefaultsDialog() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="project-default-system-prompt">
+              System prompt (optional)
+            </Label>
+            <Textarea
+              id="project-default-system-prompt"
+              placeholder="Custom system prompt passed via --system-prompt"
+              value={defaultSystemPrompt}
+              onChange={(event) => {
+                setDefaultSystemPrompt(event.target.value);
+              }}
+              rows={3}
+            />
           </div>
 
           {saveMutation.error ? (

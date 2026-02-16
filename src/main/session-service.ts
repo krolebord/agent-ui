@@ -61,6 +61,7 @@ const claudeSessionSchema = z.object({
     effort: claudeEffortSchema.optional(),
     haikuModelOverride: claudeModelSchema.optional().catch(undefined),
     subagentModelOverride: claudeModelSchema.optional().catch(undefined),
+    systemPrompt: z.string().optional().catch(undefined),
     initialPrompt: z
       .string()
       .optional()
@@ -106,6 +107,7 @@ const startClaudeSessionSchema = z.object({
   effort: claudeEffortSchema.optional(),
   haikuModelOverride: claudeModelSchema.optional(),
   subagentModelOverride: claudeModelSchema.optional(),
+  systemPrompt: z.string().optional(),
   initialPrompt: z
     .string()
     .optional()
@@ -233,6 +235,7 @@ type ClaudeStartupOptions = {
   effort?: ClaudeEffort;
   haikuModelOverride?: ClaudeModel;
   subagentModelOverride?: ClaudeModel;
+  systemPrompt?: string;
   stateFilePath: string;
   initialPrompt?: string;
   start: ClaudeStartOptions;
@@ -273,6 +276,10 @@ function buildClaudeArgs(input: ClaudeStartupOptions): {
 
   if (input.effort) {
     args.push(`--effort ${input.effort}`);
+  }
+
+  if (input.systemPrompt?.trim()) {
+    args.push(`--system-prompt ${shellQuote(input.systemPrompt)}`);
   }
 
   if (input.initialPrompt?.trim()) {
@@ -383,6 +390,7 @@ export class SessionsServiceNew {
       effort: sessionInput.effort,
       haikuModelOverride: sessionInput.haikuModelOverride,
       subagentModelOverride: sessionInput.subagentModelOverride,
+      systemPrompt: sessionInput.systemPrompt,
       permissionMode: sessionInput.permissionMode ?? "default",
       pluginDir: this.pluginDir,
       initialPrompt: sessionInput.initialPrompt,
@@ -401,6 +409,7 @@ export class SessionsServiceNew {
         effort: startupOptions.effort,
         haikuModelOverride: startupOptions.haikuModelOverride,
         subagentModelOverride: startupOptions.subagentModelOverride,
+        systemPrompt: startupOptions.systemPrompt,
         permissionMode: startupOptions.permissionMode,
         cwd: startupOptions.cwd,
       },
@@ -419,6 +428,7 @@ export class SessionsServiceNew {
       effort: sessionInput.effort,
       haikuModelOverride: sessionInput.haikuModelOverride,
       subagentModelOverride: sessionInput.subagentModelOverride,
+      systemPrompt: sessionInput.systemPrompt,
       initialPrompt: sessionInput.initialPrompt,
       start: {
         type: "start-new",
@@ -455,6 +465,7 @@ export class SessionsServiceNew {
       effort: session.startupConfig.effort,
       haikuModelOverride: session.startupConfig.haikuModelOverride,
       subagentModelOverride: session.startupConfig.subagentModelOverride,
+      systemPrompt: session.startupConfig.systemPrompt,
       start: {
         type: "resume",
         sessionId: input.sessionId,
@@ -481,6 +492,7 @@ export class SessionsServiceNew {
         effort: session.startupConfig.effort,
         haikuModelOverride: session.startupConfig.haikuModelOverride,
         subagentModelOverride: session.startupConfig.subagentModelOverride,
+        systemPrompt: session.startupConfig.systemPrompt,
         permissionMode: session.startupConfig.permissionMode,
         cwd: session.startupConfig.cwd,
       },
@@ -500,6 +512,7 @@ export class SessionsServiceNew {
       effort: session.startupConfig.effort,
       haikuModelOverride: session.startupConfig.haikuModelOverride,
       subagentModelOverride: session.startupConfig.subagentModelOverride,
+      systemPrompt: session.startupConfig.systemPrompt,
       start: {
         type: "start-new",
         sessionId: sessionId,
@@ -519,6 +532,7 @@ export class SessionsServiceNew {
     effort?: ClaudeEffort;
     haikuModelOverride?: ClaudeModel;
     subagentModelOverride?: ClaudeModel;
+    systemPrompt?: string;
     initialPrompt?: string;
     start: ClaudeStartOptions;
   }) {
@@ -581,6 +595,7 @@ export class SessionsServiceNew {
       effort: opts.effort,
       haikuModelOverride: opts.haikuModelOverride,
       subagentModelOverride: opts.subagentModelOverride,
+      systemPrompt: opts.systemPrompt,
       stateFilePath,
       initialPrompt: opts.initialPrompt,
       cwd: opts.cwd,

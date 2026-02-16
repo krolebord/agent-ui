@@ -3,6 +3,11 @@ import { PermissionModeToggleGroup } from "@renderer/components/permission-mode-
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Button } from "@renderer/components/ui/button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@renderer/components/ui/collapsible";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -32,7 +37,7 @@ import type {
   ClaudePermissionMode,
 } from "@shared/claude-types";
 import { useMutation } from "@tanstack/react-query";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, ChevronsUpDown } from "lucide-react";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
@@ -76,6 +81,7 @@ export function NewSessionDialog() {
   const [subagentModelOverride, setSubagentModelOverride] = useState<
     ClaudeModel | undefined
   >(undefined);
+  const [systemPrompt, setSystemPrompt] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const ensureProject = useMutation(orpc.projects.addProject.mutationOptions());
@@ -95,6 +101,7 @@ export function NewSessionDialog() {
     setPermissionMode(project?.defaultPermissionMode ?? "default");
     setHaikuModelOverride(project?.defaultHaikuModelOverride);
     setSubagentModelOverride(project?.defaultSubagentModelOverride);
+    setSystemPrompt(project?.defaultSystemPrompt ?? "");
     setErrorMessage(null);
   }, [openProjectCwd, project]);
 
@@ -137,6 +144,7 @@ export function NewSessionDialog() {
           effort,
           haikuModelOverride,
           subagentModelOverride,
+          systemPrompt: systemPrompt || undefined,
           permissionMode,
         });
 
@@ -208,92 +216,124 @@ export function NewSessionDialog() {
             }}
           />
 
-          <EffortToggleGroup
-            label="Effort"
-            effort={effort}
-            onEffortChange={setEffort}
-          />
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="flex w-full items-center justify-between px-2"
+              >
+                <span className="text-sm font-medium">Advanced settings</span>
+                <ChevronsUpDown className="size-4" />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-4 pt-2">
+              <EffortToggleGroup
+                label="Effort"
+                effort={effort}
+                onEffortChange={setEffort}
+              />
 
-          <div className="space-y-2">
-            <Label htmlFor="new-session-name">Session name (optional)</Label>
-            <Input
-              id="new-session-name"
-              placeholder="Leave blank for generated name"
-              value={sessionName}
-              onChange={(event) => {
-                setSessionName(event.target.value);
-              }}
-            />
-          </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-session-name">
+                  Session name (optional)
+                </Label>
+                <Input
+                  id="new-session-name"
+                  placeholder="Leave blank for generated name"
+                  value={sessionName}
+                  onChange={(event) => {
+                    setSessionName(event.target.value);
+                  }}
+                />
+              </div>
 
-          <div className="space-y-2">
-            <Label>Model</Label>
-            <Select
-              value={model}
-              onValueChange={(value) => {
-                setModel(value as ClaudeModel);
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MODEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              <div className="space-y-2">
+                <Label>Model</Label>
+                <Select
+                  value={model}
+                  onValueChange={(value) => {
+                    setModel(value as ClaudeModel);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MODEL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div className="space-y-2">
-            <Label>Override haiku model</Label>
-            <Select
-              value={haikuModelOverride ?? "no"}
-              onValueChange={(value) => {
-                setHaikuModelOverride(
-                  value === "no" ? undefined : (value as ClaudeModel),
-                );
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="no">Default</SelectItem>
-                {MODEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              <div className="space-y-2">
+                <Label>Override haiku model</Label>
+                <Select
+                  value={haikuModelOverride ?? "no"}
+                  onValueChange={(value) => {
+                    setHaikuModelOverride(
+                      value === "no" ? undefined : (value as ClaudeModel),
+                    );
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="no">Default</SelectItem>
+                    {MODEL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div className="space-y-2">
-            <Label>Override subagent model</Label>
-            <Select
-              value={subagentModelOverride ?? "no"}
-              onValueChange={(value) => {
-                setSubagentModelOverride(
-                  value === "no" ? undefined : (value as ClaudeModel),
-                );
-              }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="no">Default</SelectItem>
-                {MODEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+              <div className="space-y-2">
+                <Label>Override subagent model</Label>
+                <Select
+                  value={subagentModelOverride ?? "no"}
+                  onValueChange={(value) => {
+                    setSubagentModelOverride(
+                      value === "no" ? undefined : (value as ClaudeModel),
+                    );
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="no">Default</SelectItem>
+                    {MODEL_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="new-session-system-prompt">
+                  System prompt (optional)
+                </Label>
+                <Textarea
+                  id="new-session-system-prompt"
+                  placeholder="Custom system prompt passed via --system-prompt"
+                  value={systemPrompt}
+                  onChange={(event) => {
+                    setSystemPrompt(event.target.value);
+                  }}
+                  rows={3}
+                />
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
 
           {errorMessage ? (
             <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
