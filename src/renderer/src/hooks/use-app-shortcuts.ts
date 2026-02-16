@@ -3,12 +3,12 @@ import { useProjectDefaultsDialogStore } from "@renderer/components/project-defa
 import { useSettingsStore } from "@renderer/components/settings-dialog";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { orpc } from "@renderer/orpc-client";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import type { ClaudeSession } from "src/main/session-service";
 import {
   useActiveSessionId,
   useActiveSessionStore,
 } from "./use-active-session-id";
-import { useKeyboardShortcut } from "./use-keyboard-shortcut";
 
 export const SHORTCUT_DEFINITIONS = [
   { id: "new-session", label: "New session", key: "N", cmdOrCtrl: true },
@@ -102,35 +102,31 @@ export function useAppShortcuts(): void {
     openSettingsDialog ||
     Boolean(openProjectDefaultsDialogCwd);
 
-  useKeyboardShortcut({
-    key: "n",
-    meta: true,
-    enabled: !dialogsAreOpen,
-    callback: () => {
+  useHotkey(
+    "Mod+N",
+    () => {
       if (!activeSessionId) return;
       const activeSession = sessions[activeSessionId];
       if (!activeSession) return;
 
       setOpenNewSessionDialogCwd(activeSession.startupConfig.cwd);
     },
-  });
+    { enabled: !dialogsAreOpen },
+  );
 
-  useKeyboardShortcut({
-    key: "j",
-    meta: true,
-    enabled: !dialogsAreOpen,
-    callback: () => {
+  useHotkey(
+    "Mod+J",
+    () => {
       const nextSessionId = getNextSession(sessions, activeSessionId);
       if (!nextSessionId) return;
       setActiveSessionId(nextSessionId);
     },
-  });
+    { enabled: !dialogsAreOpen },
+  );
 
-  useKeyboardShortcut({
-    key: "backspace",
-    meta: true,
-    enabled: !dialogsAreOpen,
-    callback: () => {
+  useHotkey(
+    "Mod+Backspace",
+    () => {
       if (!activeSessionId) return;
 
       const nextSessionId = getNextSession(
@@ -145,5 +141,6 @@ export function useAppShortcuts(): void {
           setActiveSessionId(nextSessionId);
         });
     },
-  });
+    { enabled: !dialogsAreOpen },
+  );
 }
