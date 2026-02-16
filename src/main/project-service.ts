@@ -4,7 +4,6 @@ import {
   claudeEffortSchema,
   claudeModelSchema,
   claudePermissionModeSchema,
-  haikuModelOverrideSchema,
 } from "../shared/claude-types";
 import { defineServiceState } from "../shared/service-state";
 import { procedure } from "./orpc";
@@ -16,9 +15,8 @@ export const claudeProjectSchema = z.object({
   defaultModel: claudeModelSchema.optional().catch(undefined),
   defaultPermissionMode: claudePermissionModeSchema.optional().catch(undefined),
   defaultEffort: claudeEffortSchema.optional().catch(undefined),
-  defaultHaikuModelOverride: haikuModelOverrideSchema
-    .optional()
-    .catch(undefined),
+  defaultHaikuModelOverride: claudeModelSchema.optional().catch(undefined),
+  defaultSubagentModelOverride: claudeModelSchema.optional().catch(undefined),
 });
 
 function normalizeProjectPath(pathValue: string): string {
@@ -94,7 +92,8 @@ export const projectsRouter = {
         defaultModel: claudeModelSchema.optional(),
         defaultPermissionMode: claudePermissionModeSchema.optional(),
         defaultEffort: claudeEffortSchema.optional(),
-        defaultHaikuModelOverride: haikuModelOverrideSchema.optional(),
+        defaultHaikuModelOverride: claudeModelSchema.optional(),
+        defaultSubagentModelOverride: claudeModelSchema.optional(),
       }),
     )
     .handler(async ({ input, context }) => {
@@ -108,6 +107,8 @@ export const projectsRouter = {
         project.defaultPermissionMode = input.defaultPermissionMode;
         project.defaultEffort = input.defaultEffort;
         project.defaultHaikuModelOverride = input.defaultHaikuModelOverride;
+        project.defaultSubagentModelOverride =
+          input.defaultSubagentModelOverride;
       });
     }),
   deleteProject: procedure

@@ -23,7 +23,6 @@ import { Textarea } from "@renderer/components/ui/textarea";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { orpc } from "@renderer/orpc-client";
 import {
-  HAIKU_MODEL_OVERRIDE_OPTIONS,
   MODEL_OPTIONS,
   getProjectNameFromPath,
 } from "@renderer/services/terminal-session-selectors";
@@ -31,7 +30,6 @@ import type {
   ClaudeEffort,
   ClaudeModel,
   ClaudePermissionMode,
-  HaikuModelOverride,
 } from "@shared/claude-types";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
@@ -73,7 +71,10 @@ export function NewSessionDialog() {
   const [permissionMode, setPermissionMode] =
     useState<ClaudePermissionMode>("default");
   const [haikuModelOverride, setHaikuModelOverride] = useState<
-    HaikuModelOverride | undefined
+    ClaudeModel | undefined
+  >(undefined);
+  const [subagentModelOverride, setSubagentModelOverride] = useState<
+    ClaudeModel | undefined
   >(undefined);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -93,6 +94,7 @@ export function NewSessionDialog() {
     setEffort(project?.defaultEffort);
     setPermissionMode(project?.defaultPermissionMode ?? "default");
     setHaikuModelOverride(project?.defaultHaikuModelOverride);
+    setSubagentModelOverride(project?.defaultSubagentModelOverride);
     setErrorMessage(null);
   }, [openProjectCwd, project]);
 
@@ -134,6 +136,7 @@ export function NewSessionDialog() {
           model,
           effort,
           haikuModelOverride,
+          subagentModelOverride,
           permissionMode,
         });
 
@@ -250,9 +253,7 @@ export function NewSessionDialog() {
               value={haikuModelOverride ?? "no"}
               onValueChange={(value) => {
                 setHaikuModelOverride(
-                  value === "no"
-                    ? undefined
-                    : (value as HaikuModelOverride),
+                  value === "no" ? undefined : (value as ClaudeModel),
                 );
               }}
             >
@@ -260,8 +261,32 @@ export function NewSessionDialog() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="no">No</SelectItem>
-                {HAIKU_MODEL_OVERRIDE_OPTIONS.map((option) => (
+                <SelectItem value="no">Default</SelectItem>
+                {MODEL_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Override subagent model</Label>
+            <Select
+              value={subagentModelOverride ?? "no"}
+              onValueChange={(value) => {
+                setSubagentModelOverride(
+                  value === "no" ? undefined : (value as ClaudeModel),
+                );
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="no">Default</SelectItem>
+                {MODEL_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>

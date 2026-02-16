@@ -18,7 +18,6 @@ import {
   SelectValue,
 } from "@renderer/components/ui/select";
 import {
-  HAIKU_MODEL_OVERRIDE_OPTIONS,
   MODEL_OPTIONS,
   getProjectNameFromPath,
 } from "@renderer/services/terminal-session-selectors";
@@ -28,7 +27,6 @@ import type {
   ClaudeEffort,
   ClaudeModel,
   ClaudePermissionMode,
-  HaikuModelOverride,
 } from "@shared/claude-types";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
@@ -69,8 +67,10 @@ export function ProjectDefaultsDialog() {
   const [defaultPermissionMode, setDefaultPermissionMode] =
     useState<ClaudePermissionMode>("default");
   const [defaultHaikuModelOverride, setDefaultHaikuModelOverride] = useState<
-    HaikuModelOverride | undefined
+    ClaudeModel | undefined
   >(undefined);
+  const [defaultSubagentModelOverride, setDefaultSubagentModelOverride] =
+    useState<ClaudeModel | undefined>(undefined);
 
   const saveMutation = useMutation(
     orpc.projects.setProjectDefaults.mutationOptions({
@@ -88,6 +88,7 @@ export function ProjectDefaultsDialog() {
     setDefaultEffort(project.defaultEffort);
     setDefaultPermissionMode(project.defaultPermissionMode ?? "default");
     setDefaultHaikuModelOverride(project.defaultHaikuModelOverride);
+    setDefaultSubagentModelOverride(project.defaultSubagentModelOverride);
   }, [project]);
 
   if (!openProjectCwd || !project) {
@@ -135,6 +136,7 @@ export function ProjectDefaultsDialog() {
               defaultEffort,
               defaultPermissionMode,
               defaultHaikuModelOverride,
+              defaultSubagentModelOverride,
             });
           }}
         >
@@ -179,9 +181,7 @@ export function ProjectDefaultsDialog() {
               value={defaultHaikuModelOverride ?? "no"}
               onValueChange={(value) => {
                 setDefaultHaikuModelOverride(
-                  value === "no"
-                    ? undefined
-                    : (value as HaikuModelOverride),
+                  value === "no" ? undefined : (value as ClaudeModel),
                 );
               }}
             >
@@ -189,8 +189,32 @@ export function ProjectDefaultsDialog() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="no">No</SelectItem>
-                {HAIKU_MODEL_OVERRIDE_OPTIONS.map((option) => (
+                <SelectItem value="no">Default</SelectItem>
+                {MODEL_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Override subagent model</Label>
+            <Select
+              value={defaultSubagentModelOverride ?? "no"}
+              onValueChange={(value) => {
+                setDefaultSubagentModelOverride(
+                  value === "no" ? undefined : (value as ClaudeModel),
+                );
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="no">Default</SelectItem>
+                {MODEL_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>

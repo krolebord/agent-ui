@@ -125,7 +125,7 @@ function TerminalPaneComponent(
 
     window.addEventListener("resize", onWindowResize);
     fitAndNotify();
-    window.requestAnimationFrame(fitAndNotify);
+    document.fonts.ready.then(fitAndNotify);
 
     return () => {
       onDataDisposable.dispose();

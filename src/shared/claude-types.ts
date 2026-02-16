@@ -21,7 +21,12 @@ export const claudeActivityStateSchema = z.enum([
 
 export type ClaudeActivityState = z.infer<typeof claudeActivityStateSchema>;
 
-export const claudeModelSchema = z.enum(["opus", "sonnet", "haiku"]);
+export const claudeModelSchema = z.enum([
+  "haiku",
+  "sonnet",
+  "sonnet[1m]",
+  "opus",
+]);
 
 export type ClaudeModel = z.infer<typeof claudeModelSchema>;
 
@@ -38,20 +43,14 @@ export const claudeEffortSchema = z.enum(["low", "medium", "high"]);
 
 export type ClaudeEffort = z.infer<typeof claudeEffortSchema>;
 
-export const haikuModelOverrideSchema = z.enum([
-  "claude-sonnet-4-5-20250929",
-  "claude-opus-4-6",
-]);
-
-export type HaikuModelOverride = z.infer<typeof haikuModelOverrideSchema>;
-
 export interface ClaudeProject {
   path: string;
   collapsed: boolean;
   defaultModel?: ClaudeModel;
   defaultPermissionMode?: ClaudePermissionMode;
   defaultEffort?: ClaudeEffort;
-  defaultHaikuModelOverride?: HaikuModelOverride;
+  defaultHaikuModelOverride?: ClaudeModel;
+  defaultSubagentModelOverride?: ClaudeModel;
 }
 
 export interface ClaudeHookEvent {
