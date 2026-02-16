@@ -5,7 +5,7 @@ import {
   ToggleGroupItem,
 } from "@renderer/components/ui/toggle-group";
 import type { ClaudePermissionMode } from "@shared/claude-types";
-import { useEffect } from "react";
+import { useHotkey } from "@tanstack/react-hotkeys";
 
 interface PermissionModeToggleGroupProps {
   label: string;
@@ -32,32 +32,9 @@ export function PermissionModeToggleGroup({
   permissionMode,
   onPermissionModeChange,
 }: PermissionModeToggleGroupProps) {
-  useEffect(() => {
-    const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key !== "Tab" ||
-        !event.shiftKey ||
-        event.altKey ||
-        event.ctrlKey ||
-        event.metaKey
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      onPermissionModeChange(cyclePermissionMode(permissionMode));
-    };
-
-    window.addEventListener("keydown", onWindowKeyDown, { capture: true });
-
-    return () => {
-      window.removeEventListener("keydown", onWindowKeyDown, {
-        capture: true,
-      });
-    };
-  }, [onPermissionModeChange, permissionMode]);
+  useHotkey("Shift+Tab", () => {
+    onPermissionModeChange(cyclePermissionMode(permissionMode));
+  });
 
   return (
     <div className="space-y-2">
