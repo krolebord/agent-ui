@@ -6,6 +6,7 @@ import {
   defineProjectState,
   defineProjectStatePersistence,
 } from "./project-service";
+import { readProjectSettingsForAll } from "./project-settings-file";
 import { SessionsServiceNew } from "./session-service";
 import { SessionStateFileManager } from "./session-state-file-manager";
 import { SessionTitleManager } from "./session-title-manager";
@@ -68,6 +69,21 @@ export async function createServices(options: CreateServicesOptions) {
   persistenceService.registerAndHydrate(
     defineProjectStatePersistence(projectsState),
   );
+
+  // Hydrate project defaults from .claude-ui/settings.jsonc files
+  const projectPaths = projectsState.state.map((p) => p.path);
+  if (projectPaths.length > 0) {
+    const fileSettings = await readProjectSettingsForAll(projectPaths);
+    if (fileSettings.size > 0) {
+      projectsState.updateState((projects) => {
+        for (const project of projects) {
+          const settings = fileSettings.get(project.path);
+          if (!settings) continue;
+          Object.assign(project, settings);
+        }
+      });
+    }
+  }
 
   const sessionsState = defineSessionServiceState();
   persistenceService.registerAndHydrate(

@@ -8,6 +8,7 @@ import {
 import { defineServiceState } from "../shared/service-state";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
+import { writeProjectSettingsFile } from "./project-settings-file";
 
 export const claudeProjectSchema = z.object({
   path: z.string().trim().min(1),
@@ -57,6 +58,11 @@ export const defineProjectStatePersistence = (state: ProjectState) =>
   defineStatePersistence({
     serviceState: state,
     schema: z.array(claudeProjectSchema).transform(normalizeProjects),
+    toPersisted: (projects) =>
+      projects.map(({ path, collapsed }) => ({
+        path,
+        collapsed,
+      })) as ClaudeProject[],
   });
 
 const projectPathSchema = z.string().trim().min(1);
@@ -102,17 +108,22 @@ export const projectsRouter = {
       const path = normalizeProjectPath(input.path);
       if (!path) return;
 
+      const settings = {
+        defaultModel: input.defaultModel,
+        defaultPermissionMode: input.defaultPermissionMode,
+        defaultEffort: input.defaultEffort,
+        defaultHaikuModelOverride: input.defaultHaikuModelOverride,
+        defaultSubagentModelOverride: input.defaultSubagentModelOverride,
+        defaultSystemPrompt: input.defaultSystemPrompt,
+      };
+
       context.projectsState.updateState((projects) => {
         const project = projects.find((p) => p.path === path);
         if (!project) return;
-        project.defaultModel = input.defaultModel;
-        project.defaultPermissionMode = input.defaultPermissionMode;
-        project.defaultEffort = input.defaultEffort;
-        project.defaultHaikuModelOverride = input.defaultHaikuModelOverride;
-        project.defaultSubagentModelOverride =
-          input.defaultSubagentModelOverride;
-        project.defaultSystemPrompt = input.defaultSystemPrompt;
+        Object.assign(project, settings);
       });
+
+      await writeProjectSettingsFile(path, settings);
     }),
   deleteProject: procedure
     .input(z.object({ path: z.string().trim().min(1) }))
