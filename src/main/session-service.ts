@@ -576,9 +576,24 @@ export class SessionsServiceNew {
         }
 
         this.triggerTitleGeneration(opts.sessionId, prompt);
+
+        if (deferredPrompt) {
+          terminal.write(`${deferredPrompt}\r`);
+          deferredPrompt = null;
+        }
       },
     });
     disposables.push(() => activityMonitor.stopMonitoring());
+
+    let deferredPrompt: string | null = null;
+    let effectiveInitialPrompt = opts.initialPrompt;
+    if (opts.initialPrompt?.startsWith("/plan ")) {
+      const textAfterPlan = opts.initialPrompt.slice("/plan ".length).trim();
+      if (textAfterPlan) {
+        deferredPrompt = textAfterPlan;
+        effectiveInitialPrompt = "/plan";
+      }
+    }
 
     const { args, env } = buildClaudeArgs({
       start: opts.start,
@@ -590,7 +605,7 @@ export class SessionsServiceNew {
       subagentModelOverride: opts.subagentModelOverride,
       systemPrompt: opts.systemPrompt,
       stateFilePath,
-      initialPrompt: opts.initialPrompt,
+      initialPrompt: effectiveInitialPrompt,
       cwd: opts.cwd,
     });
     const terminal = createTerminalSession({
