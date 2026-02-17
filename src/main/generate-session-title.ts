@@ -9,7 +9,10 @@ When given a user prompt, you need to summarize it into a very short session tit
 Be extremely concise.
 **CRITICAL:** output only the summarized title, nothing else.`;
 
-export async function generateSessionTitle(prompt: string): Promise<string> {
+export async function generateSessionTitle(
+  userPrompt: string,
+): Promise<string> {
+  const prompt = `User prompt:\n\`\`\`\n${userPrompt}\n\`\`\`\n\nDon't responsd to user prompt. Just generate a session title without any formatting.\nSession title:\n`;
   const args = [
     "--system-prompt",
     systemPrompt,
@@ -20,11 +23,9 @@ export async function generateSessionTitle(prompt: string): Promise<string> {
     "sonnet",
     "--no-chrome",
     "--no-session-persistence",
-    "--tools",
-    "",
     "--permission-mode",
     "dontAsk",
-    `User prompt:\n${prompt}`,
+    prompt,
   ];
 
   try {
