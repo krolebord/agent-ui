@@ -5,7 +5,7 @@ import {
   ToggleGroupItem,
 } from "@renderer/components/ui/toggle-group";
 import type { ClaudePermissionMode } from "@shared/claude-types";
-import { useHotkey } from "@tanstack/react-hotkeys";
+import { formatForDisplay, Hotkey, useHotkey } from "@tanstack/react-hotkeys";
 
 interface PermissionModeToggleGroupProps {
   label: string;
@@ -27,23 +27,29 @@ function cyclePermissionMode(
   return PERMISSION_MODES[(index + 1) % PERMISSION_MODES.length].value;
 }
 
+const cyclePermissionModeHotkey: Hotkey = "Shift+Tab";
+
 export function PermissionModeToggleGroup({
   label,
   permissionMode,
   onPermissionModeChange,
 }: PermissionModeToggleGroupProps) {
-  useHotkey("Shift+Tab", () => {
-    onPermissionModeChange(cyclePermissionMode(permissionMode));
-  });
+  useHotkey(
+    cyclePermissionModeHotkey,
+    () => {
+      onPermissionModeChange(cyclePermissionMode(permissionMode));
+    },
+    {
+      ignoreInputs: false,
+    },
+  );
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <Label>{label}</Label>
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-          <Kbd>Shift</Kbd>
-          <span>+</span>
-          <Kbd>Tab</Kbd>
+          <Kbd>{formatForDisplay(cyclePermissionModeHotkey)}</Kbd>
         </span>
       </div>
       <ToggleGroup
@@ -58,7 +64,11 @@ export function PermissionModeToggleGroup({
         className="w-full"
       >
         {PERMISSION_MODES.map((option) => (
-          <ToggleGroupItem key={option.value} value={option.value} className="flex-1">
+          <ToggleGroupItem
+            key={option.value}
+            value={option.value}
+            className="flex-1"
+          >
             {option.label}
           </ToggleGroupItem>
         ))}

@@ -41,7 +41,12 @@ import type {
   ClaudeModel,
   ClaudePermissionMode,
 } from "@shared/claude-types";
-import { useHotkey } from "@tanstack/react-hotkeys";
+import {
+  formatForDisplay,
+  Hotkey,
+  RegisterableHotkey,
+  useHotkey,
+} from "@tanstack/react-hotkeys";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, ChevronsUpDown } from "lucide-react";
 import { useState } from "react";
@@ -68,6 +73,8 @@ const SESSION_TYPE_OPTIONS: { value: SessionType; label: string }[] = [
   { value: "terminal", label: "Terminal" },
 ];
 
+const switchSessionTypeHotkey: Hotkey = "Alt+Tab";
+
 export function NewSessionDialog() {
   const openProjectCwd = useNewSessionDialogStore((s) => s.openProjectCwd);
   const setOpenProjectCwd = useNewSessionDialogStore(
@@ -83,13 +90,13 @@ export function NewSessionDialog() {
   const [sessionType, setSessionType] = useState<SessionType>("claude");
 
   useHotkey(
-    "Mod+Tab",
+    switchSessionTypeHotkey,
     () => {
       setSessionType((current) =>
         current === "claude" ? "terminal" : "claude",
       );
     },
-    { enabled: Boolean(openProjectCwd) },
+    { enabled: Boolean(openProjectCwd), ignoreInputs: false },
   );
 
   if (!openProjectCwd) {
@@ -125,9 +132,7 @@ export function NewSessionDialog() {
               </span>
             </DialogDescription>
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-              <Kbd>{navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl"}</Kbd>
-              <span>+</span>
-              <Kbd>Tab</Kbd>
+              <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
             </span>
           </div>
         </DialogHeader>
@@ -169,13 +174,12 @@ function LocalClaudeSessionForm() {
   const setOpenProjectCwd = useNewSessionDialogStore(
     (s) => s.setOpenProjectCwd,
   );
-  const project = useAppState((state) =>
-    state.projects.find((item) => item.path === openProjectCwd) ?? null,
+  const project = useAppState(
+    (state) =>
+      state.projects.find((item) => item.path === openProjectCwd) ?? null,
   );
   const projectPath = project?.path ?? openProjectCwd;
-  const setActiveSessionId = useActiveSessionStore(
-    (s) => s.setActiveSessionId,
-  );
+  const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
 
   const [initialPrompt, setInitialPrompt] = useState("");
   const [sessionName, setSessionName] = useState("");
@@ -436,13 +440,12 @@ function LocalTerminalSessionForm() {
   const setOpenProjectCwd = useNewSessionDialogStore(
     (s) => s.setOpenProjectCwd,
   );
-  const project = useAppState((state) =>
-    state.projects.find((item) => item.path === openProjectCwd) ?? null,
+  const project = useAppState(
+    (state) =>
+      state.projects.find((item) => item.path === openProjectCwd) ?? null,
   );
   const projectPath = project?.path ?? openProjectCwd;
-  const setActiveSessionId = useActiveSessionStore(
-    (s) => s.setActiveSessionId,
-  );
+  const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
 
   const [sessionName, setSessionName] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
