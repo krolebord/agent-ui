@@ -29,6 +29,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@renderer/components/ui/toggle-group";
+import { Kbd } from "@renderer/components/ui/kbd";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { orpc } from "@renderer/orpc-client";
 import {
@@ -40,6 +41,7 @@ import type {
   ClaudeModel,
   ClaudePermissionMode,
 } from "@shared/claude-types";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, ChevronsUpDown } from "lucide-react";
 import { useState } from "react";
@@ -80,6 +82,16 @@ export function NewSessionDialog() {
 
   const [sessionType, setSessionType] = useState<SessionType>("claude");
 
+  useHotkey(
+    "Mod+Tab",
+    () => {
+      setSessionType((current) =>
+        current === "claude" ? "terminal" : "claude",
+      );
+    },
+    { enabled: Boolean(openProjectCwd) },
+  );
+
   if (!openProjectCwd) {
     return null;
   }
@@ -104,11 +116,20 @@ export function NewSessionDialog() {
       <DialogContent showCloseButton={false}>
         <DialogHeader>
           <DialogTitle className="hidden">Start new session</DialogTitle>
-          <DialogDescription>
-            Project: <span className="text-foreground">{projectName}</span>
-            <br />
-            <span className="text-xs text-muted-foreground">{projectPath}</span>
-          </DialogDescription>
+          <div className="flex items-start justify-between gap-2">
+            <DialogDescription>
+              Project: <span className="text-foreground">{projectName}</span>
+              <br />
+              <span className="text-xs text-muted-foreground">
+                {projectPath}
+              </span>
+            </DialogDescription>
+            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+              <Kbd>{navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl"}</Kbd>
+              <span>+</span>
+              <Kbd>Tab</Kbd>
+            </span>
+          </div>
         </DialogHeader>
 
         <ToggleGroup
