@@ -1,4 +1,9 @@
-import { type DeferredPromise, createDeferredPromise } from "@shared/utils";
+import {
+  type DeferredPromise,
+  concatAndTruncate,
+  createDeferredPromise,
+  createDisposable,
+} from "@shared/utils";
 import { type IPty, spawn } from "node-pty";
 import log from "./logger";
 
@@ -11,24 +16,31 @@ export type TerminalSessionStatus =
 
 type TerminalSessionOpts = {
   onStatusChange: (status: TerminalSessionStatus) => void;
-  onData: (chunk: string) => void;
+  onData: (payload: { chunk: string; bufferedOutput: string }) => void;
   onExit: (payload: {
     exitCode: number | null;
     signal?: number;
     errorMessage?: string;
   }) => void;
-  onClear?: () => void;
 };
 
 type TerminalStartOpts = {
   cols?: number;
   rows?: number;
-  file: string;
-  args: string[];
   cwd: string;
-  runWithShell?: boolean;
   env?: Record<string, string>;
-};
+} & (
+  | {
+      runWithShell: true;
+      file?: string;
+      args?: string[];
+    }
+  | {
+      runWithShell?: false;
+      file: string;
+      args: string[];
+    }
+);
 
 type LaunchCommand = {
   file: string;
@@ -42,10 +54,22 @@ function resolveLaunchCommand(launch: TerminalStartOpts): LaunchCommand {
     const shell =
       process.env.SHELL ??
       (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
-    const command = ["exec", launch.file, ...launch.args].join(" ");
+    if (launch.file) {
+      const command = ["exec", launch.file, ...(launch.args ?? [])].join(" ");
+      return {
+        file: shell,
+        args: ["-ilc", command],
+        cwd: launch.cwd,
+        env: {
+          ...process.env,
+          TERM: "xterm-256color",
+          ...(launch.env ?? {}),
+        },
+      };
+    }
     return {
       file: shell,
-      args: ["-ilc", command],
+      args: ["-il"],
       cwd: launch.cwd,
       env: {
         ...process.env,
@@ -65,18 +89,31 @@ function resolveLaunchCommand(launch: TerminalStartOpts): LaunchCommand {
 
 const GRACEFUL_STOP_TIMEOUT_MS = 1000;
 const FORCE_KILL_TIMEOUT_MS = 5000;
+const OUTPUT_BUFFER_MAX_TOTAL_SIZE = 1024 * 1024;
 
 export function createTerminalSession(events: TerminalSessionOpts) {
-  let disposed = false;
+  const disposable = createDisposable({
+    onError: (error) => {
+      log.error("Error disposing of terminal session", error);
+    },
+  });
+
+  let sessionStatus: TerminalSessionStatus = "stopped";
   let stopping = false;
-  const disposables = [] as Array<() => void>;
 
   let pty: IPty | null = null;
 
   const exitPromises = new Set<DeferredPromise<boolean>>();
-  disposables.push(() => exitPromises.clear());
+  disposable.addDisposable(() => exitPromises.clear());
 
-  const dispose = ({
+  let bufferedOutput = "";
+
+  const changeSessionStatus = (status: TerminalSessionStatus) => {
+    sessionStatus = status;
+    events.onStatusChange(status);
+  };
+
+  const dispose = async ({
     status,
     exitCode,
     signal,
@@ -87,16 +124,12 @@ export function createTerminalSession(events: TerminalSessionOpts) {
     signal?: number;
     errorMessage?: string;
   }) => {
-    if (disposed) {
+    if (disposable.isDisposed) {
       return;
     }
 
-    disposed = true;
-    for (const dispose of disposables) {
-      dispose();
-    }
-
-    events.onStatusChange(status);
+    await disposable.dispose();
+    changeSessionStatus(status);
     events.onExit({
       exitCode,
       signal,
@@ -109,7 +142,7 @@ export function createTerminalSession(events: TerminalSessionOpts) {
       return;
     }
 
-    events.onStatusChange("starting");
+    changeSessionStatus("starting");
 
     const safeCols =
       opts.cols != null && Number.isFinite(opts.cols) && opts.cols > 0
@@ -137,19 +170,27 @@ export function createTerminalSession(events: TerminalSessionOpts) {
 
       let receivedFirstData = false;
       const onData = pty.onData((chunk) => {
-        if (disposed) {
+        if (disposable.isDisposed) {
           return;
         }
         if (!receivedFirstData) {
           receivedFirstData = true;
-          events.onStatusChange("running");
+          changeSessionStatus("running");
         }
-        events.onData(chunk);
+        bufferedOutput = concatAndTruncate({
+          base: bufferedOutput ?? "",
+          chunk,
+          maxTotalSize: OUTPUT_BUFFER_MAX_TOTAL_SIZE,
+        });
+        events.onData({
+          chunk,
+          bufferedOutput,
+        });
       });
-      disposables.push(() => onData.dispose());
+      disposable.addDisposable(() => onData.dispose());
 
       const onExit = pty.onExit(({ exitCode, signal }) => {
-        if (disposed) {
+        if (disposable.isDisposed) {
           return;
         }
 
@@ -171,7 +212,7 @@ export function createTerminalSession(events: TerminalSessionOpts) {
           });
         }
       });
-      disposables.push(() => onExit.dispose());
+      disposable.addDisposable(() => onExit.dispose());
     } catch (error) {
       const message = getStartErrorMessage(error);
 
@@ -188,16 +229,16 @@ export function createTerminalSession(events: TerminalSessionOpts) {
   const waitForExit = async (timeoutMs: number): Promise<boolean> => {
     const promise = createDeferredPromise<boolean>({ timeout: timeoutMs });
     exitPromises.add(promise);
-    disposables.push(() => promise.resolve(true));
+    disposable.addDisposable(() => promise.resolve(true));
     return await promise.promise.catch(() => false);
   };
 
   const stop = async () => {
-    if (disposed || !pty || stopping) {
+    if (disposable.isDisposed || !pty || stopping) {
       return;
     }
     stopping = true;
-    events.onStatusChange("stopping");
+    changeSessionStatus("stopping");
 
     pty.kill("SIGTERM");
     if (await waitForExit(GRACEFUL_STOP_TIMEOUT_MS)) {
@@ -218,7 +259,7 @@ export function createTerminalSession(events: TerminalSessionOpts) {
   };
 
   const write = (data: string): void => {
-    if (disposed || !pty) {
+    if (disposable.isDisposed || !pty) {
       return;
     }
 
@@ -226,7 +267,7 @@ export function createTerminalSession(events: TerminalSessionOpts) {
   };
 
   const resize = (cols: number, rows: number): void => {
-    if (disposed || !pty) {
+    if (disposable.isDisposed || !pty) {
       return;
     }
 
@@ -237,11 +278,10 @@ export function createTerminalSession(events: TerminalSessionOpts) {
   };
 
   const clear = (): void => {
-    if (disposed || !pty) {
+    if (disposable.isDisposed || !pty) {
       return;
     }
 
-    events.onClear?.();
     pty.clear();
   };
 
@@ -251,6 +291,12 @@ export function createTerminalSession(events: TerminalSessionOpts) {
     write,
     resize,
     clear,
+    get status() {
+      return sessionStatus;
+    },
+    get bufferedOutput() {
+      return bufferedOutput;
+    },
   };
 }
 

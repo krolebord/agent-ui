@@ -1,13 +1,9 @@
 import { UsagePanel } from "@renderer/components/usage-panel";
 import { cn } from "@renderer/lib/utils";
-import type {
-  ProjectSessionGroup,
-  SessionSidebarIndicatorState,
-} from "@renderer/services/terminal-session-selectors";
+import type { ProjectSessionGroup } from "@renderer/services/terminal-session-selectors";
 import {
   buildProjectSessionGroups,
   getSessionLastActivityLabel,
-  getSessionSidebarIndicatorState,
 } from "@renderer/services/terminal-session-selectors";
 import {
   useActiveSessionId,
@@ -25,14 +21,15 @@ import {
   GitFork,
   LoaderCircle,
   MessageCircleQuestionMark,
-  Play,
   Plus,
   Settings,
-  ShieldAlert,
   Square,
   Trash2,
   TriangleAlert,
   type LucideIcon,
+  SquareIcon,
+  PlayIcon,
+  TrashIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -48,9 +45,10 @@ import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
 import { useMutation } from "@tanstack/react-query";
 import { orpc } from "@renderer/orpc-client";
 import { useNewSessionDialogStore } from "./new-session-dialog";
+import type { SessionStatus } from "src/main/sessions/common";
 
 const statusIndicatorMeta: Record<
-  SessionSidebarIndicatorState,
+  SessionStatus,
   {
     icon: LucideIcon;
     label: string;
@@ -63,13 +61,13 @@ const statusIndicatorMeta: Record<
     label: "Idle",
     className: "text-zinc-500",
   },
-  loading: {
+  starting: {
     icon: LoaderCircle,
     label: "Loading",
     className: "text-zinc-400",
     animate: true,
   },
-  pending: {
+  running: {
     icon: LoaderCircle,
     label: "Pending",
     className: "text-sky-400",
@@ -80,16 +78,6 @@ const statusIndicatorMeta: Record<
     label: "Stopping",
     className: "text-amber-300",
     animate: true,
-  },
-  running: {
-    icon: Play,
-    label: "Running",
-    className: "text-emerald-400",
-  },
-  awaiting_approval: {
-    icon: ShieldAlert,
-    label: "Awaiting approval",
-    className: "text-amber-400",
   },
   awaiting_user_response: {
     icon: MessageCircleQuestionMark,
@@ -256,12 +244,26 @@ export function SessionSidebar() {
               {!group.collapsed ? (
                 <ul className="space-y-0.5 px-1 pb-1">
                   {group.sessions.length > 0 ? (
-                    group.sessions.map((session) => (
-                      <SessionSidebarItem
-                        key={session.sessionId}
-                        sessionId={session.sessionId}
-                      />
-                    ))
+                    group.sessions.map((session) => {
+                      switch (session.type) {
+                        case "claude-local-terminal":
+                          return (
+                            <ClaudeLocalTerminalSessionSidebarItem
+                              key={session.sessionId}
+                              sessionId={session.sessionId}
+                            />
+                          );
+                        case "local-terminal":
+                          return (
+                            <LocalTerminalSessionSidebarItem
+                              key={session.sessionId}
+                              sessionId={session.sessionId}
+                            />
+                          );
+                        default:
+                          return null;
+                      }
+                    })
                   ) : (
                     <li className="px-1.5 py-1 text-xs text-zinc-500">
                       No sessions yet
@@ -278,190 +280,294 @@ export function SessionSidebar() {
   );
 }
 
-function SessionSidebarItem({ sessionId }: { sessionId: string }) {
-  const activeSessionId = useActiveSessionId();
+function ClaudeLocalTerminalSessionSidebarItem({
+  sessionId,
+}: {
+  sessionId: string;
+}) {
   const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
 
   const session = useAppState((x) => x.sessions[sessionId]);
 
-  const isActive = activeSessionId === sessionId;
-
-  const statusState = getSessionSidebarIndicatorState(session);
-  const statusMeta = statusIndicatorMeta[statusState];
-  const StatusIcon = statusMeta.icon;
-  const lastActivity = getSessionLastActivityLabel(session);
-  const ariaLabel = `${session.title} (${statusMeta.label})`;
-  const canStop =
-    session.terminal.status === "starting" ||
-    session.terminal.status === "running";
-  const canResume = session.terminal.status === "stopped";
-  const canControl = canStop || canResume;
-  const canFork =
-    session.terminal.status === "running" ||
-    session.terminal.status === "stopped" ||
-    session.terminal.status === "starting";
-  const ControlIcon = canResume ? Play : Square;
-  const controlTitle =
-    session.terminal.status === "stopping"
-      ? "Stopping session"
-      : canResume
-        ? "Resume session"
-        : "Stop session";
-  const controlAriaLabel =
-    session.terminal.status === "stopping"
-      ? `${session.title} is stopping`
-      : canResume
-        ? `Resume ${session.title}`
-        : `Stop ${session.title}`;
-
   const deleteSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      await orpc.sessions.deleteSession.call({ sessionId });
+      await orpc.sessions.localClaude.deleteSession.call({ sessionId });
+    },
+    onSuccess: () => {
+      if (useActiveSessionStore.getState().activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+    },
+  });
+
+  const forkSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      return await orpc.sessions.localClaude.forkSession.call({ sessionId });
+    },
+    onSuccess: (newId) => {
+      setActiveSessionId(newId);
+    },
+  });
+
+  const resumeSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.localClaude.resumeSession.call({ sessionId });
+    },
+  });
+
+  const stopSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.localClaude.stopLiveSession.call({ sessionId });
     },
   });
 
   return (
-    <li className="group/session relative">
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
-          <div>
-            <button
-              type="button"
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <SessionSidebarItemTrigger sessionId={sessionId}>
+          {session.status === "stopped" ? (
+            <SidebarIconButton
+              icon={PlayIcon}
+              label="Resume session"
+              disabled={resumeSessionMutation.isPending}
               onClick={() => {
-                setActiveSessionId(sessionId);
+                resumeSessionMutation.mutate(sessionId);
               }}
-              className={cn(
-                "flex w-full items-center justify-start gap-1.5 rounded-md px-1.5 py-1 pr-[3rem] text-sm transition",
-                isActive
-                  ? "bg-white/15 text-white"
-                  : "text-zinc-300 hover:bg-white/8 hover:text-zinc-100",
-              )}
-              aria-label={ariaLabel}
-            >
-              <span className="inline-flex shrink-0" title={statusMeta.label}>
-                <StatusIcon
-                  className={cn(
-                    "size-3",
-                    statusMeta.className,
-                    statusMeta.animate && "animate-spin",
-                  )}
-                  aria-hidden="true"
-                />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-left">
-                {session.title}
-              </span>
-            </button>
-            <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs tabular-nums text-zinc-400 transition group-hover/session:opacity-0 group-focus-within/session:opacity-0">
-              {lastActivity}
-            </span>
-            <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition group-hover/session:opacity-100 group-focus-within/session:opacity-100">
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (canResume) {
-                    void orpc.sessions.resumeSession
-                      .call({ sessionId })
-                      .then((newId) => {
-                        setActiveSessionId(newId);
-                      });
-                  } else {
-                    void orpc.sessions.stopLiveSession.call({ sessionId });
-                  }
-                }}
-                className={cn(
-                  "pointer-events-auto inline-flex size-5 items-center justify-center rounded text-zinc-300 transition",
-                  canControl
-                    ? "hover:bg-white/10 hover:text-white"
-                    : "cursor-not-allowed opacity-40",
-                )}
-                aria-label={controlAriaLabel}
-                title={controlTitle}
-                disabled={!canControl}
-              >
-                <ControlIcon className="size-3" />
-              </button>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  const wasActive = activeSessionId === sessionId;
-                  void orpc.sessions.deleteSession
-                    .call({ sessionId })
-                    .then(() => {
-                      if (wasActive) {
-                        setActiveSessionId(null);
-                      }
-                    });
-                }}
-                disabled={deleteSessionMutation.isPending}
-                className={cn(
-                  "pointer-events-auto inline-flex size-5 items-center justify-center rounded text-zinc-300 transition",
-                  deleteSessionMutation.isPending
-                    ? "cursor-not-allowed opacity-40"
-                    : "hover:bg-white/10 hover:text-rose-300",
-                )}
-                aria-label={`Delete ${session.title}`}
-                title="Delete session"
-              >
-                <Trash2 className="size-3" />
-              </button>
-            </div>
-          </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          {canFork ? (
-            <ContextMenuItem
+            />
+          ) : (
+            <SidebarIconButton
+              icon={SquareIcon}
+              label="Stop session"
+              disabled={stopSessionMutation.isPending}
               onClick={() => {
-                void orpc.sessions.forkSession
-                  .call({ sessionId })
-                  .then((newId) => {
-                    setActiveSessionId(newId);
-                  });
+                stopSessionMutation.mutate(sessionId);
               }}
-            >
-              <GitFork className="size-3.5" />
-              Fork session
-            </ContextMenuItem>
-          ) : null}
-          {canControl || canFork ? <ContextMenuSeparator /> : null}
-          <ContextMenuItem
-            onClick={() => {
-              void navigator.clipboard.writeText(session.sessionId);
-              toast.success("Session ID copied");
-            }}
-          >
-            <Copy className="size-3.5" />
-            Copy session ID
-          </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => {
-              void navigator.clipboard.writeText(session.startupConfig.cwd);
-              toast.success("Working directory copied");
-            }}
-          >
-            <Copy className="size-3.5" />
-            Copy working directory
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem
+            />
+          )}
+          <SidebarIconButton
+            icon={TrashIcon}
+            label="Delete session"
             variant="destructive"
+            disabled={deleteSessionMutation.isPending}
             onClick={() => {
-              deleteSessionMutation.mutate(sessionId, {
-                onSuccess: () => {
-                  if (activeSessionId === sessionId) {
-                    setActiveSessionId(null);
-                  }
-                },
-              });
+              deleteSessionMutation.mutate(sessionId);
             }}
-          >
-            <Trash2 className="size-3.5" />
-            Delete session
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </ContextMenu>
+          />
+        </SessionSidebarItemTrigger>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          onClick={() => {
+            forkSessionMutation.mutate(sessionId);
+          }}
+          disabled={forkSessionMutation.isPending}
+        >
+          <GitFork className="size-3.5" />
+          Fork session
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(session.sessionId);
+            toast.success("Session ID copied");
+          }}
+        >
+          <Copy className="size-3.5" />
+          Copy session ID
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(session.startupConfig.cwd);
+            toast.success("Working directory copied");
+          }}
+        >
+          <Copy className="size-3.5" />
+          Copy working directory
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function LocalTerminalSessionSidebarItem({ sessionId }: { sessionId: string }) {
+  const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
+
+  const session = useAppState((x) => x.sessions[sessionId]);
+
+  const resumeSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.localTerminal.resumeSession.call({ sessionId });
+    },
+  });
+
+  const stopSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.localTerminal.stopLiveSession.call({ sessionId });
+    },
+    onSuccess: () => {
+      if (useActiveSessionStore.getState().activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+    },
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.localTerminal.deleteSession.call({ sessionId });
+    },
+    onSuccess: () => {
+      if (useActiveSessionStore.getState().activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+    },
+  });
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <SessionSidebarItemTrigger sessionId={sessionId}>
+          {session.status === "stopped" ? (
+            <SidebarIconButton
+              icon={PlayIcon}
+              label="Resume session"
+              disabled={resumeSessionMutation.isPending}
+              onClick={() => {
+                resumeSessionMutation.mutate(sessionId);
+              }}
+            />
+          ) : (
+            <SidebarIconButton
+              icon={SquareIcon}
+              label="Stop session"
+              disabled={stopSessionMutation.isPending}
+              onClick={() => {
+                stopSessionMutation.mutate(sessionId);
+              }}
+            />
+          )}
+          <SidebarIconButton
+            icon={TrashIcon}
+            label="Delete session"
+            variant="destructive"
+            disabled={deleteSessionMutation.isPending}
+            onClick={() => {
+              deleteSessionMutation.mutate(sessionId);
+            }}
+          />
+        </SessionSidebarItemTrigger>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(session.sessionId);
+            toast.success("Session ID copied");
+          }}
+        >
+          <Copy className="size-3.5" />
+          Copy session ID
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(session.startupConfig.cwd);
+            toast.success("Working directory copied");
+          }}
+        >
+          <Copy className="size-3.5" />
+          Copy working directory
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function SessionSidebarItemTrigger({
+  sessionId,
+  children,
+}: {
+  sessionId: string;
+  children: React.ReactNode;
+}) {
+  const session = useAppState((x) => x.sessions[sessionId]);
+  const isActive = useActiveSessionStore(
+    (x) => x.activeSessionId === sessionId,
+  );
+
+  const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
+
+  const statusMeta = statusIndicatorMeta[session.status];
+
+  return (
+    <li className="group/session relative">
+      <button
+        type="button"
+        onClick={() => {
+          setActiveSessionId(sessionId);
+        }}
+        className={cn(
+          "flex w-full items-center justify-start gap-1.5 rounded-md px-1.5 py-1 pr-[3rem] text-sm transition",
+          isActive
+            ? "bg-white/15 text-white"
+            : "text-zinc-300 hover:bg-white/8 hover:text-zinc-100",
+        )}
+      >
+        <span className="inline-flex shrink-0" title={statusMeta.label}>
+          <statusMeta.icon
+            className={cn(
+              "size-3",
+              statusMeta.className,
+              statusMeta.animate && "animate-spin",
+            )}
+            aria-hidden="true"
+          />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-left">
+          {session.title}
+        </span>
+      </button>
+      <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs tabular-nums text-zinc-400 transition group-hover/session:opacity-0 group-focus-within/session:opacity-0">
+        {getSessionLastActivityLabel(session)}
+      </span>
+      <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition group-hover/session:opacity-100 group-focus-within/session:opacity-100">
+        {children}
+      </div>
     </li>
+  );
+}
+
+function SidebarIconButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  variant,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  variant?: "default" | "destructive";
+}) {
+  const Icon = icon;
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        "pointer-events-auto inline-flex size-5 items-center justify-center rounded text-zinc-300 transition",
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : variant === "destructive"
+            ? "hover:bg-white/10 hover:text-rose-300"
+            : "hover:bg-white/10 hover:text-white",
+      )}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+    >
+      <Icon className="size-3" />
+    </button>
   );
 }

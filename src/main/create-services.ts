@@ -1,4 +1,6 @@
+import { createDisposable } from "@shared/utils";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
+import log from "./logger";
 import { PersistenceOrchestrator } from "./persistence-orchestrator";
 import {
   defineProjectState,
@@ -7,6 +9,11 @@ import {
 import { SessionsServiceNew } from "./session-service";
 import { SessionStateFileManager } from "./session-state-file-manager";
 import { SessionTitleManager } from "./session-title-manager";
+import { LocalTerminalSessionsManager } from "./sessions/local-terminal.session";
+import {
+  defineSessionServiceState,
+  defineSessionStatePersistence,
+} from "./sessions/state";
 import { StateOrchestrator } from "./state-orchestrator";
 
 const STORAGE_SCHEMA_VERSION = 3;
@@ -62,44 +69,52 @@ export async function createServices(options: CreateServicesOptions) {
     defineProjectStatePersistence(projectsState),
   );
 
+  const sessionsState = defineSessionServiceState();
+  persistenceService.registerAndHydrate(
+    defineSessionStatePersistence(sessionsState),
+  );
+
   const sessionsService = new SessionsServiceNew({
     pluginDir: managedPluginDir,
     pluginWarning,
     titleManager,
     stateFileManager,
-    persistence: persistenceService,
+    state: sessionsState,
   });
+
+  const localTerminalSessionsManager = new LocalTerminalSessionsManager(
+    sessionsState,
+  );
 
   const stateService = new StateOrchestrator({
     serviceStates: {
       projects: projectsState,
-      sessions: sessionsService.getSyncState(),
+      sessions: sessionsState,
     },
   });
 
-  let shutdownPromise: Promise<void> | null = null;
-  const shutdown = async (): Promise<void> => {
-    if (shutdownPromise) {
-      return shutdownPromise;
-    }
+  const shutdownDisposable = createDisposable({
+    onError: (error) => {
+      log.error("Error while shutting down services", error);
+    },
+  });
 
-    shutdownPromise = (async () => {
-      await sessionsService.dispose();
-      stateService.dispose();
-      persistenceService.dispose();
-    })();
-
-    return shutdownPromise;
-  };
+  shutdownDisposable.addDisposable(async () => await sessionsService.dispose());
+  shutdownDisposable.addDisposable(() => stateService.dispose());
+  shutdownDisposable.addDisposable(() => persistenceService.dispose());
 
   return {
     projectsState,
     getMainWindow,
     sessionsService,
     stateService,
-    shutdown,
+    shutdown: shutdownDisposable.dispose,
     managedPluginDir,
     pluginWarning,
+    sessions: {
+      state: sessionsState,
+      localTerminal: localTerminalSessionsManager,
+    },
   };
 }
 

@@ -77,3 +77,50 @@ export function concatAndTruncate(opts: {
 
   return result.substring(result.length - opts.maxTotalSize);
 }
+
+// biome-ignore lint/suspicious/noExplicitAny: any in generic
+export function once<T extends () => any>(fn: T): () => ReturnType<T> {
+  let cached: { result: ReturnType<T> } | undefined;
+
+  return (): ReturnType<T> => {
+    if (cached) {
+      return cached.result;
+    }
+
+    const result = fn();
+    cached = { result };
+
+    return result;
+  };
+}
+
+type DisposableFn = () => Promise<unknown> | unknown;
+export function createDisposable({
+  onError,
+}: {
+  onError: (error: unknown) => void;
+}) {
+  let disposed = false;
+  const disposables = new Set<DisposableFn>();
+
+  return {
+    get isDisposed() {
+      return disposed;
+    },
+    addDisposable: (disposable: DisposableFn) => {
+      disposables.add(disposable);
+    },
+    dispose: once(async () => {
+      const results = await Promise.allSettled(
+        Array.from(disposables).map(async (disposable) => await disposable()),
+      );
+      disposables.clear();
+      disposed = true;
+      for (const result of results) {
+        if (result.status === "rejected") {
+          onError(result.reason);
+        }
+      }
+    }),
+  };
+}

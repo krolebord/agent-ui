@@ -3,6 +3,7 @@ import { fsRouter } from "./fs.router";
 import { procedure } from "./orpc";
 import { projectsRouter } from "./project-service";
 import { claudeSessionsRouter } from "./session-service";
+import { localTerminalRouter } from "./sessions/local-terminal.session";
 import { stateSyncRouter } from "./state-orchestrator";
 
 export const orpcRouter = {
@@ -10,5 +11,8 @@ export const orpcRouter = {
   projects: projectsRouter,
   fs: fsRouter,
   stateSync: stateSyncRouter,
-  sessions: claudeSessionsRouter,
+  sessions: {
+    localClaude: claudeSessionsRouter,
+    localTerminal: localTerminalRouter,
+  },
 };

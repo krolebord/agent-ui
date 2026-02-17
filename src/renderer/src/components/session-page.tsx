@@ -6,9 +6,10 @@ import { AlertCircle } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import { useAppState } from "./sync-state-provider";
 import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
-import { consumeEventIterator } from "@orpc/client";
+import { type ClientPromiseResult, consumeEventIterator } from "@orpc/client";
 import { orpc } from "@renderer/orpc-client";
 import { toast } from "sonner";
+import type { TerminalEvent } from "@shared/terminal-types";
 
 function useActiveSession() {
   const activeSessionId = useActiveSessionId();
@@ -25,25 +26,72 @@ export function SessionPage() {
     return null;
   }
 
-  return <TerminalPage session={session} />;
+  switch (session.type) {
+    case "claude-local-terminal":
+      return (
+        <TerminalPage
+          session={session}
+          subscribe={(sessionId) =>
+            orpc.sessions.localClaude.subscribeToSessionTerminal.call({
+              sessionId,
+            })
+          }
+          writeToTerminal={
+            orpc.sessions.localClaude.writeToSessionTerminal.call
+          }
+          resizeTerminal={orpc.sessions.localClaude.resizeSessionTerminal.call}
+        />
+      );
+    case "local-terminal":
+      return (
+        <TerminalPage
+          session={session}
+          subscribe={(sessionId) =>
+            orpc.sessions.localTerminal.subscribeToSessionTerminal.call({
+              sessionId,
+            })
+          }
+          writeToTerminal={
+            orpc.sessions.localTerminal.writeToSessionTerminal.call
+          }
+          resizeTerminal={
+            orpc.sessions.localTerminal.resizeSessionTerminal.call
+          }
+        />
+      );
+    default:
+      return null;
+  }
 }
 
-function TerminalPage({ session }: { session: Session }) {
+function TerminalPage({
+  session,
+  subscribe,
+  writeToTerminal,
+  resizeTerminal,
+}: {
+  session: Session;
+  subscribe: (
+    sessionId: string,
+  ) => ClientPromiseResult<AsyncGenerator<TerminalEvent, void, unknown>, Error>;
+  writeToTerminal: (opts: { sessionId: string; data: string }) => void;
+  resizeTerminal: (opts: {
+    sessionId: string;
+    cols: number;
+    rows: number;
+  }) => void;
+}) {
   const terminalRef = useRef<TerminalPaneHandle | null>(null);
 
   useEffect(() => {
     terminalRef.current?.clear();
-    terminalRef.current?.write(session.terminal.bufferedOutput ?? "");
+    terminalRef.current?.write(session.bufferedOutput ?? "");
 
     const cancel = consumeEventIterator(
-      orpc.sessions.subscribeToSessionTerminal
-        .call({
-          sessionId: session.sessionId,
-        })
-        .then((stream) => {
-          terminalRef.current?.focus();
-          return stream;
-        }),
+      subscribe(session.sessionId).then((stream) => {
+        terminalRef.current?.focus();
+        return stream;
+      }),
       {
         onEvent(event) {
           switch (event.type) {
@@ -70,7 +118,7 @@ function TerminalPage({ session }: { session: Session }) {
 
   const handleTerminalInput = useCallback(
     (data: string) => {
-      void orpc.sessions.writeToSessionTerminal.call({
+      writeToTerminal({
         sessionId: session.sessionId,
         data,
       });
@@ -80,7 +128,7 @@ function TerminalPage({ session }: { session: Session }) {
 
   const handleTerminalResize = useCallback(
     (cols: number, rows: number) => {
-      void orpc.sessions.resizeSessionTerminal.call({
+      resizeTerminal({
         sessionId: session.sessionId,
         cols,
         rows,
@@ -89,8 +137,7 @@ function TerminalPage({ session }: { session: Session }) {
     [session.sessionId],
   );
 
-  const errorMessage =
-    session.terminal.errorMessage || session.activity.warning || "";
+  const errorMessage = session.errorMessage || session.warningMessage || "";
 
   return (
     <>

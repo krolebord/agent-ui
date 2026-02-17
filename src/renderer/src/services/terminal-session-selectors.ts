@@ -1,24 +1,13 @@
 import type { ClaudeModel, ClaudeProject } from "@shared/claude-types";
-import type { ClaudeSession } from "src/main/session-service";
+import type { Session } from "src/main/sessions/state";
 
 export interface ProjectSessionGroup {
   path: string;
   name: string;
   collapsed: boolean;
   fromProjectList: boolean;
-  sessions: ClaudeSession[];
+  sessions: Session[];
 }
-
-export type SessionSidebarIndicatorState =
-  | "idle"
-  | "loading"
-  | "stopping"
-  | "pending"
-  | "running"
-  | "awaiting_approval"
-  | "awaiting_user_response"
-  | "stopped"
-  | "error";
 
 export const MODEL_OPTIONS: { value: ClaudeModel; label: string }[] = [
   { value: "haiku", label: "Haiku" },
@@ -29,13 +18,10 @@ export const MODEL_OPTIONS: { value: ClaudeModel; label: string }[] = [
 
 interface BuildProjectSessionGroupsInput {
   projects: ClaudeProject[];
-  sessionsById: Record<string, ClaudeSession>;
+  sessionsById: Record<string, Session>;
 }
 
-function compareSessionsByCreatedAtDesc(
-  a: ClaudeSession,
-  b: ClaudeSession,
-): number {
+function compareSessionsByCreatedAtDesc(a: Session, b: Session): number {
   return b.createdAt - a.createdAt;
 }
 
@@ -47,7 +33,7 @@ export function getProjectNameFromPath(path: string): string {
 }
 
 export function getSessionLastActivityLabel(
-  session: ClaudeSession,
+  session: Session,
   now = Date.now(),
 ): string {
   const timestamp = session.lastActivityAt;
@@ -95,44 +81,6 @@ export function getSessionLastActivityLabel(
   return `${Math.floor(days / 365)}y`;
 }
 
-export function getSessionSidebarIndicatorState(
-  session: ClaudeSession,
-): SessionSidebarIndicatorState {
-  if (session.terminal.status === "starting") {
-    return "loading";
-  }
-
-  if (session.terminal.status === "stopping") {
-    return "stopping";
-  }
-
-  if (session.terminal.status === "error") {
-    return "error";
-  }
-
-  if (session.terminal.status === "stopped") {
-    return "stopped";
-  }
-
-  if (session.activity.state === "awaiting_approval") {
-    return "awaiting_approval";
-  }
-
-  if (session.activity.state === "awaiting_user_response") {
-    return "awaiting_user_response";
-  }
-
-  if (session.activity.state === "working") {
-    return "pending";
-  }
-
-  if (session.terminal.status === "running") {
-    return "running";
-  }
-
-  return "idle";
-}
-
 export function buildProjectSessionGroups(
   state: BuildProjectSessionGroupsInput,
 ): ProjectSessionGroup[] {
@@ -140,7 +88,7 @@ export function buildProjectSessionGroups(
     compareSessionsByCreatedAtDesc,
   );
 
-  const sessionsByPath = new Map<string, ClaudeSession[]>();
+  const sessionsByPath = new Map<string, Session[]>();
   for (const session of allSessions) {
     const bucket = sessionsByPath.get(session.startupConfig.cwd);
     if (bucket) {

@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { EventPublisher } from "@orpc/client";
-import { concatAndTruncate, shellQuote } from "@shared/utils";
+import type { TerminalEvent } from "@shared/terminal-types";
+import { shellQuote } from "@shared/utils";
 import { z } from "zod";
 import {
-  type ClaudeActivityState,
   type ClaudeEffort,
   type ClaudeModel,
   type ClaudePermissionMode,
@@ -11,50 +11,36 @@ import {
   claudeModelSchema,
   claudePermissionModeSchema,
 } from "../shared/claude-types";
-import { defineServiceState } from "../shared/service-state";
 import { ClaudeActivityMonitor } from "./claude-activity-monitor";
 import { withDebouncedRunner } from "./debounce-runner";
 import log from "./logger";
 import { procedure } from "./orpc";
-import {
-  type PersistenceOrchestrator,
-  defineStatePersistence,
-} from "./persistence-orchestrator";
+
 import type { SessionStateFileManager } from "./session-state-file-manager";
 import type { SessionTitleManager } from "./session-title-manager";
+import { type SessionStatus, commonSessionSchema } from "./sessions/common";
+import type { SessionServiceState } from "./sessions/state";
 import {
   type TerminalSession,
-  type TerminalSessionStatus,
   createTerminalSession,
 } from "./terminal-session";
-
-const OUTPUT_BUFFER_MAX_TOTAL_SIZE = 1024 * 1024;
 
 interface SessionRecord {
   terminal: TerminalSession;
   activityMonitor: ClaudeActivityMonitor;
   stateFilePath: string;
-  bufferedOutput: string;
   dispose: () => Promise<void>;
 }
+interface SessionServiceOptions {
+  pluginDir: string | null;
+  pluginWarning: string | null;
+  titleManager: SessionTitleManager;
+  stateFileManager: SessionStateFileManager;
+  state: SessionServiceState;
+}
 
-const claudeSessionSchema = z.object({
-  sessionId: z.string(),
-  title: z.string().catch("Claude Session"),
-  createdAt: z.number().default(Date.now()),
-  lastActivityAt: z.number().default(Date.now()),
-
-  activity: z.object({
-    state: z.literal("unknown" as ClaudeActivityState).catch("unknown"),
-    warning: z.string().optional(),
-  }),
-
-  terminal: z.object({
-    status: z.literal("stopped" as TerminalSessionStatus).catch("stopped"),
-    errorMessage: z.string().optional(),
-    bufferedOutput: z.string().optional(),
-  }),
-
+export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
+  type: z.literal("claude-local-terminal"),
   startupConfig: z.object({
     permissionMode: claudePermissionModeSchema,
     model: claudeModelSchema,
@@ -69,30 +55,9 @@ const claudeSessionSchema = z.object({
     cwd: z.string(),
   }),
 });
-
-export type ClaudeSession = z.infer<typeof claudeSessionSchema>;
-
-const defineSessionServiceState = () =>
-  defineServiceState({
-    key: "sessions",
-    defaults: {} as Record<string, ClaudeSession>,
-  });
-
-const defineSessionStatePersistence = (state: SessionServiceState) =>
-  defineStatePersistence({
-    serviceState: state,
-    schema: z.record(z.string(), claudeSessionSchema),
-  });
-
-export type SessionServiceState = ReturnType<typeof defineSessionServiceState>;
-
-interface SessionServiceOptions {
-  persistence: PersistenceOrchestrator;
-  pluginDir: string | null;
-  pluginWarning: string | null;
-  titleManager: SessionTitleManager;
-  stateFileManager: SessionStateFileManager;
-}
+export type ClaudeLocalTerminalSessionData = z.infer<
+  typeof claudeLocalTerminalSessionSchema
+>;
 
 const startClaudeSessionSchema = z.object({
   cwd: z.string(),
@@ -177,11 +142,11 @@ export const claudeSessionsRouter = {
       if (isLive) {
         yield { type: "clear" } as TerminalEvent;
         if (bufferedOutput) {
-          yield { type: "data", data: bufferedOutput };
+          yield { type: "data", data: bufferedOutput } as TerminalEvent;
         }
       }
       for await (const event of stream) {
-        yield event;
+        yield event as TerminalEvent;
       }
     }),
   writeToSessionTerminal: procedure
@@ -315,14 +280,48 @@ function getDefaultSessionTitle(sessionId: string): string {
   return `Session ${sessionId.substring(0, 8)}`;
 }
 
-export type TerminalEvent =
-  | {
-      type: "data";
-      data: string;
-    }
-  | {
-      type: "clear";
-    };
+export type { TerminalEvent } from "@shared/terminal-types";
+
+function getSessionStatus({
+  terminal,
+  activityMonitor,
+}: {
+  terminal: TerminalSession;
+  activityMonitor: ClaudeActivityMonitor;
+}): SessionStatus {
+  const terminalStatus = terminal.status;
+  const activityStatus = activityMonitor.getState();
+
+  if (terminalStatus === "starting") {
+    return "starting";
+  }
+
+  if (terminalStatus === "stopping") {
+    return "stopping";
+  }
+
+  if (terminalStatus === "error") {
+    return "error";
+  }
+
+  if (terminalStatus === "stopped") {
+    return "stopped";
+  }
+
+  if (activityStatus === "awaiting_approval") {
+    return "awaiting_user_response";
+  }
+
+  if (activityStatus === "awaiting_user_response") {
+    return "awaiting_user_response";
+  }
+
+  if (activityStatus === "working") {
+    return "running";
+  }
+
+  return "idle";
+}
 
 export class SessionsServiceNew {
   private readonly sessionsState: SessionServiceState;
@@ -343,38 +342,22 @@ export class SessionsServiceNew {
     this.pluginWarning = options.pluginWarning;
     this.titleManager = options.titleManager;
     this.stateFileManager = options.stateFileManager;
-
-    this.sessionsState = defineSessionServiceState();
-    options.persistence.registerAndHydrate(
-      defineSessionStatePersistence(this.sessionsState),
-    );
-  }
-
-  getSyncState() {
-    return this.sessionsState;
-  }
-
-  getSessionById(sessionId: string): ClaudeSession | undefined {
-    return this.sessionsState.state[sessionId];
+    this.sessionsState = options.state;
   }
 
   private createSessionSnapshot(input: {
     sessionId: string;
     title: string;
-    startupConfig: ClaudeSession["startupConfig"];
-  }): ClaudeSession {
+    startupConfig: ClaudeLocalTerminalSessionData["startupConfig"];
+  }): ClaudeLocalTerminalSessionData {
     return {
       sessionId: input.sessionId,
+      type: "claude-local-terminal",
       title: input.title,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
-      activity: {
-        state: "unknown",
-        warning: this.pluginWarning ?? undefined,
-      },
-      terminal: {
-        status: "stopped",
-      },
+      status: "stopped",
+      warningMessage: this.pluginWarning ?? undefined,
       startupConfig: input.startupConfig,
     };
   }
@@ -445,15 +428,25 @@ export class SessionsServiceNew {
     return sessionId;
   }
 
+  private getSessionState(sessionId: string) {
+    const session = this.sessionsState.state[sessionId];
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+    if (session.type !== "claude-local-terminal") {
+      throw new Error(
+        `Session ${sessionId} is not a Claude local terminal session`,
+      );
+    }
+    return session;
+  }
+
   async resumeSession(input: ResumeClaudeSessionInput) {
     const liveSession = this.liveSessions.get(input.sessionId);
     if (liveSession) {
       return input.sessionId;
     }
-    const session = this.getSessionById(input.sessionId);
-    if (!session) {
-      return input.sessionId;
-    }
+    const session = this.getSessionState(input.sessionId);
 
     await this.createLiveSession({
       sessionId: session.sessionId,
@@ -477,10 +470,7 @@ export class SessionsServiceNew {
 
   async forkSession(input: ForkClaudeSessionInput) {
     const state = this.sessionsState;
-    const session = this.getSessionById(input.sessionId);
-    if (!session) {
-      throw new Error(`Session ${input.sessionId} not found`);
-    }
+    const session = this.getSessionState(input.sessionId);
 
     const sessionId = generateUniqueSessionId();
     const forkedSession = this.createSessionSnapshot({
@@ -544,8 +534,8 @@ export class SessionsServiceNew {
 
     const syncBufferedOutput = withDebouncedRunner(() => {
       this.sessionsState.updateState((state) => {
-        state[opts.sessionId].terminal.bufferedOutput =
-          liveSession.bufferedOutput;
+        state[opts.sessionId].bufferedOutput =
+          liveSession.terminal.bufferedOutput;
       });
     }, 500);
     disposables.push(() => syncBufferedOutput.dispose());
@@ -553,7 +543,10 @@ export class SessionsServiceNew {
     const activityMonitor = new ClaudeActivityMonitor({
       onStatusChange(status) {
         state.updateState((state) => {
-          state[opts.sessionId].activity.state = status;
+          state[opts.sessionId].status = getSessionStatus({
+            terminal,
+            activityMonitor,
+          });
           state[opts.sessionId].lastActivityAt = Date.now();
         });
         if (
@@ -601,32 +594,30 @@ export class SessionsServiceNew {
       cwd: opts.cwd,
     });
     const terminal = createTerminalSession({
-      onData: (chunk) => {
+      onData: ({ chunk }) => {
         this.eventPublisher.publish(opts.sessionId, {
           type: "data",
           data: chunk,
         });
 
-        liveSession.bufferedOutput = concatAndTruncate({
-          base: liveSession.bufferedOutput ?? "",
-          chunk,
-          maxTotalSize: OUTPUT_BUFFER_MAX_TOTAL_SIZE,
-        });
         syncBufferedOutput.schedule();
       },
       onExit: (payload) => {
         void this.stopLiveSession(opts.sessionId);
         state.updateState((state) => {
-          state[opts.sessionId].terminal.status = payload.errorMessage
+          state[opts.sessionId].status = payload.errorMessage
             ? "error"
             : "stopped";
-          state[opts.sessionId].terminal.errorMessage = payload.errorMessage;
+          state[opts.sessionId].errorMessage = payload.errorMessage;
         });
         syncBufferedOutput.flush();
       },
       onStatusChange: (status) => {
         state.updateState((state) => {
-          state[opts.sessionId].terminal.status = status;
+          state[opts.sessionId].status = getSessionStatus({
+            terminal,
+            activityMonitor,
+          });
         });
         if (status === "stopped") {
           syncBufferedOutput.flush();
@@ -639,7 +630,6 @@ export class SessionsServiceNew {
       terminal,
       activityMonitor,
       stateFilePath,
-      bufferedOutput: "",
       dispose: async () => {
         for (const disposable of disposables) {
           try {
@@ -725,9 +715,10 @@ export class SessionsServiceNew {
   }
 
   subscribeToTerminalEvents(sessionId: string, signal?: AbortSignal) {
+    const liveSession = this.liveSessions.get(sessionId);
     return {
-      isLive: this.liveSessions.has(sessionId),
-      bufferedOutput: this.liveSessions.get(sessionId)?.bufferedOutput ?? "",
+      isLive: !!liveSession,
+      bufferedOutput: liveSession?.terminal.bufferedOutput ?? "",
       stream: this.eventPublisher.subscribe(sessionId, { signal }),
     };
   }

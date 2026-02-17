@@ -4,7 +4,7 @@ import { useSettingsStore } from "@renderer/components/settings-dialog";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { orpc } from "@renderer/orpc-client";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import type { ClaudeSession } from "src/main/session-service";
+import type { Session } from "src/main/sessions/state";
 import {
   useActiveSessionId,
   useActiveSessionStore,
@@ -22,7 +22,7 @@ export const SHORTCUT_DEFINITIONS = [
 ] as const;
 
 export function getNextSession(
-  sessionsById: Record<string, ClaudeSession>,
+  sessionsById: Record<string, Session>,
   activeSessionId: string | null,
   excludeSessionId?: string,
 ): string | null {
@@ -43,10 +43,9 @@ export function getNextSession(
     "awaiting_approval",
   ]);
 
-  const isAwaiting = (session: ClaudeSession) =>
-    awaitingStates.has(session.activity.state);
+  const isAwaiting = (session: Session) => awaitingStates.has(session.status);
 
-  const byRecent = (a: ClaudeSession, b: ClaudeSession) =>
+  const byRecent = (a: Session, b: Session) =>
     b.lastActivityAt - a.lastActivityAt;
 
   if (activeCwd) {
@@ -67,13 +66,7 @@ export function getNextSession(
     .sort(byRecent);
   if (tier2.length > 0) return tier2[0].sessionId;
 
-  const tier3 = candidates
-    .filter(
-      (session) =>
-        session.terminal.status === "running" &&
-        session.activity.state === "idle",
-    )
-    .sort(byRecent);
+  const tier3 = candidates.sort(byRecent);
   if (tier3.length > 0) return tier3[0].sessionId;
 
   return null;
@@ -135,11 +128,20 @@ export function useAppShortcuts(): void {
         activeSessionId,
       );
       const deletingSessionId = activeSessionId;
-      void orpc.sessions.deleteSession
-        .call({ sessionId: deletingSessionId })
-        .then(() => {
-          setActiveSessionId(nextSessionId);
-        });
+
+      switch (sessions[deletingSessionId].type) {
+        case "claude-local-terminal":
+          void orpc.sessions.localClaude.deleteSession.call({
+            sessionId: deletingSessionId,
+          });
+          break;
+        case "local-terminal":
+          void orpc.sessions.localTerminal.deleteSession.call({
+            sessionId: deletingSessionId,
+          });
+          break;
+      }
+      setActiveSessionId(nextSessionId);
     },
     { enabled: !dialogsAreOpen },
   );

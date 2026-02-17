@@ -21,7 +21,7 @@ Instead of Electron's built-in IPC, the app uses **oRPC** (`@orpc/server` + `@or
 
 - **Main**: `src/main/orpc.ts` defines typed procedures with a `Services` context. `src/main/orpc-router.ts` composes sub-routers from service modules (sessions, projects, fs, stateSync).
 - **Renderer**: `src/renderer/src/orpc-client.ts` creates the client and wraps it with `createTanstackQueryUtils` for TanStack Query integration.
-- Calling RPCs: `orpc.sessions.startSession.call({ ... })`. Event streams use `consumeEventIterator`.
+- Calling RPCs: `orpc.sessions.localClaude.startSession.call({ ... })`. Event streams use `consumeEventIterator`.
 
 ### State Sync: Immer patches → Event streams → Zustand
 
@@ -40,9 +40,13 @@ State flows from main to renderer via JSON Patches:
 
 `create-services.ts` initializes all services (plugin, session state file manager, persistence, project/session states, state orchestrator) and returns a services object with a `shutdown()` hook. Shutdown flushes pending persistence and aborts subscriptions via `disposeSignal`.
 
+### Sessions
+
+Sessions use a discriminated union (`type` field) to support multiple session types. Shared schema and state live in `src/main/sessions/`. Current types: `claude-local-terminal` (Claude CLI) and `local-terminal` (plain shell). The oRPC router nests per-type sub-routers under `sessions.localClaude` and `sessions.localTerminal`.
+
 ### Terminal
 
-xterm.js in the renderer with `node-pty` spawning in main. `TerminalSession` wraps PTY with input/output handling and activity monitoring.
+xterm.js in the renderer with `node-pty` spawning in main. `TerminalSession` wraps PTY with input/output handling, buffered output, and activity monitoring.
 
 ## Key Conventions
 

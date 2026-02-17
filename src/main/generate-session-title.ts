@@ -3,25 +3,28 @@ import log from "./logger";
 
 const FALLBACK_TITLE = "New Session";
 
-const systemPrompt =
-  "You are a summarization assistant. You are given a user prompt and you need to summarize it into a very short session title (2-4 words, max 30 characters). Be extremely concise. Output only the title, nothing else.";
+const systemPrompt = `
+You are a summarization assistant.
+When given a user prompt, you need to summarize it into a very short session title (2-4 words, max 30 characters).
+Be extremely concise.
+**CRITICAL:** output only the summarized title, nothing else.`;
 
 export async function generateSessionTitle(prompt: string): Promise<string> {
   const args = [
     "--system-prompt",
     systemPrompt,
     "--print",
-    `User prompt:\n${prompt}`,
     "--model",
     "haiku",
     "--fallback-model",
     "sonnet",
     "--no-chrome",
     "--no-session-persistence",
-    "--permission-mode",
-    "dontAsk",
     "--tools",
     "",
+    "--permission-mode",
+    "dontAsk",
+    `User prompt:\n${prompt}`,
   ];
 
   try {
