@@ -591,7 +591,7 @@ export class SessionsServiceNew {
     disposables.push(() => activityMonitor.stopMonitoring());
 
     let deferredPrompt: string | null = null;
-    let deferredPromptChecksLeft = 5;
+    let deferredPromptChecksLeft = 10;
     let effectiveInitialPrompt = opts.initialPrompt;
     if (opts.initialPrompt?.startsWith("/plan ")) {
       const textAfterPlan = opts.initialPrompt.slice("/plan ".length).trim();
@@ -623,10 +623,13 @@ export class SessionsServiceNew {
 
         if (deferredPrompt && deferredPromptChecksLeft > 0) {
           deferredPromptChecksLeft--;
-          if (chunk.includes("/plan")) {
-            terminal.write(deferredPrompt);
-            terminal.write("\r");
+          if (chunk.includes("plan mode on")) {
+            const prompt = deferredPrompt;
             deferredPrompt = null;
+            setTimeout(() => {
+              terminal.write(prompt);
+              terminal.write("\r");
+            }, 500);
           }
         }
 
