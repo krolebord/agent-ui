@@ -1,0 +1,6 @@
+{
+  "defaultModel": "opus",
+  "defaultPermissionMode": "yolo",
+  "defaultEffort": "high",
+  "defaultSubagentModelOverride": "sonnet"
+}
