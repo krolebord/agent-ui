@@ -22,10 +22,11 @@ interface TerminalPaneProps {
   className?: string;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
+  readOnly?: boolean;
 }
 
 function TerminalPaneComponent(
-  { className, onInput, onResize }: TerminalPaneProps,
+  { className, onInput, onResize, readOnly = false }: TerminalPaneProps,
   ref: ForwardedRef<TerminalPaneHandle>,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -67,6 +68,7 @@ function TerminalPaneComponent(
     const terminal = new Terminal({
       convertEol: true,
       cursorBlink: true,
+      disableStdin: readOnly,
       fontFamily: "JetBrains Mono, Menlo, Consolas, monospace",
       fontSize: 13,
       theme: {
@@ -136,6 +138,13 @@ function TerminalPaneComponent(
       terminalRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    if (!terminalRef.current) {
+      return;
+    }
+    terminalRef.current.options.disableStdin = readOnly;
+  }, [readOnly]);
 
   return <div ref={containerRef} className={cn("h-full w-full", className)} />;
 }

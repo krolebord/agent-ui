@@ -6,7 +6,6 @@ import {
   getSessionLastActivityLabel,
 } from "@renderer/services/terminal-session-selectors";
 import {
-  useActiveSessionId,
   useActiveSessionStore,
 } from "@renderer/hooks/use-active-session-id";
 import { forwardRef, useMemo } from "react";
@@ -266,6 +265,13 @@ export function SessionSidebar() {
                               sessionId={session.sessionId}
                             />
                           );
+                        case "ralph-loop":
+                          return (
+                            <RalphLoopSessionSidebarItem
+                              key={session.sessionId}
+                              sessionId={session.sessionId}
+                            />
+                          );
                         default:
                           return null;
                       }
@@ -468,6 +474,116 @@ function LocalTerminalSessionSidebarItem({ sessionId }: { sessionId: string }) {
         </SessionSidebarItemTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(session.sessionId);
+            toast.success("Session ID copied");
+          }}
+        >
+          <Copy className="size-3.5" />
+          Copy session ID
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(session.startupConfig.cwd);
+            toast.success("Working directory copied");
+          }}
+        >
+          <Copy className="size-3.5" />
+          Copy working directory
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function RalphLoopSessionSidebarItem({ sessionId }: { sessionId: string }) {
+  const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
+  const session = useAppState((x) => x.sessions[sessionId]);
+
+  const resumeLoopMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.ralphLoop.resumeSession.call({ sessionId });
+    },
+  });
+
+  const stopLoopMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.ralphLoop.stopLoop.call({ sessionId });
+    },
+  });
+
+  const runSingleMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.ralphLoop.runSingleIteration.call({ sessionId });
+    },
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.ralphLoop.deleteSession.call({ sessionId });
+    },
+    onSuccess: () => {
+      if (useActiveSessionStore.getState().activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+    },
+  });
+
+  if (!session || session.type !== "ralph-loop") {
+    return null;
+  }
+
+  const resumeDisabled =
+    resumeLoopMutation.isPending ||
+    session.loopState.completion === "done" ||
+    session.loopState.completion === "max_iterations";
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <SessionSidebarItemTrigger sessionId={sessionId}>
+          {session.loopState.autonomousEnabled ? (
+            <SidebarIconButton
+              icon={SquareIcon}
+              label="Stop loop"
+              disabled={stopLoopMutation.isPending}
+              onClick={() => {
+                stopLoopMutation.mutate(sessionId);
+              }}
+            />
+          ) : (
+            <SidebarIconButton
+              icon={PlayIcon}
+              label="Resume loop"
+              disabled={resumeDisabled}
+              onClick={() => {
+                resumeLoopMutation.mutate(sessionId);
+              }}
+            />
+          )}
+          <SidebarIconButton
+            icon={TrashIcon}
+            label="Delete session"
+            variant="destructive"
+            disabled={deleteSessionMutation.isPending}
+            onClick={() => {
+              deleteSessionMutation.mutate(sessionId);
+            }}
+          />
+        </SessionSidebarItemTrigger>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          onClick={() => {
+            runSingleMutation.mutate(sessionId);
+          }}
+          disabled={runSingleMutation.isPending}
+        >
+          <PlayIcon className="size-3.5" />
+          Run single iteration
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() => {
             void navigator.clipboard.writeText(session.sessionId);

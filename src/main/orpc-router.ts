@@ -4,6 +4,7 @@ import { procedure } from "./orpc";
 import { projectsRouter } from "./project-service";
 import { claudeSessionsRouter } from "./session-service";
 import { localTerminalRouter } from "./sessions/local-terminal.session";
+import { ralphLoopRouter } from "./sessions/ralph-loop.session";
 import { stateSyncRouter } from "./state-orchestrator";
 
 export const orpcRouter = {
@@ -14,5 +15,6 @@ export const orpcRouter = {
   sessions: {
     localClaude: claudeSessionsRouter,
     localTerminal: localTerminalRouter,
+    ralphLoop: ralphLoopRouter,
   },
 };

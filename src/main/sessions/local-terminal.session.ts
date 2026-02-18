@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { EventPublisher, call } from "@orpc/server";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
@@ -10,7 +9,7 @@ import {
   type TerminalSession,
   createTerminalSession,
 } from "../terminal-session";
-import { commonSessionSchema } from "./common";
+import { commonSessionSchema, generateUniqueSessionId } from "./common";
 import type { SessionServiceState } from "./state";
 
 export const localTerminalSessionSchema = commonSessionSchema.extend({
@@ -37,7 +36,7 @@ export const localTerminalRouter = {
   startSession: procedure
     .input(startLocalTerminalSessionSchema)
     .handler(async ({ input, context }) => {
-      const sessionId = randomUUID();
+      const sessionId = generateUniqueSessionId();
       const state = context.sessions.state;
 
       const newSession: LocalTerminalSessionData = {

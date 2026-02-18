@@ -1,16 +1,5 @@
 import { z } from "zod";
 
-export const claudeSessionStatusSchema = z.enum([
-  "idle",
-  "starting",
-  "stopping",
-  "running",
-  "stopped",
-  "error",
-]);
-
-export type ClaudeSessionStatus = z.infer<typeof claudeSessionStatusSchema>;
-
 export const claudeActivityStateSchema = z.enum([
   "idle",
   "working",

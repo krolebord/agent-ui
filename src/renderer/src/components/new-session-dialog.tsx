@@ -44,7 +44,6 @@ import type {
 import {
   formatForDisplay,
   Hotkey,
-  RegisterableHotkey,
   useHotkey,
 } from "@tanstack/react-hotkeys";
 import { useMutation } from "@tanstack/react-query";
@@ -66,12 +65,29 @@ export const useNewSessionDialogStore = create(
   ),
 );
 
-type SessionType = "claude" | "terminal";
+type SessionType = "claude" | "ralphLoop" | "terminal";
 
 const SESSION_TYPE_OPTIONS: { value: SessionType; label: string }[] = [
   { value: "claude", label: "Claude" },
+  { value: "ralphLoop", label: "Ralph Loop" },
   { value: "terminal", label: "Terminal" },
 ];
+
+const DEFAULT_RALPH_LOOP_OBJECTIVE_PROMPT = [
+  "Iteration: {iteration}",
+  "Objective:",
+  "1. Pick random task from @plan.md",
+  "2. Summarize your progress and reason why you picked that task into progress.md",
+  "3. Output text associated with the task",
+  "",
+  "Instructions:",
+  "- If all tasks are complete, just output {complete_marker}",
+  "- Work autonomously in small, verifiable iterations to complete the requested task.",
+  "- Make concrete progress in the repository.",
+  "- If blocked, explain the blocker clearly. Use AskUserQuestion. Only use it if you can't proceed.",
+  "- Use @progress.md and @prd.md as primary context and keep them updated as work progresses.",
+  "- At the end of each iteration, summarize progress and mark task as complete if its done.",
+].join("\n");
 
 const switchSessionTypeHotkey: Hotkey = "Alt+Tab";
 
@@ -92,9 +108,16 @@ export function NewSessionDialog() {
   useHotkey(
     switchSessionTypeHotkey,
     () => {
-      setSessionType((current) =>
-        current === "claude" ? "terminal" : "claude",
-      );
+      setSessionType((current) => {
+        const currentIndex = SESSION_TYPE_OPTIONS.findIndex(
+          (option) => option.value === current,
+        );
+        const nextIndex =
+          currentIndex < 0
+            ? 0
+            : (currentIndex + 1) % SESSION_TYPE_OPTIONS.length;
+        return SESSION_TYPE_OPTIONS[nextIndex]?.value ?? "claude";
+      });
     },
     { enabled: Boolean(openProjectCwd), ignoreInputs: false },
   );
@@ -161,6 +184,8 @@ export function NewSessionDialog() {
 
         {sessionType === "claude" ? (
           <LocalClaudeSessionForm key={`claude-${openProjectCwd}`} />
+        ) : sessionType === "ralphLoop" ? (
+          <RalphLoopSessionForm key={`ralph-loop-${openProjectCwd}`} />
         ) : (
           <LocalTerminalSessionForm key={`terminal-${openProjectCwd}`} />
         )}
@@ -408,6 +433,292 @@ function LocalClaudeSessionForm() {
               rows={3}
             />
           </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {errorMessage ? (
+        <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+          <AlertCircle className="size-4 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      ) : null}
+
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setOpenProjectCwd(null)}
+          disabled={isPending}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isPending}>
+          {isPending ? "Starting..." : "Create"}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+function RalphLoopSessionForm() {
+  const openProjectCwd = useNewSessionDialogStore((s) => s.openProjectCwd)!;
+  const setOpenProjectCwd = useNewSessionDialogStore(
+    (s) => s.setOpenProjectCwd,
+  );
+  const project = useAppState(
+    (state) =>
+      state.projects.find((item) => item.path === openProjectCwd) ?? null,
+  );
+  const projectPath = project?.path ?? openProjectCwd;
+  const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
+
+  const [objectivePrompt, setObjectivePrompt] = useState(
+    DEFAULT_RALPH_LOOP_OBJECTIVE_PROMPT,
+  );
+  const [sessionName, setSessionName] = useState("");
+  const [model, setModel] = useState<ClaudeModel>(
+    project?.defaultModel ?? "opus",
+  );
+  const [effort, setEffort] = useState<ClaudeEffort | undefined>(
+    project?.defaultEffort,
+  );
+  const [permissionMode, setPermissionMode] =
+    useState<ClaudePermissionMode>("yolo");
+  const [systemPrompt, setSystemPrompt] = useState(
+    project?.defaultSystemPrompt ?? "",
+  );
+  const [maxIterations, setMaxIterations] = useState("20");
+  const [maxConsecutiveFailures, setMaxConsecutiveFailures] = useState("3");
+  const [backoffInitialMs, setBackoffInitialMs] = useState("3000");
+  const [backoffMaxMs, setBackoffMaxMs] = useState("60000");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const toOptionalPositiveInt = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return null;
+    }
+    return parsed;
+  };
+
+  const toOptionalNonNegativeInt = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return null;
+    }
+    return parsed;
+  };
+
+  const handleError = (error: unknown) => {
+    if (error instanceof Error && error.message.trim()) {
+      setErrorMessage(error.message);
+      return;
+    }
+    setErrorMessage("Failed to start ralph-loop session.");
+  };
+
+  const startSession = useMutation(
+    orpc.sessions.ralphLoop.startSession.mutationOptions({
+      onSuccess: (result) => {
+        setActiveSessionId(result.sessionId);
+        setOpenProjectCwd(null);
+      },
+      onError: handleError,
+    }),
+  );
+
+  const ensureProject = useMutation(
+    orpc.projects.addProject.mutationOptions({
+      onSuccess: () => {
+        startSession.mutate({
+          cwd: projectPath,
+          cols: 80,
+          rows: 24,
+          objectivePrompt: objectivePrompt.trim(),
+          sessionName: sessionName.trim() || undefined,
+          model,
+          effort,
+          permissionMode,
+          systemPrompt: systemPrompt.trim() || undefined,
+          maxIterations: toOptionalPositiveInt(maxIterations) ?? undefined,
+          maxConsecutiveFailures:
+            toOptionalNonNegativeInt(maxConsecutiveFailures) ?? undefined,
+          backoffInitialMs:
+            toOptionalPositiveInt(backoffInitialMs) ?? undefined,
+          backoffMaxMs: toOptionalPositiveInt(backoffMaxMs) ?? undefined,
+        });
+      },
+      onError: handleError,
+    }),
+  );
+
+  const isPending = ensureProject.isPending || startSession.isPending;
+
+  const handleSubmit = () => {
+    setErrorMessage(null);
+
+    const normalizedPath = projectPath.trim();
+    if (!normalizedPath) {
+      setErrorMessage("Project path is required.");
+      return;
+    }
+
+    if (!objectivePrompt.trim()) {
+      setErrorMessage("Objective prompt is required.");
+      return;
+    }
+
+    ensureProject.mutate({ path: normalizedPath });
+  };
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        handleSubmit();
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="new-ralph-loop-objective">Objective prompt</Label>
+        <Textarea
+          id="new-ralph-loop-objective"
+          autoFocus
+          placeholder="Describe the objective for autonomous iterations"
+          value={objectivePrompt}
+          onChange={(event) => {
+            setObjectivePrompt(event.target.value);
+          }}
+          rows={4}
+        />
+      </div>
+
+      <PermissionModeToggleGroup
+        label="Permission mode"
+        permissionMode={permissionMode}
+        onPermissionModeChange={(value) => {
+          setPermissionMode(value);
+        }}
+      />
+
+      <Collapsible>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="flex w-full items-center justify-between px-2"
+          >
+            <span className="text-sm font-medium">Advanced settings</span>
+            <ChevronsUpDown className="size-4" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-4 pt-2">
+          <EffortToggleGroup
+            label="Effort"
+            effort={effort}
+            onEffortChange={setEffort}
+          />
+
+          <div className="space-y-2">
+            <Label htmlFor="new-ralph-loop-name">Session name (optional)</Label>
+            <Input
+              id="new-ralph-loop-name"
+              placeholder="Leave blank for generated name"
+              value={sessionName}
+              onChange={(event) => {
+                setSessionName(event.target.value);
+              }}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Model</Label>
+            <Select
+              value={model}
+              onValueChange={(value) => {
+                setModel(value as ClaudeModel);
+              }}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MODEL_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="new-ralph-loop-system-prompt">
+              System prompt (optional)
+            </Label>
+            <Textarea
+              id="new-ralph-loop-system-prompt"
+              placeholder="Custom system prompt passed via --system-prompt"
+              value={systemPrompt}
+              onChange={(event) => {
+                setSystemPrompt(event.target.value);
+              }}
+              rows={3}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="new-ralph-loop-max-iterations">
+                Max iterations
+              </Label>
+              <Input
+                id="new-ralph-loop-max-iterations"
+                value={maxIterations}
+                onChange={(event) => {
+                  setMaxIterations(event.target.value);
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-ralph-loop-max-failures">
+                Max consecutive failures
+              </Label>
+              <Input
+                id="new-ralph-loop-max-failures"
+                value={maxConsecutiveFailures}
+                onChange={(event) => {
+                  setMaxConsecutiveFailures(event.target.value);
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-ralph-loop-backoff-initial">
+                Initial backoff (ms)
+              </Label>
+              <Input
+                id="new-ralph-loop-backoff-initial"
+                value={backoffInitialMs}
+                onChange={(event) => {
+                  setBackoffInitialMs(event.target.value);
+                }}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="new-ralph-loop-backoff-max">
+                Max backoff (ms)
+              </Label>
+              <Input
+                id="new-ralph-loop-backoff-max"
+                value={backoffMaxMs}
+                onChange={(event) => {
+                  setBackoffMaxMs(event.target.value);
+                }}
+              />
+            </div>
+          </div>
+
         </CollapsibleContent>
       </Collapsible>
 

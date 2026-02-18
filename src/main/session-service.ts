@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { EventPublisher } from "@orpc/client";
 import type { TerminalEvent } from "@shared/terminal-types";
-import { shellQuote } from "@shared/utils";
 import { z } from "zod";
 import {
   type ClaudeEffort,
@@ -12,13 +10,22 @@ import {
   claudePermissionModeSchema,
 } from "../shared/claude-types";
 import { ClaudeActivityMonitor } from "./claude-activity-monitor";
+import {
+  type BuildClaudeArgsInput,
+  type ClaudeStartOptions,
+  buildClaudeArgs,
+} from "./claude-cli";
 import { withDebouncedRunner } from "./debounce-runner";
 import log from "./logger";
 import { procedure } from "./orpc";
 
 import type { SessionStateFileManager } from "./session-state-file-manager";
 import type { SessionTitleManager } from "./session-title-manager";
-import { type SessionStatus, commonSessionSchema } from "./sessions/common";
+import {
+  type SessionStatus,
+  commonSessionSchema,
+  generateUniqueSessionId,
+} from "./sessions/common";
 import type { SessionServiceState } from "./sessions/state";
 import {
   type TerminalSession,
@@ -181,110 +188,9 @@ export const claudeSessionsRouter = {
     }),
 };
 
-function getPermissionArgs(permissionMode?: ClaudePermissionMode): string {
-  if (permissionMode === "yolo") {
-    return "--dangerously-skip-permissions";
-  }
-  if (permissionMode) {
-    return `--permission-mode ${permissionMode}`;
-  }
-  return "";
-}
-
-type ClaudeStartOptions =
-  | {
-      type: "start-new";
-      sessionId: string;
-      forkSessionId?: string;
-    }
-  | {
-      type: "resume";
-      sessionId: string;
-    };
-
-type ClaudeStartupOptions = {
+type ClaudeStartupOptions = Omit<BuildClaudeArgsInput, "stateFilePath"> & {
   cwd: string;
-  permissionMode: ClaudePermissionMode;
-  pluginDir: string | null;
-  model: ClaudeModel;
-  effort?: ClaudeEffort;
-  haikuModelOverride?: ClaudeModel;
-  subagentModelOverride?: ClaudeModel;
-  systemPrompt?: string;
-  stateFilePath: string;
-  initialPrompt?: string;
-  start: ClaudeStartOptions;
 };
-
-function buildStartNewArgs(input: ClaudeStartOptions): string[] {
-  switch (input.type) {
-    case "resume": {
-      return [`--resume ${shellQuote(input.sessionId)}`];
-    }
-    case "start-new": {
-      const args = [`--session-id ${shellQuote(input.sessionId)}`];
-      if (input.forkSessionId) {
-        args.push("--fork-session");
-        args.push(`--resume ${shellQuote(input.forkSessionId)}`);
-      }
-      return args;
-    }
-  }
-}
-
-function buildClaudeArgs(input: ClaudeStartupOptions): {
-  args: string[];
-  env: Record<string, string>;
-} {
-  const args: string[] = [];
-
-  const permissionArg = getPermissionArgs(input.permissionMode);
-  args.push(permissionArg);
-
-  if (input.pluginDir) {
-    args.push(`--plugin-dir ${shellQuote(input.pluginDir)}`);
-  }
-
-  if (input.model) {
-    args.push(`--model ${input.model}`);
-  }
-
-  if (input.effort) {
-    args.push(`--effort ${input.effort}`);
-  }
-
-  if (input.systemPrompt?.trim()) {
-    args.push(`--system-prompt ${shellQuote(input.systemPrompt)}`);
-  }
-
-  if (input.initialPrompt?.trim()) {
-    args.push(shellQuote(input.initialPrompt));
-  }
-
-  args.push(...buildStartNewArgs(input.start));
-
-  const env: Record<string, string> = {
-    CLAUDE_UI_STATE_FILE: input.stateFilePath,
-    CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: "true",
-    CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1",
-    DISABLE_BUG_COMMAND: "1",
-    DISABLE_ERROR_REPORTING: "1",
-    DISABLE_TELEMETRY: "1",
-  };
-
-  if (input.haikuModelOverride) {
-    env.ANTHROPIC_DEFAULT_HAIKU_MODEL = input.haikuModelOverride;
-  }
-
-  if (input.subagentModelOverride) {
-    env.CLAUDE_CODE_SUBAGENT_MODEL = input.subagentModelOverride;
-  }
-
-  return {
-    args: args.filter(Boolean),
-    env,
-  };
-}
 
 function getDefaultSessionTitle(sessionId: string): string {
   return `Session ${sessionId.substring(0, 8)}`;
@@ -377,7 +283,7 @@ export class SessionsServiceNew {
     const sessionId = generateUniqueSessionId();
     const sessionName = sessionInput.sessionName?.trim();
 
-    const startupOptions: Omit<ClaudeStartupOptions, "stateFilePath"> = {
+    const startupOptions: ClaudeStartupOptions = {
       cwd: sessionInput.cwd,
       model: sessionInput.model ?? "opus",
       effort: sessionInput.effort,
@@ -612,7 +518,6 @@ export class SessionsServiceNew {
       systemPrompt: opts.systemPrompt,
       stateFilePath,
       initialPrompt: effectiveInitialPrompt,
-      cwd: opts.cwd,
     });
     const terminal = createTerminalSession({
       onData: ({ chunk }) => {
@@ -755,8 +660,4 @@ export class SessionsServiceNew {
       stream: this.eventPublisher.subscribe(sessionId, { signal }),
     };
   }
-}
-
-function generateUniqueSessionId(): string {
-  return randomUUID();
 }

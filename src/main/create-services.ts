@@ -11,6 +11,7 @@ import { SessionsServiceNew } from "./session-service";
 import { SessionStateFileManager } from "./session-state-file-manager";
 import { SessionTitleManager } from "./session-title-manager";
 import { LocalTerminalSessionsManager } from "./sessions/local-terminal.session";
+import { RalphLoopSessionsManager } from "./sessions/ralph-loop.session";
 import {
   defineSessionServiceState,
   defineSessionStatePersistence,
@@ -101,6 +102,11 @@ export async function createServices(options: CreateServicesOptions) {
   const localTerminalSessionsManager = new LocalTerminalSessionsManager(
     sessionsState,
   );
+  const ralphLoopSessionsManager = new RalphLoopSessionsManager({
+    pluginDir: managedPluginDir,
+    state: sessionsState,
+    stateFileManager,
+  });
 
   const stateService = new StateOrchestrator({
     serviceStates: {
@@ -116,6 +122,9 @@ export async function createServices(options: CreateServicesOptions) {
   });
 
   shutdownDisposable.addDisposable(async () => await sessionsService.dispose());
+  shutdownDisposable.addDisposable(
+    async () => await ralphLoopSessionsManager.dispose(),
+  );
   shutdownDisposable.addDisposable(() => stateService.dispose());
   shutdownDisposable.addDisposable(() => persistenceService.dispose());
 
@@ -130,6 +139,7 @@ export async function createServices(options: CreateServicesOptions) {
     sessions: {
       state: sessionsState,
       localTerminal: localTerminalSessionsManager,
+      ralphLoop: ralphLoopSessionsManager,
     },
   };
 }

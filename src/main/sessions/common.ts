@@ -1,4 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
+
+export function generateUniqueSessionId(): string {
+  return randomUUID();
+}
 
 export const sessionStatusSchema = z.enum([
   "idle",

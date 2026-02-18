@@ -30,3 +30,12 @@ yarn.lock
 /test-results/
 /playwright-report/
 /playwright/.cache/
+
+.claude/commands/opsx/
+.claude/skills/openspec-*/
+
+.codex/commands/opsx/
+.codex/skills/openspec-*/
+
+.cursor/commands/opsx-*
+.cursor/skills/openspec-*/

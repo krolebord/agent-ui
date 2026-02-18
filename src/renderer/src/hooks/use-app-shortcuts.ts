@@ -140,6 +140,11 @@ export function useAppShortcuts(): void {
             sessionId: deletingSessionId,
           });
           break;
+        case "ralph-loop":
+          void orpc.sessions.ralphLoop.deleteSession.call({
+            sessionId: deletingSessionId,
+          });
+          break;
       }
       setActiveSessionId(nextSessionId);
     },
