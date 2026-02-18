@@ -151,7 +151,7 @@ export function SessionSidebar() {
 
   return (
     <aside className="flex h-full w-[304px] shrink-0 flex-col border-r border-border/70 bg-black/35 backdrop-blur-xl">
-      <div className="flex items-center gap-1.5 border-b border-border/70 p-2">
+      <div className="flex h-12 items-center gap-1.5 border-b border-border/70 px-2">
         <button
           type="button"
           onClick={openSettingsDialog}

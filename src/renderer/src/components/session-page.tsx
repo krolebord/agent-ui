@@ -112,7 +112,7 @@ function RalphLoopSessionPage({
       resizeTerminal={orpc.sessions.ralphLoop.resizeSessionTerminal.call}
       readOnly={loopReadOnly}
       controls={
-        <header className="flex flex-wrap items-center gap-2 border-b border-border/70 px-2 py-2">
+        <header className="flex h-12 flex-wrap items-center gap-2 border-b border-border/70 px-2">
           <Badge variant="secondary">
             Iteration {session.loopState.currentIteration}/
             {session.startupConfig.maxIterations}
