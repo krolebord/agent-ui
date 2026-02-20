@@ -14,7 +14,7 @@ describe("generateCodexSessionTitle", () => {
   });
 
   it("runs codex exec with expected flags and prompt", async () => {
-    spawnMock.mockResolvedValue({ output: "Refactor auth flow" });
+    spawnMock.mockResolvedValue({ stdout: "Refactor auth flow" });
 
     const result = await generateCodexSessionTitle("Fix auth + add tests");
 
@@ -47,7 +47,9 @@ describe("generateCodexSessionTitle", () => {
   });
 
   it("returns first non-empty output line", async () => {
-    spawnMock.mockResolvedValue({ output: "\n\n  Build release plan  \nextra" });
+    spawnMock.mockResolvedValue({
+      stdout: "\n\n  Build release plan  \nextra",
+    });
 
     const result = await generateCodexSessionTitle("anything");
 
@@ -55,7 +57,19 @@ describe("generateCodexSessionTitle", () => {
   });
 
   it("returns fallback when output is empty", async () => {
-    spawnMock.mockResolvedValue({ output: "   \n" });
+    spawnMock.mockResolvedValue({ stdout: "   \n" });
+
+    const result = await generateCodexSessionTitle("anything");
+
+    expect(result).toBe("Codex Session");
+  });
+
+  it("ignores stderr-only output and returns fallback", async () => {
+    spawnMock.mockResolvedValue({
+      stdout: "   \n",
+      stderr: "OpenAI Codex v0.104.0",
+      output: "OpenAI Codex v0.104.0",
+    });
 
     const result = await generateCodexSessionTitle("anything");
 

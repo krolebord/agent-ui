@@ -38,13 +38,13 @@ export async function generateCodexSessionTitle(
   ];
 
   try {
-    const { output } = await spawn("codex", args, {
+    const { stdout } = await spawn("codex", args, {
       preferLocal: true,
       timeout: 10_000,
       stdin: "ignore",
     });
     const title =
-      output
+      stdout
         .split(/\r?\n/)
         .map((line) => line.trim())
         .find(Boolean) ?? "";
