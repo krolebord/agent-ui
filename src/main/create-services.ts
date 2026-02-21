@@ -3,6 +3,7 @@ import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import { generateCodexSessionTitle } from "./generate-codex-session-title";
 import log from "./logger";
 import { PersistenceOrchestrator } from "./persistence-orchestrator";
+import { PowerSaveBlockerManager } from "./power-save-blocker-manager";
 import {
   defineProjectState,
   defineProjectStatePersistence,
@@ -116,6 +117,7 @@ export async function createServices(options: CreateServicesOptions) {
     state: sessionsState,
     stateFileManager,
   });
+  const powerSaveBlockerManager = new PowerSaveBlockerManager(sessionsState);
 
   const stateService = new StateOrchestrator({
     serviceStates: {
@@ -140,6 +142,7 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(
     async () => await ralphLoopSessionsManager.dispose(),
   );
+  shutdownDisposable.addDisposable(() => powerSaveBlockerManager.dispose());
   shutdownDisposable.addDisposable(() => stateService.dispose());
   shutdownDisposable.addDisposable(() => persistenceService.dispose());
 
