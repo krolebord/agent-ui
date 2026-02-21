@@ -179,7 +179,7 @@ describe("CodexSessionsManager", () => {
     await manager.stopLiveSession(sessionId);
   });
 
-  it("reflects terminal status transitions directly", async () => {
+  it("maps running terminal status to idle session status", async () => {
     const { manager, sessionId, state } = createManager({
       initialPrompt: undefined,
     });
@@ -198,7 +198,7 @@ describe("CodexSessionsManager", () => {
     expect(session.status).toBe("starting");
 
     callbacks?.onStatusChange("running");
-    expect(session.status).toBe("running");
+    expect(session.status).toBe("idle");
 
     callbacks?.onStatusChange("stopping");
     expect(session.status).toBe("stopping");
@@ -230,10 +230,10 @@ describe("CodexSessionsManager", () => {
     expect(session.status).toBe("idle");
 
     callbacks?.onStatusChange("running");
-    expect(session.status).toBe("running");
+    expect(session.status).toBe("idle");
 
     callbacks?.onData({ chunk: "still working...", bufferedOutput: "..." });
-    expect(session.status).toBe("running");
+    expect(session.status).toBe("idle");
   });
 
   it("dispose stops all live sessions", async () => {
