@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionStateFileManager } from "../../src/main/session-state-file-manager";
 import {
-  type RalphLoopSessionData,
-  RalphLoopSessionsManager,
   buildRalphLoopPrompt,
   canResumeAutonomousLoop,
   evaluateStopHookOutcome,
   extractTranscriptPathFromStopHook,
   hasCompleteMarkerInAssistantText,
   hasReachedConsecutiveFailureLimit,
+  type RalphLoopSessionData,
+  RalphLoopSessionsManager,
   readLastAssistantTextFromTranscript,
 } from "../../src/main/sessions/ralph-loop.session";
 import type { SessionServiceState } from "../../src/main/sessions/state";

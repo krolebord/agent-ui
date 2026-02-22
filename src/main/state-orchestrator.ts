@@ -16,7 +16,7 @@ interface StateOrchestratorOptions<StateMap extends SyncStateMap> {
   serviceStates: StateMap;
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+// biome-ignore lint/suspicious/noExplicitAny: map accepts heterogeneous service states
 type SyncStateMap = Record<string, ServiceState<string, any>>;
 
 export type SyncStateUpdateEvent = {
@@ -91,7 +91,7 @@ export class StateOrchestrator<State extends SyncStateMap> {
     }
 
     const handleStateChange = (
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+      // biome-ignore lint/suspicious/noExplicitAny: handler receives events from any service state
       event: TypedEvent<ServiceStateUpdateEvent<any>>,
     ) => {
       const scopedPatch = event.payload.patch.map((patch) => ({

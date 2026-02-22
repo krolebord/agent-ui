@@ -28,8 +28,8 @@ import {
 } from "@renderer/components/ui/toggle-group";
 import { orpc } from "@renderer/orpc-client";
 import {
-  MODEL_OPTIONS,
   getProjectNameFromPath,
+  MODEL_OPTIONS,
 } from "@renderer/services/terminal-session-selectors";
 import type {
   ClaudeEffort,

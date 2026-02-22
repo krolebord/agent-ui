@@ -1,21 +1,23 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.4.4/schema.json",
   "vcs": {
     "enabled": false,
     "clientKind": "git",
     "useIgnoreFile": true
   },
   "files": {
-    "ignore": [
-      "dist",
-      "dist-electron",
-      ".vite",
-      "node_modules",
-      ".vscode",
-      ".github",
-      "build",
-      "electron",
-      "public"
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/dist-electron",
+      "!**/.vite",
+      "!**/node_modules",
+      "!**/.vscode",
+      "!**/.github",
+      "!**/build",
+      "!**/electron",
+      "!**/public",
+      "!**/release"
     ]
   },
   "formatter": {
@@ -23,10 +25,28 @@
     "indentStyle": "space",
     "indentWidth": 2
   },
+  "css": {
+    "parser": {
+      "cssModules": false,
+      "tailwindDirectives": true
+    }
+  },
   "linter": {
     "enabled": true,
     "rules": {
       "recommended": true
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/terminal-pane.tsx"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useHookAtTopLevel": "off"
+          }
+        }
+      }
+    }
+  ]
 }

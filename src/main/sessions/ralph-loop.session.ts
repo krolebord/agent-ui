@@ -9,11 +9,12 @@ import {
   claudePermissionModeSchema,
 } from "../../shared/claude-types";
 import type { ClaudeActivityMonitor } from "../claude-activity-monitor";
-import { type ClaudeStartOptions, buildClaudeArgs } from "../claude-cli";
+import { buildClaudeArgs, type ClaudeStartOptions } from "../claude-cli";
 import { getUsage as getClaudeUsage } from "../claude-usage";
 import log from "../logger";
 import { procedure } from "../orpc";
 import type { SessionStateFileManager } from "../session-state-file-manager";
+import type { SessionTitleManager } from "../session-title-manager";
 import type { TerminalSession } from "../terminal-session";
 import { commonSessionSchema, generateUniqueSessionId } from "./common";
 import {
@@ -147,10 +148,13 @@ interface RalphLoopSessionRecord {
   stopHookTranscriptPath?: string;
 }
 
+const DEFAULT_RALPH_LOOP_TITLE_PREFIX = "Ralph Loop ";
+
 interface RalphLoopSessionsManagerOptions {
   pluginDir: string | null;
   state: SessionServiceState;
   stateFileManager: SessionStateFileManager;
+  titleManager?: SessionTitleManager;
 }
 
 export const ralphLoopRouter = {
@@ -253,7 +257,8 @@ export class RalphLoopSessionsManager {
 
     const sessionId = generateUniqueSessionId();
     const title =
-      input.sessionName?.trim() || `Ralph Loop ${sessionId.slice(0, 8)}`;
+      input.sessionName?.trim() ||
+      `${DEFAULT_RALPH_LOOP_TITLE_PREFIX}${sessionId.slice(0, 8)}`;
 
     const newSession: RalphLoopSessionData = {
       sessionId,
@@ -288,6 +293,10 @@ export class RalphLoopSessionsManager {
     this.options.state.updateState((state) => {
       state[sessionId] = newSession;
     });
+
+    if (!input.sessionName?.trim()) {
+      this.maybeGenerateTitle(sessionId, input.objectivePrompt);
+    }
 
     if (input.cols || input.rows) {
       this.terminalSizes.set(sessionId, {
@@ -422,6 +431,8 @@ export class RalphLoopSessionsManager {
     this.terminalSizes.delete(sessionId);
     this.manualStopRequested.delete(sessionId);
 
+    this.options.titleManager?.forget(sessionId);
+
     this.options.state.updateState((state) => {
       delete state[sessionId];
     });
@@ -436,6 +447,8 @@ export class RalphLoopSessionsManager {
     this.updateSession(sessionId, (session) => {
       session.title = nextTitle;
     });
+
+    this.options.titleManager?.forget(sessionId);
   }
 
   async resizeSessionTerminal(input: z.infer<typeof terminalResizeSchema>) {
@@ -458,6 +471,25 @@ export class RalphLoopSessionsManager {
       bufferedOutput: this.getSession(sessionId)?.bufferedOutput ?? "",
       stream: this.eventPublisher.subscribe(sessionId, { signal }),
     };
+  }
+
+  private maybeGenerateTitle(sessionId: string, objectivePrompt: string) {
+    this.options.titleManager?.maybeGenerate({
+      sessionId,
+      prompt: objectivePrompt,
+      sessionExists: () => {
+        const session = this.options.state.state[sessionId];
+        return !!session && session.type === "ralph-loop";
+      },
+      onTitleReady: (title) => {
+        this.updateSession(sessionId, (session) => {
+          if (!session.title.startsWith(DEFAULT_RALPH_LOOP_TITLE_PREFIX)) {
+            return;
+          }
+          session.title = title;
+        });
+      },
+    });
   }
 
   async dispose() {

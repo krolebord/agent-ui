@@ -1,4 +1,4 @@
-import { EventPublisher, call } from "@orpc/server";
+import { call, EventPublisher } from "@orpc/server";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
 import { z } from "zod";
@@ -6,8 +6,8 @@ import { withDebouncedRunner } from "../debounce-runner";
 import log from "../logger";
 import { procedure } from "../orpc";
 import {
-  type TerminalSession,
   createTerminalSession,
+  type TerminalSession,
 } from "../terminal-session";
 import { commonSessionSchema, generateUniqueSessionId } from "./common";
 import type { SessionServiceState } from "./state";

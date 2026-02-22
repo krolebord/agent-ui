@@ -2,8 +2,8 @@ import type { ClaudeHookEvent } from "../../shared/claude-types";
 import { ClaudeActivityMonitor } from "../claude-activity-monitor";
 import { withDebouncedRunner } from "../debounce-runner";
 import {
-  type TerminalSession,
   createTerminalSession,
+  type TerminalSession,
 } from "../terminal-session";
 import type { SessionStatus } from "./common";
 

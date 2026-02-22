@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { type ParseError, applyEdits, modify, parse } from "jsonc-parser";
+import { applyEdits, modify, type ParseError, parse } from "jsonc-parser";
 import z from "zod";
 import {
   claudeEffortSchema,

@@ -86,7 +86,7 @@ export class PersistenceOrchestrator {
   }
 
   registerAndHydrate<
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    // biome-ignore lint/suspicious/noExplicitAny: generic registration accepts any state shape
     Registration extends PersistenceRegistration<string, any, any>,
   >(registration: Registration): void {
     const key = registration.serviceState.key;

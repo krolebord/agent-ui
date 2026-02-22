@@ -188,7 +188,10 @@ function RalphLoopSessionPage({
 function ElapsedTimeBadge({
   createdAt,
   completedAt,
-}: { createdAt: number; completedAt?: number }) {
+}: {
+  createdAt: number;
+  completedAt?: number;
+}) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {

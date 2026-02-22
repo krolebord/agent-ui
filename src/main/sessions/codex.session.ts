@@ -1,4 +1,4 @@
-import { EventPublisher, call } from "@orpc/server";
+import { call, EventPublisher } from "@orpc/server";
 import {
   type CodexModelReasoningEffort,
   type CodexPermissionMode,
@@ -8,19 +8,20 @@ import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
 import { z } from "zod";
 import { buildCodexArgs } from "../codex-cli";
+import type { CodexSessionLogFileManager } from "../codex-session-log-file-manager";
 import { getCodexUsage } from "../codex-usage";
 import { withDebouncedRunner } from "../debounce-runner";
 import log from "../logger";
 import { procedure } from "../orpc";
 import { SessionTitleManager } from "../session-title-manager";
 import {
-  type TerminalSession,
   createTerminalSession,
+  type TerminalSession,
 } from "../terminal-session";
 import {
-  type SessionStatus,
   commonSessionSchema,
   generateUniqueSessionId,
+  type SessionStatus,
 } from "./common";
 import type { SessionServiceState } from "./state";
 
@@ -175,6 +176,7 @@ interface CodexSessionRecord {
 interface CodexSessionsManagerOptions {
   state: SessionServiceState;
   titleManager?: SessionTitleManager;
+  sessionLogFileManager?: CodexSessionLogFileManager;
 }
 
 export class CodexSessionsManager {
@@ -186,16 +188,19 @@ export class CodexSessionsManager {
   });
   private readonly sessionsState: SessionServiceState;
   private readonly titleManager: SessionTitleManager;
+  private readonly sessionLogFileManager: CodexSessionLogFileManager | null;
 
   constructor(options: CodexSessionsManagerOptions | SessionServiceState) {
     if ("updateState" in options) {
       this.sessionsState = options;
       this.titleManager = new SessionTitleManager();
+      this.sessionLogFileManager = null;
       return;
     }
 
     this.sessionsState = options.state;
     this.titleManager = options.titleManager ?? new SessionTitleManager();
+    this.sessionLogFileManager = options.sessionLogFileManager ?? null;
   }
 
   createSession(input: z.infer<typeof startCodexSessionSchema>): string {
@@ -332,6 +337,13 @@ export class CodexSessionsManager {
       initialPrompt: isPlanMode ? undefined : initialPrompt,
     });
 
+    const sessionLogPath = this.createSessionLogPath(sessionId);
+    if (sessionLogPath) {
+      disposable.addDisposable(() => {
+        this.sessionLogFileManager?.cleanup(sessionLogPath);
+      });
+    }
+
     const terminal = createTerminalSession({
       onData: ({ chunk }) => {
         this.eventPublisher.publish(sessionId, {
@@ -380,6 +392,12 @@ export class CodexSessionsManager {
       cwd,
       cols,
       rows,
+      env: sessionLogPath
+        ? {
+            CODEX_TUI_RECORD_SESSION: "1",
+            CODEX_TUI_SESSION_LOG_PATH: sessionLogPath,
+          }
+        : undefined,
     });
 
     const session: CodexSessionRecord = {
@@ -439,5 +457,21 @@ export class CodexSessionsManager {
       bufferedOutput: liveSession?.terminal.bufferedOutput ?? "",
       stream: this.eventPublisher.subscribe(sessionId, { signal }),
     };
+  }
+
+  private createSessionLogPath(sessionId: string): string | null {
+    if (!this.sessionLogFileManager) {
+      return null;
+    }
+
+    try {
+      return this.sessionLogFileManager.create(sessionId);
+    } catch (error) {
+      log.error("Failed to initialize codex session log file", {
+        sessionId,
+        error,
+      });
+      return null;
+    }
   }
 }

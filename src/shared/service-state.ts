@@ -1,12 +1,12 @@
 import {
   type Draft,
-  type Patch,
   enablePatches,
+  type Patch,
   produceWithPatches,
 } from "immer";
 import {
-  type TypedEventTarget,
   createTypedEventTarget,
+  type TypedEventTarget,
 } from "./typed-event-target";
 
 const IS_DEV = process.env.NODE_ENV !== "production";

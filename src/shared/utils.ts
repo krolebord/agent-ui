@@ -57,7 +57,7 @@ export function tryCatch<T>(fn: () => T): TryCatchResult<T> {
 }
 
 export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
 export function concatAndTruncate(opts: {

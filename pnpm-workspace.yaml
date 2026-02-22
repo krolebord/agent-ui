@@ -1,4 +1,0 @@
-onlyBuiltDependencies:
-  - electron
-  - node-pty
-  - lefthook

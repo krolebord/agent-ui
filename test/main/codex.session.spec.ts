@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CodexSessionLogFileManager } from "../../src/main/codex-session-log-file-manager";
 import {
   type CodexLocalTerminalSessionData,
   CodexSessionsManager,
@@ -44,9 +45,17 @@ function createSessionsState() {
   return { state, sessionsState };
 }
 
-function createManager(opts?: { initialPrompt?: string }) {
+function createManager(opts?: {
+  initialPrompt?: string;
+  sessionLogFileManager?: CodexSessionLogFileManager;
+}) {
   const { state, sessionsState } = createSessionsState();
-  const manager = new CodexSessionsManager(sessionsState);
+  const manager = opts?.sessionLogFileManager
+    ? new CodexSessionsManager({
+        state: sessionsState,
+        sessionLogFileManager: opts.sessionLogFileManager,
+      })
+    : new CodexSessionsManager(sessionsState);
   const sessionId = "session-codex-1";
   const startupConfig: CodexLocalTerminalSessionData["startupConfig"] = {
     cwd: "/tmp",
@@ -125,11 +134,46 @@ describe("CodexSessionsManager", () => {
     });
 
     const startCall = terminalSessionSpies.start.mock.calls[0]?.[0] as
-      | { args?: string[] }
+      | { args?: string[]; env?: Record<string, string> }
       | undefined;
     expect(startCall?.args?.[0]).toBe("--no-alt-screen");
+    expect(startCall?.env).toBeUndefined();
 
     await manager.stopLiveSession(sessionId);
+  });
+
+  it("sets session recording env vars when a codex log file manager is provided", async () => {
+    const sessionLogFileManager = {
+      create: vi.fn(() => "/tmp/claude-state/codex-session-codex-1.jsonl"),
+      cleanup: vi.fn(),
+    } as unknown as CodexSessionLogFileManager;
+    const { manager, sessionId } = createManager({
+      initialPrompt: undefined,
+      sessionLogFileManager,
+    });
+
+    manager.startLiveSession({
+      sessionId,
+      cwd: "/tmp",
+      modelReasoningEffort: "high",
+      permissionMode: "default",
+      initialPrompt: undefined,
+    });
+
+    const startCall = terminalSessionSpies.start.mock.calls[0]?.[0] as
+      | { env?: Record<string, string> }
+      | undefined;
+    expect(sessionLogFileManager.create).toHaveBeenCalledWith(sessionId);
+    expect(startCall?.env).toEqual({
+      CODEX_TUI_RECORD_SESSION: "1",
+      CODEX_TUI_SESSION_LOG_PATH:
+        "/tmp/claude-state/codex-session-codex-1.jsonl",
+    });
+
+    await manager.stopLiveSession(sessionId);
+    expect(sessionLogFileManager.cleanup).toHaveBeenCalledWith(
+      "/tmp/claude-state/codex-session-codex-1.jsonl",
+    );
   });
 
   it("does not defer-submit prompt when it is not /plan mode", async () => {

@@ -1,11 +1,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fixPath from "fix-path";
+
 fixPath();
 
 import { onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/message-port";
-import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { createServices } from "./create-services";
 import log from "./logger";
 import { orpcRouter } from "./orpc-router";
@@ -133,6 +134,7 @@ app.on("window-all-closed", () => {
 
 let isHandlingBeforeQuit = false;
 let hasCompletedShutdown = false;
+// biome-ignore lint/correctness/noUnusedVariables: assigned via ??= to ensure shutdown runs at most once
 let shutdownPromise: Promise<void> | null = null;
 
 app.on("before-quit", (event) => {

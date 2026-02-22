@@ -1,5 +1,6 @@
 import { createDisposable } from "@shared/utils";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
+import { CodexSessionLogFileManager } from "./codex-session-log-file-manager";
 import { generateCodexSessionTitle } from "./generate-codex-session-title";
 import log from "./logger";
 import { PersistenceOrchestrator } from "./persistence-orchestrator";
@@ -67,6 +68,9 @@ export async function createServices(options: CreateServicesOptions) {
   });
 
   const stateFileManager = new SessionStateFileManager(userDataPath);
+  const codexSessionLogFileManager = new CodexSessionLogFileManager(
+    userDataPath,
+  );
 
   const persistenceService = new PersistenceOrchestrator({
     schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -111,6 +115,7 @@ export async function createServices(options: CreateServicesOptions) {
   const codexSessionsManager = new CodexSessionsManager({
     state: sessionsState,
     titleManager: codexTitleManager,
+    sessionLogFileManager: codexSessionLogFileManager,
   });
   const ralphLoopSessionsManager = new RalphLoopSessionsManager({
     pluginDir: managedPluginDir,

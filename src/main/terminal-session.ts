@@ -1,8 +1,8 @@
 import {
-  type DeferredPromise,
   concatAndTruncate,
   createDeferredPromise,
   createDisposable,
+  type DeferredPromise,
 } from "@shared/utils";
 import { type IPty, spawn } from "node-pty";
 import log from "./logger";

@@ -28,6 +28,7 @@ interface HookMatcherConfig {
 function buildHooksConfig(runtime: HookRuntime) {
   const commandHook = {
     type: "command" as const,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal ${CLAUDE_PLUGIN_ROOT} is a Claude CLI hook variable
     command: `${runtime} "${"${CLAUDE_PLUGIN_ROOT}"}/scripts/emit-state.mjs"`,
     timeout: 5,
   };

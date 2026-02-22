@@ -1,4 +1,4 @@
-import { type Patch, enablePatches } from "immer";
+import { enablePatches, type Patch } from "immer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 enablePatches();

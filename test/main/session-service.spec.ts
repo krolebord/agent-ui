@@ -71,7 +71,8 @@ vi.mock("../../src/main/terminal-session", () => ({
 }));
 
 vi.mock("../../src/main/claude-activity-monitor", () => ({
-  ClaudeActivityMonitor: vi.fn().mockImplementation((callbacks) => {
+  // biome-ignore lint/complexity/useArrowFunction: must be a regular function — called with `new` and arrow functions aren't constructable
+  ClaudeActivityMonitor: vi.fn().mockImplementation(function (callbacks) {
     activityMonitorSpies.callbacks.push({
       ...callbacks,
       onStatusChange: (status: string) => {

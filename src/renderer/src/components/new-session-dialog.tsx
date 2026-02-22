@@ -36,8 +36,8 @@ import {
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { orpc } from "@renderer/orpc-client";
 import {
-  MODEL_OPTIONS,
   getProjectNameFromPath,
+  MODEL_OPTIONS,
 } from "@renderer/services/terminal-session-selectors";
 import type {
   ClaudeEffort,
@@ -49,8 +49,8 @@ import type {
   CodexPermissionMode,
 } from "@shared/codex-types";
 import {
-  type Hotkey,
   formatForDisplay,
+  type Hotkey,
   useHotkey,
 } from "@tanstack/react-hotkeys";
 import { useMutation } from "@tanstack/react-query";

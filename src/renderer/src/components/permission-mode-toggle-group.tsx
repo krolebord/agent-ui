@@ -7,8 +7,8 @@ import {
 import type { ClaudePermissionMode } from "@shared/claude-types";
 import type { CodexPermissionMode } from "@shared/codex-types";
 import {
-  type Hotkey,
   formatForDisplay,
+  type Hotkey,
   useHotkey,
 } from "@tanstack/react-hotkeys";
 

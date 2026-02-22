@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import z from "zod";
 import {
-  PersistenceOrchestrator,
   defineStatePersistence,
+  PersistenceOrchestrator,
 } from "../../src/main/persistence-orchestrator";
 import { defineServiceState } from "../../src/shared/service-state";
 

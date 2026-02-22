@@ -12,8 +12,8 @@ import {
 import type { ClaudeActivityMonitor } from "./claude-activity-monitor";
 import {
   type BuildClaudeArgsInput,
-  type ClaudeStartOptions,
   buildClaudeArgs,
+  type ClaudeStartOptions,
 } from "./claude-cli";
 import { getUsage as getClaudeUsage } from "./claude-usage";
 import log from "./logger";
