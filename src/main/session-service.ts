@@ -145,16 +145,6 @@ export const claudeSessionsRouter = {
       context.sessionsService.renameSession(input.sessionId, input.title);
     }),
   getUsage: procedure.handler(getClaudeUsage),
-  markSeen: procedure
-    .input(z.object({ sessionId: z.string() }))
-    .handler(async ({ input, context }) => {
-      context.sessions.state.updateState((state) => {
-        const session = state[input.sessionId];
-        if (session?.status === "awaiting_user_response") {
-          session.status = "idle";
-        }
-      });
-    }),
   subscribeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string() }))
     .handler(async function* ({ input, context, signal }) {

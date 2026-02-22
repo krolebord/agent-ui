@@ -81,6 +81,21 @@ export function SessionPage() {
           resizeTerminal={orpc.sessions.codex.resizeSessionTerminal.call}
         />
       );
+    case "cursor-agent":
+      return (
+        <TerminalPage
+          session={session}
+          subscribe={(sessionId) =>
+            orpc.sessions.cursorAgent.subscribeToSessionTerminal.call({
+              sessionId,
+            })
+          }
+          writeToTerminal={
+            orpc.sessions.cursorAgent.writeToSessionTerminal.call
+          }
+          resizeTerminal={orpc.sessions.cursorAgent.resizeSessionTerminal.call}
+        />
+      );
     case "ralph-loop":
       return <RalphLoopSessionPage session={session} />;
     default:

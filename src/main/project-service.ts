@@ -14,6 +14,9 @@ import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
 import { writeProjectSettingsFile } from "./project-settings-file";
 
+const cursorAgentModeSchema = z.enum(["plan", "ask"]);
+const cursorAgentPermissionModeSchema = z.enum(["default", "yolo"]);
+
 const localClaudeProjectSettingsSchema = z.object({
   defaultModel: claudeModelSchema.optional().catch(undefined),
   defaultPermissionMode: claudePermissionModeSchema.optional().catch(undefined),
@@ -32,6 +35,12 @@ const localCodexProjectSettingsSchema = z.object({
   configOverrides: z.string().optional().catch(undefined),
 });
 
+const localCursorProjectSettingsSchema = z.object({
+  model: z.string().optional().catch(undefined),
+  mode: cursorAgentModeSchema.optional().catch(undefined),
+  permissionMode: cursorAgentPermissionModeSchema.optional().catch(undefined),
+});
+
 function toOptionalSettings<T extends Record<string, unknown>>(
   value: T | undefined,
 ): T | undefined {
@@ -48,6 +57,7 @@ export const claudeProjectSchema = z.object({
   collapsed: z.boolean().catch(false),
   localClaude: localClaudeProjectSettingsSchema.optional().catch(undefined),
   localCodex: localCodexProjectSettingsSchema.optional().catch(undefined),
+  localCursor: localCursorProjectSettingsSchema.optional().catch(undefined),
 });
 
 function normalizeProjectPath(pathValue: string): string {
@@ -127,6 +137,7 @@ export const projectsRouter = {
         path: projectPathSchema,
         localClaude: localClaudeProjectSettingsSchema.optional(),
         localCodex: localCodexProjectSettingsSchema.optional(),
+        localCursor: localCursorProjectSettingsSchema.optional(),
       }),
     )
     .handler(async ({ input, context }) => {
@@ -136,6 +147,7 @@ export const projectsRouter = {
       const settings = {
         localClaude: toOptionalSettings(input.localClaude),
         localCodex: toOptionalSettings(input.localCodex),
+        localCursor: toOptionalSettings(input.localCursor),
       };
 
       context.projectsState.updateState((projects) => {
@@ -143,6 +155,7 @@ export const projectsRouter = {
         if (!project) return;
         project.localClaude = settings.localClaude;
         project.localCodex = settings.localCodex;
+        project.localCursor = settings.localCursor;
       });
 
       await writeProjectSettingsFile(path, settings);

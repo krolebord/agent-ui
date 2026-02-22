@@ -52,11 +52,21 @@ export interface LocalCodexProjectSettings {
   configOverrides?: string;
 }
 
+export type CursorAgentMode = "plan" | "ask";
+export type CursorAgentPermissionMode = "default" | "yolo";
+
+export interface LocalCursorProjectSettings {
+  model?: string;
+  mode?: CursorAgentMode;
+  permissionMode?: CursorAgentPermissionMode;
+}
+
 export interface ClaudeProject {
   path: string;
   collapsed: boolean;
   localClaude?: LocalClaudeProjectSettings;
   localCodex?: LocalCodexProjectSettings;
+  localCursor?: LocalCursorProjectSettings;
 }
 
 export interface ClaudeHookEvent {

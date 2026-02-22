@@ -35,16 +35,25 @@ import type {
   ClaudeEffort,
   ClaudeModel,
   ClaudePermissionMode,
+  CursorAgentMode,
+  CursorAgentPermissionMode,
 } from "@shared/claude-types";
 import type {
   CodexModelReasoningEffort,
   CodexPermissionMode,
 } from "@shared/codex-types";
+import { cursorModels } from "@shared/cursor-models";
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle } from "lucide-react";
+import type { ComponentType, SVGProps } from "react";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
+import {
+  ClaudeCodeIcon,
+  CodexIcon,
+  CursorAgentIcon,
+} from "./session-type-icons";
 
 export const useProjectDefaultsDialogStore = create(
   combine(
@@ -76,7 +85,25 @@ const CLAUDE_EFFORT_OPTIONS: { value: ClaudeEffort; label: string }[] = [
   { value: "high", label: "High" },
 ];
 
-type ProjectDefaultsTab = "claude" | "codex";
+const CURSOR_AGENT_MODE_OPTIONS: { value: string; label: string }[] = [
+  { value: "default", label: "Default" },
+  { value: "plan", label: "Plan" },
+  { value: "ask", label: "Ask" },
+];
+
+type ProjectDefaultsTab = "claude" | "codex" | "cursor";
+
+const PROJECT_DEFAULTS_TAB_OPTIONS: {
+  value: ProjectDefaultsTab;
+  label: string;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+}[] = [
+  { value: "claude", label: "Claude", icon: ClaudeCodeIcon },
+  { value: "codex", label: "Codex", icon: CodexIcon },
+  { value: "cursor", label: "Cursor", icon: CursorAgentIcon },
+];
+
+const CURSOR_AUTO_MODEL_VALUE = "auto";
 
 export function ProjectDefaultsDialog() {
   const openProjectCwd = useProjectDefaultsDialogStore((s) => s.openProjectCwd);
@@ -112,6 +139,12 @@ export function ProjectDefaultsDialog() {
   const [codexModelReasoningEffort, setCodexModelReasoningEffort] =
     useState<CodexModelReasoningEffort>("high");
   const [codexConfigOverrides, setCodexConfigOverrides] = useState("");
+  const [cursorModel, setCursorModel] = useState("");
+  const [cursorMode, setCursorMode] = useState<CursorAgentMode | undefined>(
+    undefined,
+  );
+  const [cursorPermissionMode, setCursorPermissionMode] =
+    useState<CursorAgentPermissionMode>("default");
   const [activeTab, setActiveTab] = useState<ProjectDefaultsTab>("claude");
 
   const saveMutation = useMutation(
@@ -146,6 +179,9 @@ export function ProjectDefaultsDialog() {
       project.localCodex?.modelReasoningEffort ?? "high",
     );
     setCodexConfigOverrides(project.localCodex?.configOverrides ?? "");
+    setCursorModel(project.localCursor?.model ?? "");
+    setCursorMode(project.localCursor?.mode);
+    setCursorPermissionMode(project.localCursor?.permissionMode ?? "default");
   }, [project]);
 
   if (!openProjectCwd || !project) {
@@ -156,6 +192,11 @@ export function ProjectDefaultsDialog() {
   const projectName = getProjectNameFromPath(projectPath);
   const effectiveClaudePermissionMode =
     claudeDefaultPermissionMode ?? "default";
+  const hasCursorModelOption = cursorModels.some(
+    (option) => option.value === cursorModel,
+  );
+  const cursorModelSelectValue =
+    cursorModel && hasCursorModelOption ? cursorModel : CURSOR_AUTO_MODEL_VALUE;
 
   const closeDialog = () => {
     if (saveMutation.isPending) {
@@ -206,6 +247,11 @@ export function ProjectDefaultsDialog() {
                 modelReasoningEffort: codexModelReasoningEffort,
                 configOverrides: codexConfigOverrides || undefined,
               },
+              localCursor: {
+                model: cursorModel || undefined,
+                mode: cursorMode,
+                permissionMode: cursorPermissionMode,
+              },
             });
           }}
         >
@@ -218,18 +264,29 @@ export function ProjectDefaultsDialog() {
                 setActiveTab(value as ProjectDefaultsTab);
               }
             }}
-            className="w-full"
           >
-            <ToggleGroupItem value="claude" className="flex-1">
-              Claude
-            </ToggleGroupItem>
-            <ToggleGroupItem value="codex" className="flex-1">
-              Codex
-            </ToggleGroupItem>
+            {PROJECT_DEFAULTS_TAB_OPTIONS.map((option) => {
+              const isActive = activeTab === option.value;
+              return (
+                <ToggleGroupItem
+                  key={option.value}
+                  value={option.value}
+                  title={isActive ? undefined : option.label}
+                  className="gap-1.5"
+                >
+                  <option.icon className="size-4 shrink-0" />
+                  {isActive && (
+                    <span className="animate-in fade-in slide-in-from-left-1 duration-150">
+                      {option.label}
+                    </span>
+                  )}
+                </ToggleGroupItem>
+              );
+            })}
           </ToggleGroup>
 
           {activeTab === "claude" ? (
-            <>
+            <div key="claude-defaults-tab" className="space-y-4">
               <div className="text-sm font-medium">Claude defaults</div>
 
               <PermissionModeToggleGroup
@@ -355,9 +412,9 @@ export function ProjectDefaultsDialog() {
                   rows={3}
                 />
               </div>
-            </>
-          ) : (
-            <>
+            </div>
+          ) : activeTab === "codex" ? (
+            <div key="codex-defaults-tab" className="space-y-4">
               <div className="text-sm font-medium">Codex defaults</div>
 
               <CodexPermissionModeToggleGroup
@@ -423,7 +480,96 @@ export function ProjectDefaultsDialog() {
                   rows={3}
                 />
               </div>
-            </>
+            </div>
+          ) : (
+            <div key="cursor-defaults-tab" className="space-y-4">
+              <div className="text-sm font-medium">Cursor defaults</div>
+
+              <div className="space-y-2">
+                <Label>Default permission mode</Label>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  value={cursorPermissionMode}
+                  onValueChange={(value) => {
+                    if (value) {
+                      setCursorPermissionMode(
+                        value as CursorAgentPermissionMode,
+                      );
+                    }
+                  }}
+                  className="w-full"
+                >
+                  <ToggleGroupItem value="default" className="flex-1">
+                    Default
+                  </ToggleGroupItem>
+                  <ToggleGroupItem value="yolo" className="flex-1">
+                    YOLO
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Label>Default model</Label>
+                  <Select
+                    value={cursorModelSelectValue}
+                    onValueChange={(value) => {
+                      setCursorModel(
+                        value === CURSOR_AUTO_MODEL_VALUE ? "" : value,
+                      );
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {cursorModel &&
+                      !hasCursorModelOption &&
+                      cursorModel !== CURSOR_AUTO_MODEL_VALUE ? (
+                        <SelectItem value={cursorModel}>
+                          {`Custom (${cursorModel})`}
+                        </SelectItem>
+                      ) : null}
+                      {cursorModels.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="w-fit shrink-0 space-y-2">
+                  <Label className="whitespace-nowrap">Default mode</Label>
+                  <Select
+                    value={cursorMode ?? "default"}
+                    onValueChange={(value) => {
+                      setCursorMode(
+                        value === "default"
+                          ? undefined
+                          : (value as CursorAgentMode),
+                      );
+                    }}
+                  >
+                    <SelectTrigger className="w-auto min-w-24 whitespace-nowrap">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CURSOR_AGENT_MODE_OPTIONS.map((option) => (
+                        <SelectItem
+                          key={option.value}
+                          value={option.value}
+                          className="whitespace-nowrap"
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
           )}
 
           {saveMutation.error ? (

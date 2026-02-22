@@ -14,7 +14,7 @@ const BUCKET_LABELS: { key: UsageBucketKey; label: string }[] = [
   { key: "seven_day_sonnet", label: "Sonnet" },
 ];
 
-type UsageSource = "claude" | "ralphLoop" | "codex";
+type UsageSource = "claude" | "ralphLoop" | "codex" | "cursorAgent";
 
 type ClaudeUsageData = {
   five_hour: { utilization: number; resets_at: string | null } | null;
@@ -86,7 +86,9 @@ export function UsagePanel() {
         ? "ralphLoop"
         : activeSession?.type === "codex-local-terminal"
           ? "codex"
-          : null;
+          : activeSession?.type === "cursor-agent"
+            ? "cursorAgent"
+            : null;
 
   const claudeQuery = useQuery(
     orpc.sessions.localClaude.getUsage.queryOptions({
@@ -112,12 +114,137 @@ export function UsagePanel() {
     }),
   );
 
+  const cursorAgentQuery = useQuery(
+    orpc.sessions.cursorAgent.getUsage.queryOptions({
+      retry: false,
+      refetchInterval: 60_000,
+      enabled: usageSource === "cursorAgent",
+    }),
+  );
+
   if (!usageSource) {
     return (
       <div className="border-t border-border/70 p-2">
         <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-center text-xs text-zinc-500">
-          Usage is available for Claude, Ralph Loop, and Codex sessions.
+          Usage is available for Claude, Ralph Loop, Codex, and Cursor sessions.
         </div>
+      </div>
+    );
+  }
+
+  if (usageSource === "cursorAgent") {
+    const handleRefetch = async () => {
+      const result = await cursorAgentQuery.refetch();
+      if (result.error) {
+        toast.error(result.error.message);
+      }
+    };
+
+    if (cursorAgentQuery.data?.ok && cursorAgentQuery.data.usage) {
+      const usage = cursorAgentQuery.data.usage;
+      const spent = usage.planUsage.includedSpend / 100;
+      const limit = usage.planUsage.limit / 100;
+      const planPct = limit > 0 ? Math.round((spent / limit) * 100) : 0;
+      const slData = usage.spendLimitUsage;
+      const slIndividualLimit = slData?.individualLimit;
+      const slIndividualUsed = slData?.individualUsed;
+      const cycleEnd = new Date(Number(usage.billingCycleEnd));
+      const cycleEndLabel = Number.isNaN(cycleEnd.getTime())
+        ? null
+        : new Intl.DateTimeFormat(undefined, {
+            month: "short",
+            day: "numeric",
+          }).format(cycleEnd);
+
+      return (
+        <div className="border-t border-border/70 p-2">
+          <div className="space-y-1.5">
+            <div className="space-y-0.5">
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-zinc-400">
+                  Plan
+                  {cycleEndLabel ? (
+                    <span className="text-zinc-500">
+                      {` (resets ${cycleEndLabel})`}
+                    </span>
+                  ) : null}
+                </span>
+                <span className={cn("tabular-nums", getTextColor(planPct))}>
+                  ${spent.toFixed(2)} / ${limit.toFixed(2)}
+                </span>
+              </div>
+              <div className="h-1 rounded-full bg-white/10">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all",
+                    getBarColor(planPct),
+                  )}
+                  style={{ width: `${Math.min(planPct, 100)}%` }}
+                />
+              </div>
+            </div>
+            {slIndividualLimit != null &&
+            slIndividualUsed != null &&
+            slIndividualLimit > 0
+              ? (() => {
+                  const slUsed = slIndividualUsed / 100;
+                  const slLimit = slIndividualLimit / 100;
+                  const slPct = Math.round(
+                    (slIndividualUsed / slIndividualLimit) * 100,
+                  );
+                  return (
+                    <div className="space-y-0.5">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <span className="text-zinc-400">On-demand</span>
+                        <span
+                          className={cn("tabular-nums", getTextColor(slPct))}
+                        >
+                          ${slUsed.toFixed(2)} / ${slLimit.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="h-1 rounded-full bg-white/10">
+                        <div
+                          className={cn(
+                            "h-full rounded-full transition-all",
+                            getBarColor(slPct),
+                          )}
+                          style={{ width: `${Math.min(slPct, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()
+              : null}
+          </div>
+        </div>
+      );
+    }
+
+    if (cursorAgentQuery.isPending) {
+      return null;
+    }
+
+    if (cursorAgentQuery.isFetching) {
+      return (
+        <div className="border-t border-border/70 p-2">
+          <div className="flex items-center justify-center gap-1.5 py-1.5 text-xs text-zinc-400">
+            <LoaderCircle className="size-3.5 animate-spin" />
+            Loading usage...
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="border-t border-border/70 p-2">
+        <button
+          type="button"
+          onClick={() => void handleRefetch()}
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-zinc-100 transition hover:bg-white/10"
+        >
+          <BarChart3 className="size-3.5" />
+          Show Usage
+        </button>
       </div>
     );
   }

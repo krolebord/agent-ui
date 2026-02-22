@@ -9,5 +9,9 @@
   "localCodex": {
     "permissionMode": "yolo",
     "modelReasoningEffort": "high"
+  },
+  "localCursor": {
+    "model": "gpt-5.3-codex-high",
+    "permissionMode": "yolo"
   }
 }

@@ -13,6 +13,9 @@ import {
 } from "../shared/codex-types";
 import log from "./logger";
 
+const cursorAgentModeSchema = z.enum(["plan", "ask"]);
+const cursorAgentPermissionModeSchema = z.enum(["default", "yolo"]);
+
 const SETTINGS_DIR = ".claude-ui";
 const SETTINGS_FILE = "settings.jsonc";
 
@@ -34,6 +37,12 @@ const localCodexProjectSettingsSchema = z.object({
   configOverrides: z.string().optional().catch(undefined),
 });
 
+const localCursorProjectSettingsSchema = z.object({
+  model: z.string().optional().catch(undefined),
+  mode: cursorAgentModeSchema.optional().catch(undefined),
+  permissionMode: cursorAgentPermissionModeSchema.optional().catch(undefined),
+});
+
 function toOptionalSettings<T extends Record<string, unknown>>(
   value: T | undefined,
 ): T | undefined {
@@ -48,6 +57,7 @@ function toOptionalSettings<T extends Record<string, unknown>>(
 export const projectSettingsFileSchema = z.object({
   localClaude: localClaudeProjectSettingsSchema.optional().catch(undefined),
   localCodex: localCodexProjectSettingsSchema.optional().catch(undefined),
+  localCursor: localCursorProjectSettingsSchema.optional().catch(undefined),
 });
 
 export type ProjectSettingsFile = z.infer<typeof projectSettingsFileSchema>;
@@ -136,33 +146,14 @@ export async function writeProjectSettingsFile(
 
   const localClaude = toOptionalSettings(settings.localClaude);
   const localCodex = toOptionalSettings(settings.localCodex);
+  const localCursor = toOptionalSettings(settings.localCursor);
 
-  if (localClaude) {
-    const edits = modify(content, ["localClaude"], localClaude, {
-      isArrayInsertion: false,
-      formattingOptions: { tabSize: 2, insertSpaces: true },
-    });
-    content = applyEdits(content, edits);
-  }
-
-  if (localCodex) {
-    const edits = modify(content, ["localCodex"], localCodex, {
-      isArrayInsertion: false,
-      formattingOptions: { tabSize: 2, insertSpaces: true },
-    });
-    content = applyEdits(content, edits);
-  }
-
-  if (!localClaude) {
-    const edits = modify(content, ["localClaude"], undefined, {
-      isArrayInsertion: false,
-      formattingOptions: { tabSize: 2, insertSpaces: true },
-    });
-    content = applyEdits(content, edits);
-  }
-
-  if (!localCodex) {
-    const edits = modify(content, ["localCodex"], undefined, {
+  for (const [key, value] of [
+    ["localClaude", localClaude],
+    ["localCodex", localCodex],
+    ["localCursor", localCursor],
+  ] as const) {
+    const edits = modify(content, [key], value ?? undefined, {
       isArrayInsertion: false,
       formattingOptions: { tabSize: 2, insertSpaces: true },
     });

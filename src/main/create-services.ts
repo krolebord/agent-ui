@@ -1,6 +1,7 @@
 import { createDisposable } from "@shared/utils";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import { CodexSessionLogFileManager } from "./codex-session-log-file-manager";
+import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { generateCodexSessionTitle } from "./generate-codex-session-title";
 import log from "./logger";
 import { PersistenceOrchestrator } from "./persistence-orchestrator";
@@ -14,6 +15,7 @@ import { SessionsServiceNew } from "./session-service";
 import { SessionStateFileManager } from "./session-state-file-manager";
 import { SessionTitleManager } from "./session-title-manager";
 import { CodexSessionsManager } from "./sessions/codex.session";
+import { CursorAgentSessionsManager } from "./sessions/cursor-agent.session";
 import { LocalTerminalSessionsManager } from "./sessions/local-terminal.session";
 import { RalphLoopSessionsManager } from "./sessions/ralph-loop.session";
 import {
@@ -33,6 +35,12 @@ interface CreateServicesOptions {
 interface ManagedPluginInitializationResult {
   managedPluginDir: string | null;
   pluginWarning: string | null;
+}
+
+interface ManagedCursorHooksInitializationResult {
+  cursorConfigDir: string | null;
+  cursorHookEventsFilePath: string | null;
+  cursorHooksWarning: string | null;
 }
 
 async function initializeManagedPlugin(
@@ -55,12 +63,36 @@ async function initializeManagedPlugin(
   }
 }
 
+async function initializeManagedCursorHooks(
+  userDataPath: string,
+): Promise<ManagedCursorHooksInitializationResult> {
+  try {
+    const managedHooks = await ensureManagedCursorStateHooks(userDataPath);
+    return {
+      cursorConfigDir: managedHooks.configDir,
+      cursorHookEventsFilePath: managedHooks.eventsFilePath,
+      cursorHooksWarning: null,
+    };
+  } catch (error) {
+    return {
+      cursorConfigDir: null,
+      cursorHookEventsFilePath: null,
+      cursorHooksWarning:
+        error instanceof Error
+          ? `Cursor hook monitoring failed to initialize: ${error.message}`
+          : "Cursor hook monitoring failed to initialize.",
+    };
+  }
+}
+
 export type CreateServicesResult = Awaited<ReturnType<typeof createServices>>;
 
 export async function createServices(options: CreateServicesOptions) {
   const { userDataPath, getMainWindow } = options;
   const { managedPluginDir, pluginWarning } =
     await initializeManagedPlugin(userDataPath);
+  const { cursorConfigDir, cursorHookEventsFilePath, cursorHooksWarning } =
+    await initializeManagedCursorHooks(userDataPath);
 
   const titleManager = new SessionTitleManager();
   const codexTitleManager = new SessionTitleManager({
@@ -122,6 +154,12 @@ export async function createServices(options: CreateServicesOptions) {
     state: sessionsState,
     stateFileManager,
   });
+  const cursorAgentSessionsManager = new CursorAgentSessionsManager({
+    state: sessionsState,
+    cursorConfigDir,
+    cursorHookEventsFilePath,
+    cursorHooksWarning,
+  });
   const powerSaveBlockerManager = new PowerSaveBlockerManager(sessionsState);
 
   const stateService = new StateOrchestrator({
@@ -147,6 +185,9 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(
     async () => await ralphLoopSessionsManager.dispose(),
   );
+  shutdownDisposable.addDisposable(
+    async () => await cursorAgentSessionsManager.dispose(),
+  );
   shutdownDisposable.addDisposable(() => powerSaveBlockerManager.dispose());
   shutdownDisposable.addDisposable(() => stateService.dispose());
   shutdownDisposable.addDisposable(() => persistenceService.dispose());
@@ -164,6 +205,7 @@ export async function createServices(options: CreateServicesOptions) {
       localTerminal: localTerminalSessionsManager,
       codex: codexSessionsManager,
       ralphLoop: ralphLoopSessionsManager,
+      cursorAgent: cursorAgentSessionsManager,
     },
   };
 }

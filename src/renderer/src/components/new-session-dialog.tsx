@@ -48,6 +48,7 @@ import type {
   CodexModelReasoningEffort,
   CodexPermissionMode,
 } from "@shared/codex-types";
+import { cursorModels } from "@shared/cursor-models";
 import {
   formatForDisplay,
   type Hotkey,
@@ -64,7 +65,11 @@ import type { ComponentType, SVGProps } from "react";
 import { useState } from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
-import { ClaudeCodeIcon, CodexIcon } from "./session-type-icons";
+import {
+  ClaudeCodeIcon,
+  CodexIcon,
+  CursorAgentIcon,
+} from "./session-type-icons";
 
 export const useNewSessionDialogStore = create(
   combine(
@@ -79,7 +84,12 @@ export const useNewSessionDialogStore = create(
   ),
 );
 
-type SessionType = "claude" | "codex" | "ralphLoop" | "terminal";
+type SessionType =
+  | "claude"
+  | "codex"
+  | "cursorAgent"
+  | "ralphLoop"
+  | "terminal";
 
 const SESSION_TYPE_OPTIONS: {
   value: SessionType;
@@ -88,6 +98,7 @@ const SESSION_TYPE_OPTIONS: {
 }[] = [
   { value: "claude", label: "Claude", icon: ClaudeCodeIcon },
   { value: "codex", label: "Codex", icon: CodexIcon },
+  { value: "cursorAgent", label: "Cursor", icon: CursorAgentIcon },
   { value: "ralphLoop", label: "Ralph Loop", icon: Repeat },
   { value: "terminal", label: "Terminal", icon: TerminalSquare },
 ];
@@ -205,24 +216,33 @@ export function NewSessionDialog() {
               setSessionType(value as SessionType);
             }
           }}
-          className="w-full"
         >
-          {SESSION_TYPE_OPTIONS.map((option) => (
-            <ToggleGroupItem
-              key={option.value}
-              value={option.value}
-              className="flex-1 gap-1.5"
-            >
-              <option.icon className="size-4 shrink-0" />
-              {option.label}
-            </ToggleGroupItem>
-          ))}
+          {SESSION_TYPE_OPTIONS.map((option) => {
+            const isActive = sessionType === option.value;
+            return (
+              <ToggleGroupItem
+                key={option.value}
+                value={option.value}
+                title={isActive ? undefined : option.label}
+                className="gap-1.5"
+              >
+                <option.icon className="size-4 shrink-0" />
+                {isActive && (
+                  <span className="animate-in fade-in slide-in-from-left-1 duration-150">
+                    {option.label}
+                  </span>
+                )}
+              </ToggleGroupItem>
+            );
+          })}
         </ToggleGroup>
 
         {sessionType === "claude" ? (
           <LocalClaudeSessionForm key={`claude-${openProjectCwd}`} />
         ) : sessionType === "codex" ? (
           <CodexSessionForm key={`codex-${openProjectCwd}`} />
+        ) : sessionType === "cursorAgent" ? (
+          <CursorAgentSessionForm key={`cursor-agent-${openProjectCwd}`} />
         ) : sessionType === "ralphLoop" ? (
           <RalphLoopSessionForm key={`ralph-loop-${openProjectCwd}`} />
         ) : (
@@ -1006,6 +1026,273 @@ function CodexSessionForm() {
                 setConfigOverrides(event.target.value);
               }}
               rows={3}
+            />
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+
+      {errorMessage ? (
+        <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+          <AlertCircle className="size-4 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      ) : null}
+
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setOpenProjectCwd(null)}
+          disabled={isPending}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isPending}>
+          {isPending ? "Starting..." : "Create"}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+type CursorAgentMode = "default" | "plan" | "ask";
+
+const CURSOR_AGENT_MODE_OPTIONS: {
+  value: CursorAgentMode;
+  label: string;
+  description: string;
+}[] = [
+  { value: "default", label: "Default", description: "Full agent mode" },
+  { value: "plan", label: "Plan", description: "Read-only planning" },
+  { value: "ask", label: "Ask", description: "Q&A, no edits" },
+];
+
+function cycleCursorAgentMode(current: CursorAgentMode): CursorAgentMode {
+  const index = CURSOR_AGENT_MODE_OPTIONS.findIndex(
+    (option) => option.value === current,
+  );
+  return (
+    CURSOR_AGENT_MODE_OPTIONS[(index + 1) % CURSOR_AGENT_MODE_OPTIONS.length]
+      ?.value ?? "default"
+  );
+}
+
+const cycleCursorModeHotkey: Hotkey = "Shift+Tab";
+
+function CursorAgentSessionForm() {
+  const openProjectCwd = useNewSessionDialogStore(
+    (s) => s.openProjectCwd,
+  ) as string;
+  const setOpenProjectCwd = useNewSessionDialogStore(
+    (s) => s.setOpenProjectCwd,
+  );
+  const project = useAppState(
+    (state) =>
+      state.projects.find((item) => item.path === openProjectCwd) ?? null,
+  );
+  const projectPath = project?.path ?? openProjectCwd;
+  const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
+
+  const [initialPrompt, setInitialPrompt] = useState("");
+  const [sessionName, setSessionName] = useState("");
+  const [model, setModel] = useState(project?.localCursor?.model ?? "");
+  const [mode, setMode] = useState<CursorAgentMode>(
+    project?.localCursor?.mode ?? "default",
+  );
+  const [permissionMode, setPermissionMode] = useState<"default" | "yolo">(
+    project?.localCursor?.permissionMode ?? "default",
+  );
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useHotkey(
+    cycleCursorModeHotkey,
+    () => {
+      setMode((current) => cycleCursorAgentMode(current));
+    },
+    {
+      ignoreInputs: false,
+    },
+  );
+
+  const handleError = (error: unknown) => {
+    if (error instanceof Error && error.message.trim()) {
+      setErrorMessage(error.message);
+      return;
+    }
+    setErrorMessage("Failed to start Cursor Agent session.");
+  };
+
+  const startSession = useMutation(
+    orpc.sessions.cursorAgent.startSession.mutationOptions({
+      onSuccess: (result) => {
+        setActiveSessionId(result.sessionId);
+        setOpenProjectCwd(null);
+      },
+      onError: handleError,
+    }),
+  );
+
+  const ensureProject = useMutation(
+    orpc.projects.addProject.mutationOptions({
+      onSuccess: () => {
+        startSession.mutate({
+          cwd: projectPath,
+          cols: 80,
+          rows: 24,
+          sessionName: sessionName || undefined,
+          model: model || undefined,
+          mode: mode === "default" ? undefined : mode,
+          permissionMode: permissionMode,
+          initialPrompt: initialPrompt || undefined,
+        });
+      },
+      onError: handleError,
+    }),
+  );
+
+  const isPending = ensureProject.isPending || startSession.isPending;
+
+  const handleSubmit = () => {
+    setErrorMessage(null);
+
+    const normalizedPath = projectPath.trim();
+    if (!normalizedPath) {
+      setErrorMessage("Project path is required.");
+      return;
+    }
+
+    ensureProject.mutate({ path: normalizedPath });
+  };
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        handleSubmit();
+      }}
+    >
+      <div className="space-y-2">
+        <Label htmlFor="new-cursor-agent-initial-prompt">
+          Initial prompt (optional)
+        </Label>
+        <Textarea
+          id="new-cursor-agent-initial-prompt"
+          autoFocus
+          placeholder="What would you like Cursor Agent to do?"
+          value={initialPrompt}
+          onChange={(event) => {
+            setInitialPrompt(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              handleSubmit();
+            }
+          }}
+          rows={3}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <Label>Mode</Label>
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+            <Kbd>{formatForDisplay(cycleCursorModeHotkey)}</Kbd>
+          </span>
+        </div>
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          value={mode}
+          onValueChange={(value) => {
+            if (value) {
+              setMode(value as CursorAgentMode);
+            }
+          }}
+          className="w-full"
+        >
+          {CURSOR_AGENT_MODE_OPTIONS.map((option) => (
+            <ToggleGroupItem
+              key={option.value}
+              value={option.value}
+              className="flex-1"
+            >
+              {option.label}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </div>
+
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <Label>Model (optional)</Label>
+          <Select
+            value={model || "auto"}
+            onValueChange={(value) => {
+              setModel(value === "auto" ? "" : value);
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {cursorModels.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="w-fit shrink-0 space-y-2">
+          <Label className="whitespace-nowrap">Permission mode</Label>
+          <Select
+            value={permissionMode}
+            onValueChange={(value) => {
+              setPermissionMode(value as "default" | "yolo");
+            }}
+          >
+            <SelectTrigger className="w-auto min-w-28 whitespace-nowrap">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default" className="whitespace-nowrap">
+                Default
+              </SelectItem>
+              <SelectItem value="yolo" className="whitespace-nowrap">
+                YOLO
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <Collapsible>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="flex w-full items-center justify-between px-2"
+          >
+            <span className="text-sm font-medium">Advanced settings</span>
+            <ChevronsUpDown className="size-4" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="space-y-4 pt-2">
+          <div className="space-y-2">
+            <Label htmlFor="new-cursor-agent-session-name">
+              Session name (optional)
+            </Label>
+            <Input
+              id="new-cursor-agent-session-name"
+              placeholder="Leave blank for generated name"
+              value={sessionName}
+              onChange={(event) => {
+                setSessionName(event.target.value);
+              }}
             />
           </div>
         </CollapsibleContent>

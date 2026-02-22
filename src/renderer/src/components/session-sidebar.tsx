@@ -68,6 +68,7 @@ import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
 import {
   ClaudeCodeIcon,
   CodexIcon,
+  CursorAgentIcon,
   type SessionTypeIcon,
 } from "./session-type-icons";
 import { useSettingsStore } from "./settings-dialog";
@@ -135,6 +136,7 @@ const sessionTypeIcon: Record<
   "local-terminal": { icon: TerminalSquare, label: "Terminal" },
   "ralph-loop": { icon: Repeat, label: "Ralph Loop" },
   "codex-local-terminal": { icon: CodexIcon, label: "Codex" },
+  "cursor-agent": { icon: CursorAgentIcon, label: "Cursor Agent" },
 };
 
 type RenamableSessionType = Session["type"];
@@ -203,6 +205,11 @@ export function SessionSidebar() {
             break;
           case "codex-local-terminal":
             await orpc.sessions.codex.deleteSession.call({
+              sessionId: session.sessionId,
+            });
+            break;
+          case "cursor-agent":
+            await orpc.sessions.cursorAgent.deleteSession.call({
               sessionId: session.sessionId,
             });
             break;
@@ -377,6 +384,16 @@ export function SessionSidebar() {
                               }}
                             />
                           );
+                        case "cursor-agent":
+                          return (
+                            <CursorAgentSessionSidebarItem
+                              key={session.sessionId}
+                              sessionId={session.sessionId}
+                              onRenameSession={(target) => {
+                                setRenameTarget(target);
+                              }}
+                            />
+                          );
                         case "ralph-loop":
                           return (
                             <RalphLoopSessionSidebarItem
@@ -421,7 +438,6 @@ function ClaudeLocalTerminalSessionSidebarItem({
   const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
 
   const session = useAppState((x) => x.sessions[sessionId]);
-  const sessions = useAppState((x) => x.sessions);
 
   const deleteSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
@@ -458,20 +474,7 @@ function ClaudeLocalTerminalSessionSidebarItem({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <SessionSidebarItemTrigger
-          sessionId={sessionId}
-          onSessionSelect={(prevSessionId) => {
-            if (
-              prevSessionId &&
-              sessions[prevSessionId]?.type === "claude-local-terminal"
-            ) {
-              orpc.sessions.localClaude.markSeen.call({
-                sessionId: prevSessionId,
-              });
-            }
-            orpc.sessions.localClaude.markSeen.call({ sessionId });
-          }}
-        >
+        <SessionSidebarItemTrigger sessionId={sessionId}>
           {session.status === "stopped" ? (
             <SidebarIconButton
               icon={PlayIcon}
@@ -758,6 +761,111 @@ function CodexLocalTerminalSessionSidebarItem({
   );
 }
 
+function CursorAgentSessionSidebarItem({
+  sessionId,
+  onRenameSession,
+}: {
+  sessionId: string;
+  onRenameSession: (target: RenameSessionTarget) => void;
+}) {
+  const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
+
+  const session = useAppState((x) => x.sessions[sessionId]);
+
+  const resumeSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.cursorAgent.resumeSession.call({ sessionId });
+    },
+  });
+
+  const stopSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.cursorAgent.stopLiveSession.call({ sessionId });
+    },
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      await orpc.sessions.cursorAgent.deleteSession.call({ sessionId });
+    },
+    onSuccess: () => {
+      if (useActiveSessionStore.getState().activeSessionId === sessionId) {
+        setActiveSessionId(null);
+      }
+    },
+  });
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <SessionSidebarItemTrigger sessionId={sessionId}>
+          {session.status === "stopped" ? (
+            <SidebarIconButton
+              icon={PlayIcon}
+              label="Resume session"
+              disabled={resumeSessionMutation.isPending}
+              onClick={() => {
+                resumeSessionMutation.mutate(sessionId);
+              }}
+            />
+          ) : (
+            <SidebarIconButton
+              icon={SquareIcon}
+              label="Stop session"
+              disabled={stopSessionMutation.isPending}
+              onClick={() => {
+                stopSessionMutation.mutate(sessionId);
+              }}
+            />
+          )}
+          <SidebarIconButton
+            icon={TrashIcon}
+            label="Delete session"
+            variant="destructive"
+            disabled={deleteSessionMutation.isPending}
+            onClick={() => {
+              deleteSessionMutation.mutate(sessionId);
+            }}
+          />
+        </SessionSidebarItemTrigger>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          onClick={() => {
+            onRenameSession({
+              sessionId,
+              type: "cursor-agent",
+              title: session.title,
+            });
+          }}
+        >
+          <Pencil className="size-3.5" />
+          Rename session
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(session.sessionId);
+            toast.success("Session ID copied");
+          }}
+        >
+          <Copy className="size-3.5" />
+          Copy session ID
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(session.startupConfig.cwd);
+            toast.success("Working directory copied");
+          }}
+        >
+          <Copy className="size-3.5" />
+          Copy working directory
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 function RalphLoopSessionSidebarItem({
   sessionId,
   onRenameSession,
@@ -916,6 +1024,12 @@ function RenameSessionDialog({
             title: target.title,
           });
           return;
+        case "cursor-agent":
+          await orpc.sessions.cursorAgent.renameSession.call({
+            sessionId: target.sessionId,
+            title: target.title,
+          });
+          return;
         case "ralph-loop":
           await orpc.sessions.ralphLoop.renameSession.call({
             sessionId: target.sessionId,
@@ -1014,12 +1128,8 @@ const SessionSidebarItemTrigger = forwardRef<
   {
     sessionId: string;
     children: React.ReactNode;
-    onSessionSelect?: (prevSessionId: string | null) => void;
   } & React.HTMLAttributes<HTMLLIElement>
->(function SessionSidebarItemTrigger(
-  { sessionId, children, onSessionSelect, ...props },
-  ref,
-) {
+>(function SessionSidebarItemTrigger({ sessionId, children, ...props }, ref) {
   const session = useAppState((x) => x.sessions[sessionId]);
   const isActive = useActiveSessionStore(
     (x) => x.activeSessionId === sessionId,
@@ -1041,7 +1151,10 @@ const SessionSidebarItemTrigger = forwardRef<
           const prevSessionId =
             useActiveSessionStore.getState().activeSessionId;
           setActiveSessionId(sessionId);
-          onSessionSelect?.(prevSessionId !== sessionId ? prevSessionId : null);
+          if (prevSessionId && prevSessionId !== sessionId) {
+            void orpc.sessions.markSeen.call({ sessionId: prevSessionId });
+          }
+          void orpc.sessions.markSeen.call({ sessionId });
         }}
         className={cn(
           "flex w-full items-center justify-start gap-1.5 rounded-md px-1.5 py-1 pr-[3rem] text-sm transition",

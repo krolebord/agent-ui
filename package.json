@@ -14,7 +14,8 @@
     "app:install": "pnpm app:dist:mac:dir && ./scripts/install-mac-app.sh",
     "typecheck": "tsc --noEmit",
     "format": "biome check --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "extract-cursor-models": "bash scripts/extract-cursor-models.sh"
   },
   "dependencies": {
     "@orpc/client": "^1.13.5",
