@@ -81,6 +81,17 @@ export function getSessionLastActivityLabel(
   return `${Math.floor(days / 365)}y`;
 }
 
+export function getVisibleSessionIds(groups: ProjectSessionGroup[]): string[] {
+  const ids: string[] = [];
+  for (const group of groups) {
+    if (group.collapsed) continue;
+    for (const session of group.sessions) {
+      ids.push(session.sessionId);
+    }
+  }
+  return ids;
+}
+
 export function buildProjectSessionGroups(
   state: BuildProjectSessionGroupsInput,
 ): ProjectSessionGroup[] {
