@@ -34,6 +34,7 @@ import {
   ToggleGroupItem,
 } from "@renderer/components/ui/toggle-group";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
+import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { orpc } from "@renderer/orpc-client";
 import {
   getProjectNameFromPath,
@@ -310,10 +311,11 @@ function LocalClaudeSessionForm() {
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
+        const { cols, rows } = getTerminalSize();
         startSession.mutate({
           cwd: projectPath,
-          cols: 80,
-          rows: 24,
+          cols,
+          rows,
           initialPrompt: initialPrompt || undefined,
           sessionName: sessionName || undefined,
           model,
@@ -617,10 +619,11 @@ function RalphLoopSessionForm() {
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
+        const { cols, rows } = getTerminalSize();
         startSession.mutate({
           cwd: projectPath,
-          cols: 80,
-          rows: 24,
+          cols,
+          rows,
           objectivePrompt: objectivePrompt.trim(),
           sessionName: sessionName.trim() || undefined,
           model,
@@ -882,10 +885,11 @@ function CodexSessionForm() {
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
+        const { cols, rows } = getTerminalSize();
         startSession.mutate({
           cwd: projectPath,
-          cols: 80,
-          rows: 24,
+          cols,
+          rows,
           sessionName: sessionName || undefined,
           model: model || undefined,
           modelReasoningEffort,
@@ -1135,10 +1139,11 @@ function CursorAgentSessionForm() {
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
+        const { cols, rows } = getTerminalSize();
         startSession.mutate({
           cwd: projectPath,
-          cols: 80,
-          rows: 24,
+          cols,
+          rows,
           sessionName: sessionName || undefined,
           model: model || undefined,
           mode: mode === "default" ? undefined : mode,
@@ -1360,8 +1365,11 @@ function LocalTerminalSessionForm() {
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
+        const { cols, rows } = getTerminalSize();
         startSession.mutate({
           cwd: projectPath,
+          cols,
+          rows,
           sessionName: sessionName || undefined,
         });
       },

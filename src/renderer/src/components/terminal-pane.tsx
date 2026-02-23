@@ -1,3 +1,4 @@
+import { useTerminalSizeStore } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -103,12 +104,14 @@ export function TerminalPane({
       return true;
     });
 
+    const setTerminalSize = useTerminalSizeStore.getState().setSize;
     const fitAndNotify = () => {
       if (!container.clientWidth || !container.clientHeight) {
         return;
       }
 
       fitAddon.fit();
+      setTerminalSize(terminal.cols, terminal.rows);
       onResizeRef.current(terminal.cols, terminal.rows);
     };
     fitRef.current = fitAndNotify;

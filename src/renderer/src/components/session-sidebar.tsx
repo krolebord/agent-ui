@@ -25,6 +25,7 @@ import { Input } from "@renderer/components/ui/input";
 import { Label } from "@renderer/components/ui/label";
 import { UsagePanel } from "@renderer/components/usage-panel";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
+import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import type { ProjectSessionGroup } from "@renderer/services/terminal-session-selectors";
@@ -452,7 +453,12 @@ function ClaudeLocalTerminalSessionSidebarItem({
 
   const forkSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      return await orpc.sessions.localClaude.forkSession.call({ sessionId });
+      const { cols, rows } = getTerminalSize();
+      return await orpc.sessions.localClaude.forkSession.call({
+        sessionId,
+        cols,
+        rows,
+      });
     },
     onSuccess: (newId) => {
       setActiveSessionId(newId);
@@ -461,7 +467,12 @@ function ClaudeLocalTerminalSessionSidebarItem({
 
   const resumeSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      await orpc.sessions.localClaude.resumeSession.call({ sessionId });
+      const { cols, rows } = getTerminalSize();
+      await orpc.sessions.localClaude.resumeSession.call({
+        sessionId,
+        cols,
+        rows,
+      });
     },
   });
 
@@ -564,7 +575,12 @@ function LocalTerminalSessionSidebarItem({
 
   const resumeSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      await orpc.sessions.localTerminal.resumeSession.call({ sessionId });
+      const { cols, rows } = getTerminalSize();
+      await orpc.sessions.localTerminal.resumeSession.call({
+        sessionId,
+        cols,
+        rows,
+      });
     },
   });
 
@@ -669,7 +685,8 @@ function CodexLocalTerminalSessionSidebarItem({
 
   const resumeSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      await orpc.sessions.codex.resumeSession.call({ sessionId });
+      const { cols, rows } = getTerminalSize();
+      await orpc.sessions.codex.resumeSession.call({ sessionId, cols, rows });
     },
   });
 
@@ -774,7 +791,12 @@ function CursorAgentSessionSidebarItem({
 
   const resumeSessionMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      await orpc.sessions.cursorAgent.resumeSession.call({ sessionId });
+      const { cols, rows } = getTerminalSize();
+      await orpc.sessions.cursorAgent.resumeSession.call({
+        sessionId,
+        cols,
+        rows,
+      });
     },
   });
 
@@ -878,7 +900,12 @@ function RalphLoopSessionSidebarItem({
 
   const resumeLoopMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      await orpc.sessions.ralphLoop.resumeSession.call({ sessionId });
+      const { cols, rows } = getTerminalSize();
+      await orpc.sessions.ralphLoop.resumeSession.call({
+        sessionId,
+        cols,
+        rows,
+      });
     },
   });
 
