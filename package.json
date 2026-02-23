@@ -50,8 +50,13 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "electron",
       "esbuild",
-      "electron"
+      "lefthook",
+      "node-pty"
+    ],
+    "ignoredBuiltDependencies": [
+      "electron-winstaller"
     ]
   },
   "devDependencies": {
