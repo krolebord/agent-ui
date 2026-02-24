@@ -20,6 +20,16 @@ const sessionsRouter = {
         }
       });
     }),
+  markUnseen: procedure
+    .input(z.object({ sessionId: z.string() }))
+    .handler(async ({ input, context }) => {
+      context.sessions.state.updateState((state) => {
+        const session = state[input.sessionId];
+        if (session) {
+          session.status = "awaiting_user_response";
+        }
+      });
+    }),
   localClaude: claudeSessionsRouter,
   localTerminal: localTerminalRouter,
   ralphLoop: ralphLoopRouter,

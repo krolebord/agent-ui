@@ -43,6 +43,7 @@ import {
   CircleDot,
   Copy,
   EllipsisVertical,
+  EyeOff,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -432,6 +433,60 @@ export function SessionSidebar() {
   );
 }
 
+function CommonSessionContextMenuItems({
+  session,
+  onRenameSession,
+}: {
+  session: Session;
+  onRenameSession: (target: RenameSessionTarget) => void;
+}) {
+  return (
+    <>
+      <ContextMenuItem
+        onClick={() => {
+          onRenameSession({
+            sessionId: session.sessionId,
+            type: session.type,
+            title: session.title,
+          });
+        }}
+      >
+        <Pencil className="size-3.5" />
+        Rename session
+      </ContextMenuItem>
+      <ContextMenuItem
+        onClick={() => {
+          void orpc.sessions.markUnseen.call({
+            sessionId: session.sessionId,
+          });
+        }}
+      >
+        <EyeOff className="size-3.5" />
+        Mark as unseen
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        onClick={() => {
+          void navigator.clipboard.writeText(session.sessionId);
+          toast.success("Session ID copied");
+        }}
+      >
+        <Copy className="size-3.5" />
+        Copy session ID
+      </ContextMenuItem>
+      <ContextMenuItem
+        onClick={() => {
+          void navigator.clipboard.writeText(session.startupConfig.cwd);
+          toast.success("Working directory copied");
+        }}
+      >
+        <Copy className="size-3.5" />
+        Copy working directory
+      </ContextMenuItem>
+    </>
+  );
+}
+
 function ClaudeLocalTerminalSessionSidebarItem({
   sessionId,
   onRenameSession,
@@ -529,37 +584,10 @@ function ClaudeLocalTerminalSessionSidebarItem({
           <GitFork className="size-3.5" />
           Fork session
         </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            onRenameSession({
-              sessionId,
-              type: "claude-local-terminal",
-              title: session.title,
-            });
-          }}
-        >
-          <Pencil className="size-3.5" />
-          Rename session
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.sessionId);
-            toast.success("Session ID copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy session ID
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.startupConfig.cwd);
-            toast.success("Working directory copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy working directory
-        </ContextMenuItem>
+        <CommonSessionContextMenuItems
+          session={session}
+          onRenameSession={onRenameSession}
+        />
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -639,37 +667,10 @@ function LocalTerminalSessionSidebarItem({
         </SessionSidebarItemTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem
-          onClick={() => {
-            onRenameSession({
-              sessionId,
-              type: "local-terminal",
-              title: session.title,
-            });
-          }}
-        >
-          <Pencil className="size-3.5" />
-          Rename session
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.sessionId);
-            toast.success("Session ID copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy session ID
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.startupConfig.cwd);
-            toast.success("Working directory copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy working directory
-        </ContextMenuItem>
+        <CommonSessionContextMenuItems
+          session={session}
+          onRenameSession={onRenameSession}
+        />
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -745,37 +746,10 @@ function CodexLocalTerminalSessionSidebarItem({
         </SessionSidebarItemTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem
-          onClick={() => {
-            onRenameSession({
-              sessionId,
-              type: "codex-local-terminal",
-              title: session.title,
-            });
-          }}
-        >
-          <Pencil className="size-3.5" />
-          Rename session
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.sessionId);
-            toast.success("Session ID copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy session ID
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.startupConfig.cwd);
-            toast.success("Working directory copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy working directory
-        </ContextMenuItem>
+        <CommonSessionContextMenuItems
+          session={session}
+          onRenameSession={onRenameSession}
+        />
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -855,37 +829,10 @@ function CursorAgentSessionSidebarItem({
         </SessionSidebarItemTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem
-          onClick={() => {
-            onRenameSession({
-              sessionId,
-              type: "cursor-agent",
-              title: session.title,
-            });
-          }}
-        >
-          <Pencil className="size-3.5" />
-          Rename session
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.sessionId);
-            toast.success("Session ID copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy session ID
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.startupConfig.cwd);
-            toast.success("Working directory copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy working directory
-        </ContextMenuItem>
+        <CommonSessionContextMenuItems
+          session={session}
+          onRenameSession={onRenameSession}
+        />
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -988,37 +935,10 @@ function RalphLoopSessionSidebarItem({
           <PlayIcon className="size-3.5" />
           Run single iteration
         </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            onRenameSession({
-              sessionId,
-              type: "ralph-loop",
-              title: session.title,
-            });
-          }}
-        >
-          <Pencil className="size-3.5" />
-          Rename session
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.sessionId);
-            toast.success("Session ID copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy session ID
-        </ContextMenuItem>
-        <ContextMenuItem
-          onClick={() => {
-            void navigator.clipboard.writeText(session.startupConfig.cwd);
-            toast.success("Working directory copied");
-          }}
-        >
-          <Copy className="size-3.5" />
-          Copy working directory
-        </ContextMenuItem>
+        <CommonSessionContextMenuItems
+          session={session}
+          onRenameSession={onRenameSession}
+        />
       </ContextMenuContent>
     </ContextMenu>
   );
