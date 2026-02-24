@@ -89,14 +89,16 @@ describe("ensureManagedCursorStateHooks", () => {
       "hooks",
       "emit-state.mjs",
     );
-    const managedCommand = `node "${managedScriptPath}"`;
+    // Use a different runtime than what detectHookRuntime may return,
+    // to verify that stale commands are replaced on runtime change.
+    const staleCommand = `node "${managedScriptPath}"`;
 
     const userHooksPath = path.join(homePath, ".cursor", "hooks.json");
     const existingHooksConfig = {
       hooks: {
         sessionStart: [
           { command: "echo keep-existing", timeout: 5 },
-          { command: managedCommand, timeout: 5 },
+          { command: staleCommand, timeout: 5 },
         ],
         beforeReadFile: [{ command: "echo keep-before-read", timeout: 5 }],
       },
@@ -120,14 +122,16 @@ describe("ensureManagedCursorStateHooks", () => {
       mergedConfig.hooks.sessionStart?.map((entry) => entry.command) ?? [];
     expect(sessionStartCommands).toContain("echo keep-existing");
     expect(
-      sessionStartCommands.filter((cmd) => cmd === managedCommand).length,
+      sessionStartCommands.filter((cmd) => cmd.includes(managedScriptPath))
+        .length,
     ).toBe(1);
 
     const beforeReadFileCommands =
       mergedConfig.hooks.beforeReadFile?.map((entry) => entry.command) ?? [];
     expect(beforeReadFileCommands).toContain("echo keep-before-read");
     expect(
-      beforeReadFileCommands.filter((cmd) => cmd === managedCommand).length,
+      beforeReadFileCommands.filter((cmd) => cmd.includes(managedScriptPath))
+        .length,
     ).toBe(1);
   });
 });

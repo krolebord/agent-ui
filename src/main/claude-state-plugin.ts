@@ -1,18 +1,7 @@
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import spawn from "nano-spawn";
+import { detectHookRuntime, type HookRuntime } from "./hook-runtime";
 import log from "./logger";
-
-type HookRuntime = "bun" | "node";
-
-async function detectRuntime(): Promise<HookRuntime> {
-  try {
-    await spawn("bun", ["--version"], { timeout: 3000 });
-    return "bun";
-  } catch {
-    return "node";
-  }
-}
 
 const PLUGIN_VERSION = 1;
 
@@ -154,7 +143,7 @@ export async function ensureManagedClaudeStatePlugin(
   const hooksDir = path.join(pluginRoot, "hooks");
   const scriptsDir = path.join(pluginRoot, "scripts");
 
-  const runtime = await detectRuntime();
+  const runtime = await detectHookRuntime();
 
   await mkdir(pluginDir, { recursive: true });
   await mkdir(hooksDir, { recursive: true });

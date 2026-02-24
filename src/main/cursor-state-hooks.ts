@@ -2,6 +2,7 @@ import { chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { type ParseError, parse } from "jsonc-parser";
+import { detectHookRuntime, type HookRuntime } from "./hook-runtime";
 import log from "./logger";
 
 const HOOK_CONFIG_VERSION = 1;
@@ -33,12 +34,15 @@ function isHookConfigEntry(value: unknown): value is HookConfigEntry {
   );
 }
 
-function buildHookCommand(scriptPath: string): string {
-  return `node "${scriptPath}"`;
+function buildHookCommand(runtime: HookRuntime, scriptPath: string): string {
+  return `${runtime} "${scriptPath}"`;
 }
 
-function buildHooksConfig(scriptPath: string): HookConfig {
-  const command = buildHookCommand(scriptPath);
+function buildHooksConfig(
+  runtime: HookRuntime,
+  scriptPath: string,
+): HookConfig {
+  const command = buildHookCommand(runtime, scriptPath);
   const hook = { command, timeout: 5 };
   return {
     version: HOOK_CONFIG_VERSION,
@@ -83,6 +87,7 @@ function parseHooksConfig(raw: string, filePath: string): HookConfig {
 async function upsertManagedUserHooksConfig(
   userHooksPath: string,
   managedHooksConfig: HookConfig,
+  managedScriptPath: string,
 ): Promise<void> {
   await mkdir(path.dirname(userHooksPath), { recursive: true });
 
@@ -111,12 +116,12 @@ async function upsertManagedUserHooksConfig(
     managedHooksConfig.hooks ?? {},
   )) {
     const managedEntries = managedHookEntries.filter(isHookConfigEntry);
-    const managedCommands = new Set(managedEntries.map((hook) => hook.command));
     const preservedEntries = (nextHooks[hookName] ?? []).filter((entry) => {
       if (!isRecord(entry) || typeof entry.command !== "string") {
         return true;
       }
-      return !managedCommands.has(entry.command);
+      // Match by script path so runtime changes (node→bun) replace the old entry
+      return !entry.command.includes(managedScriptPath);
     });
 
     nextHooks[hookName] = [...preservedEntries, ...managedEntries];
@@ -135,9 +140,9 @@ async function upsertManagedUserHooksConfig(
   );
 }
 
-function buildHookScript(eventsFilePath: string): string {
+function buildHookScript(runtime: HookRuntime, eventsFilePath: string): string {
   const escapedEventsFilePath = JSON.stringify(eventsFilePath);
-  return `#!/usr/bin/env node
+  return `#!/usr/bin/env ${runtime}
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -284,15 +289,17 @@ export async function ensureManagedCursorStateHooks(
   const hooksPath = path.join(configDir, "hooks.json");
   const eventsFilePath = path.join(stateDir, "events.ndjson");
 
+  const runtime = await detectHookRuntime();
+
   await mkdir(hooksDir, { recursive: true });
   await mkdir(stateDir, { recursive: true });
 
-  await writeFile(scriptPath, buildHookScript(eventsFilePath), "utf8");
+  await writeFile(scriptPath, buildHookScript(runtime, eventsFilePath), "utf8");
   if (process.platform !== "win32") {
     await chmod(scriptPath, 0o755);
   }
 
-  const hooksConfig = buildHooksConfig(scriptPath);
+  const hooksConfig = buildHooksConfig(runtime, scriptPath);
   await writeFile(
     hooksPath,
     `${JSON.stringify(hooksConfig, null, 2)}\n`,
@@ -301,6 +308,7 @@ export async function ensureManagedCursorStateHooks(
   await upsertManagedUserHooksConfig(
     path.join(homedir(), ".cursor", "hooks.json"),
     hooksConfig,
+    scriptPath,
   );
   await copyUserCliConfigIfPresent(configDir);
 
@@ -313,6 +321,7 @@ export async function ensureManagedCursorStateHooks(
   log.info("Managed Cursor hooks created", {
     configDir,
     eventsFilePath,
+    runtime,
   });
 
   return {
