@@ -84,7 +84,11 @@ export function TerminalPane({
     const fitAddon = new FitAddon();
 
     terminal.loadAddon(fitAddon);
-    terminal.loadAddon(new WebLinksAddon());
+    terminal.loadAddon(
+      new WebLinksAddon((_event, url) => {
+        window.open(url, "_blank");
+      }),
+    );
     terminal.open(container);
     terminalRef.current = terminal;
 
