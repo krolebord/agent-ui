@@ -105,6 +105,16 @@ export function TerminalPane({
         return false;
       }
 
+      // Let app-level Cmd/Ctrl shortcuts pass through to the document
+      // so @tanstack/hotkeys can handle them (xterm would otherwise
+      // call stopPropagation and swallow the event).
+      if (event.type === "keydown" && (event.metaKey || event.ctrlKey)) {
+        const key = event.key.toLowerCase();
+        if (key === "backspace" || key === "n" || key === "j") {
+          return false;
+        }
+      }
+
       return true;
     });
 
