@@ -1,4 +1,8 @@
 import { createDisposable } from "@shared/utils";
+import {
+  defineAppSettingsPersistence,
+  defineAppSettingsState,
+} from "./app-settings";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import { CodexSessionLogFileManager } from "./codex-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
@@ -108,6 +112,11 @@ export async function createServices(options: CreateServicesOptions) {
     schemaVersion: STORAGE_SCHEMA_VERSION,
   });
 
+  const appSettingsState = defineAppSettingsState();
+  persistenceService.registerAndHydrate(
+    defineAppSettingsPersistence(appSettingsState),
+  );
+
   const projectsState = defineProjectState();
   persistenceService.registerAndHydrate(
     defineProjectStatePersistence(projectsState),
@@ -160,10 +169,14 @@ export async function createServices(options: CreateServicesOptions) {
     cursorHookEventsFilePath,
     cursorHooksWarning,
   });
-  const powerSaveBlockerManager = new PowerSaveBlockerManager(sessionsState);
+  const powerSaveBlockerManager = new PowerSaveBlockerManager(
+    sessionsState,
+    appSettingsState,
+  );
 
   const stateService = new StateOrchestrator({
     serviceStates: {
+      appSettings: appSettingsState,
       projects: projectsState,
       sessions: sessionsState,
     },
@@ -193,6 +206,7 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(() => persistenceService.dispose());
 
   return {
+    appSettingsState,
     projectsState,
     getMainWindow,
     sessionsService,

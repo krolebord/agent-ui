@@ -40,4 +40,10 @@ export const fsRouter = {
     const stateDir = path.join(app.getPath("userData"), "claude-state");
     await shell.openPath(stateDir);
   }),
+  openDevTools: procedure.handler(async ({ context }) => {
+    const mainWindow = context.getMainWindow();
+    if (mainWindow) {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
+  }),
 };

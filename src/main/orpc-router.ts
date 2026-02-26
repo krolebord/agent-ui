@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { appSettingsRouter } from "./app-settings";
 import { fsRouter } from "./fs.router";
 import { procedure } from "./orpc";
 import { projectsRouter } from "./project-service";
@@ -38,6 +39,7 @@ const sessionsRouter = {
 };
 
 export const orpcRouter = {
+  appSettings: appSettingsRouter,
   projects: projectsRouter,
   fs: fsRouter,
   stateSync: stateSyncRouter,

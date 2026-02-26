@@ -8,12 +8,16 @@ import {
   DialogTitle,
 } from "@renderer/components/ui/dialog";
 import { Kbd, KbdGroup } from "@renderer/components/ui/kbd";
+import { Switch } from "@renderer/components/ui/switch";
 import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
 import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
-import { FolderOpen, Keyboard, LoaderCircle } from "lucide-react";
+import { Bug, FolderOpen, Keyboard, LoaderCircle, ScanEye } from "lucide-react";
+import { useState } from "react";
+import { setOptions } from "react-scan";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
+import { useAppState } from "./sync-state-provider";
 
 export const useSettingsStore = create(
   combine(
@@ -48,6 +52,8 @@ export function SettingsDialog() {
         </DialogHeader>
 
         <div className="space-y-4">
+          <PreventSleepToggle />
+
           <OpenLogFolder />
           <OpenStatePluginFolder />
           <OpenSessionFilesFolder />
@@ -77,9 +83,13 @@ export function SettingsDialog() {
         </div>
 
         <DialogFooter className="sm:justify-between" showCloseButton>
-          <span className="text-xs text-muted-foreground self-center">
-            v{__APP_VERSION__}
-          </span>
+          <div className="flex items-center gap-2 self-center">
+            <span className="text-xs text-muted-foreground">
+              v{__APP_VERSION__}
+            </span>
+            <ReactScanToggle />
+            <OpenDevToolsButton />
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -160,5 +170,64 @@ function OpenSessionFilesFolder() {
       isPending={isPending}
       onOpen={() => mutate(undefined)}
     />
+  );
+}
+
+function ReactScanToggle() {
+  const [enabled, setEnabled] = useState(false);
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-6 px-2 text-xs text-muted-foreground"
+      data-active={enabled || undefined}
+      onClick={() => {
+        const next = !enabled;
+        setEnabled(next);
+        setOptions({ enabled: next, showToolbar: next });
+      }}
+    >
+      <ScanEye className="mr-1 size-3" />
+      React Scan {enabled ? "On" : "Off"}
+    </Button>
+  );
+}
+
+function OpenDevToolsButton() {
+  const { mutate } = useMutation(orpc.fs.openDevTools.mutationOptions());
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="h-6 px-2 text-xs text-muted-foreground"
+      onClick={() => mutate(undefined)}
+    >
+      <Bug className="mr-1 size-3" />
+      DevTools
+    </Button>
+  );
+}
+
+function PreventSleepToggle() {
+  const preventSleep = useAppState((s) => s.appSettings.preventSleep);
+  const { mutate } = useMutation(
+    orpc.appSettings.setPreventSleep.mutationOptions(),
+  );
+
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-white/10 px-4 py-3">
+      <div className="space-y-0.5">
+        <div className="text-sm font-medium">Prevent sleep</div>
+        <div className="text-xs text-muted-foreground">
+          Keep display awake while sessions are active
+        </div>
+      </div>
+      <Switch
+        checked={preventSleep}
+        onCheckedChange={(checked) => mutate({ enabled: checked })}
+      />
+    </div>
   );
 }

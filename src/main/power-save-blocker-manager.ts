@@ -1,4 +1,5 @@
 import { powerSaveBlocker } from "electron";
+import type { AppSettingsState } from "./app-settings";
 import log from "./logger";
 import type { SessionServiceState } from "./sessions/state";
 
@@ -8,12 +9,19 @@ export class PowerSaveBlockerManager {
   private blockerId: number | null = null;
   private isDisposed = false;
 
-  constructor(private readonly sessionsState: SessionServiceState) {
+  constructor(
+    private readonly sessionsState: SessionServiceState,
+    private readonly appSettingsState: AppSettingsState,
+  ) {
     this.sessionsState.eventTarget.addEventListener(
       "state-update",
-      this.handleSessionsStateUpdate,
+      this.handleStateUpdate,
     );
-    this.syncWithSessionState();
+    this.appSettingsState.eventTarget.addEventListener(
+      "state-update",
+      this.handleStateUpdate,
+    );
+    this.sync();
   }
 
   dispose() {
@@ -24,25 +32,32 @@ export class PowerSaveBlockerManager {
 
     this.sessionsState.eventTarget.removeEventListener(
       "state-update",
-      this.handleSessionsStateUpdate,
+      this.handleStateUpdate,
+    );
+    this.appSettingsState.eventTarget.removeEventListener(
+      "state-update",
+      this.handleStateUpdate,
     );
     this.stopBlockerIfNeeded();
   }
 
-  private readonly handleSessionsStateUpdate = () => {
-    this.syncWithSessionState();
+  private readonly handleStateUpdate = () => {
+    this.sync();
   };
 
-  private syncWithSessionState() {
+  private sync() {
     if (this.isDisposed) {
       return;
     }
 
-    const shouldBlockPowerSave = Object.values(this.sessionsState.state).some(
+    const hasActiveSessions = Object.values(this.sessionsState.state).some(
       (session) => session.status !== "stopped" && session.status !== "error",
     );
 
-    if (shouldBlockPowerSave) {
+    const shouldBlock =
+      this.appSettingsState.state.preventSleep && hasActiveSessions;
+
+    if (shouldBlock) {
       this.startBlockerIfNeeded();
       return;
     }

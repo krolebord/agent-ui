@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { defineAppSettingsState } from "../../src/main/app-settings";
 import { PowerSaveBlockerManager } from "../../src/main/power-save-blocker-manager";
 import type { SessionStatus } from "../../src/main/sessions/common";
 import { defineSessionServiceState } from "../../src/main/sessions/state";
@@ -45,7 +46,11 @@ describe("PowerSaveBlockerManager", () => {
 
   it("activates blocker when first active session appears", () => {
     const sessionsState = defineSessionServiceState();
-    const manager = new PowerSaveBlockerManager(sessionsState);
+    const appSettingsState = defineAppSettingsState();
+    const manager = new PowerSaveBlockerManager(
+      sessionsState,
+      appSettingsState,
+    );
 
     sessionsState.updateState((state) => {
       state["session-1"] = makeLocalTerminalSession("session-1", "starting");
@@ -62,7 +67,11 @@ describe("PowerSaveBlockerManager", () => {
 
   it("does not re-start while blocker is already active", () => {
     const sessionsState = defineSessionServiceState();
-    const manager = new PowerSaveBlockerManager(sessionsState);
+    const appSettingsState = defineAppSettingsState();
+    const manager = new PowerSaveBlockerManager(
+      sessionsState,
+      appSettingsState,
+    );
 
     sessionsState.updateState((state) => {
       state["session-1"] = makeLocalTerminalSession("session-1", "starting");
@@ -79,7 +88,11 @@ describe("PowerSaveBlockerManager", () => {
 
   it("deactivates blocker when the last active session becomes stopped", () => {
     const sessionsState = defineSessionServiceState();
-    const manager = new PowerSaveBlockerManager(sessionsState);
+    const appSettingsState = defineAppSettingsState();
+    const manager = new PowerSaveBlockerManager(
+      sessionsState,
+      appSettingsState,
+    );
 
     sessionsState.updateState((state) => {
       state["session-1"] = makeLocalTerminalSession("session-1", "running");
@@ -97,7 +110,11 @@ describe("PowerSaveBlockerManager", () => {
 
   it("keeps blocker on when one active session remains", () => {
     const sessionsState = defineSessionServiceState();
-    const manager = new PowerSaveBlockerManager(sessionsState);
+    const appSettingsState = defineAppSettingsState();
+    const manager = new PowerSaveBlockerManager(
+      sessionsState,
+      appSettingsState,
+    );
 
     sessionsState.updateState((state) => {
       state["session-1"] = makeLocalTerminalSession("session-1", "running");
@@ -118,7 +135,11 @@ describe("PowerSaveBlockerManager", () => {
     powerSaveBlockerMock.start
       .mockReturnValueOnce(101)
       .mockReturnValueOnce(102);
-    const manager = new PowerSaveBlockerManager(sessionsState);
+    const appSettingsState = defineAppSettingsState();
+    const manager = new PowerSaveBlockerManager(
+      sessionsState,
+      appSettingsState,
+    );
 
     sessionsState.updateState((state) => {
       state["session-1"] = makeLocalTerminalSession("session-1", "running");
@@ -139,7 +160,11 @@ describe("PowerSaveBlockerManager", () => {
 
   it("dispose stops active blocker and unsubscribes from state updates", () => {
     const sessionsState = defineSessionServiceState();
-    const manager = new PowerSaveBlockerManager(sessionsState);
+    const appSettingsState = defineAppSettingsState();
+    const manager = new PowerSaveBlockerManager(
+      sessionsState,
+      appSettingsState,
+    );
 
     sessionsState.updateState((state) => {
       state["session-1"] = makeLocalTerminalSession("session-1", "running");
@@ -159,7 +184,11 @@ describe("PowerSaveBlockerManager", () => {
 
   it("dispose is safe when blocker was never started", () => {
     const sessionsState = defineSessionServiceState();
-    const manager = new PowerSaveBlockerManager(sessionsState);
+    const appSettingsState = defineAppSettingsState();
+    const manager = new PowerSaveBlockerManager(
+      sessionsState,
+      appSettingsState,
+    );
 
     manager.dispose();
     manager.dispose();
