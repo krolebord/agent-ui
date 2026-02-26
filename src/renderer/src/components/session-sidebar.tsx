@@ -1106,7 +1106,7 @@ const SessionSidebarItemTrigger = forwardRef<
           "flex w-full items-center justify-start gap-1.5 rounded-md px-1.5 py-1 pr-[3rem] text-sm transition",
           isActive
             ? "bg-white/15 text-white"
-            : session.status === "stopped" || session.status === "idle"
+            : session.status === "stopped"
               ? "text-zinc-500 hover:bg-white/8 hover:text-zinc-300"
               : "text-zinc-300 hover:bg-white/8 hover:text-zinc-100",
         )}
