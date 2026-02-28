@@ -24,6 +24,9 @@ release
 *.sln
 *.sw?
 
+# Bundle analyzer
+stats.html
+
 #lockfile
 package-lock.json
 yarn.lock

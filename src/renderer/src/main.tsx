@@ -1,14 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { scan } from "react-scan";
 import App from "./App";
 import "./index.css";
 import { toast } from "sonner";
 import { SyncStateProvider } from "./components/sync-state-provider";
 import { createSyncStateStore } from "./services/state-sync-client";
-
-scan({ enabled: false, showToolbar: false });
 
 const queryClient = new QueryClient({
   defaultOptions: {

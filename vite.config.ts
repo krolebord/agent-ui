@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { visualizer } from "rollup-plugin-visualizer";
 import { defineConfig } from "vite";
 import electron from "vite-plugin-electron/simple";
 import pkg from "./package.json";
@@ -34,6 +35,12 @@ export default defineConfig(({ command }) => {
     plugins: [
       react(),
       tailwindcss(),
+      !!process.env.ANALYZE &&
+        visualizer({
+          open: true,
+          filename: "stats.html",
+          gzipSize: true,
+        }),
       electron({
         main: {
           entry: "src/main/index.ts",

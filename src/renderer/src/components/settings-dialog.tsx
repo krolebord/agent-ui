@@ -12,9 +12,7 @@ import { Switch } from "@renderer/components/ui/switch";
 import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
 import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
-import { Bug, FolderOpen, Keyboard, LoaderCircle, ScanEye } from "lucide-react";
-import { useState } from "react";
-import { setOptions } from "react-scan";
+import { Bug, FolderOpen, Keyboard, LoaderCircle } from "lucide-react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import { useAppState } from "./sync-state-provider";
@@ -87,7 +85,6 @@ export function SettingsDialog() {
             <span className="text-xs text-muted-foreground">
               v{__APP_VERSION__}
             </span>
-            <ReactScanToggle />
             <OpenDevToolsButton />
           </div>
         </DialogFooter>
@@ -170,27 +167,6 @@ function OpenSessionFilesFolder() {
       isPending={isPending}
       onOpen={() => mutate(undefined)}
     />
-  );
-}
-
-function ReactScanToggle() {
-  const [enabled, setEnabled] = useState(false);
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="h-6 px-2 text-xs text-muted-foreground"
-      data-active={enabled || undefined}
-      onClick={() => {
-        const next = !enabled;
-        setEnabled(next);
-        setOptions({ enabled: next, showToolbar: next });
-      }}
-    >
-      <ScanEye className="mr-1 size-3" />
-      React Scan {enabled ? "On" : "Off"}
-    </Button>
   );
 }
 
