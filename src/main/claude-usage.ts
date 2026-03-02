@@ -3,13 +3,12 @@ import * as z from "zod";
 import log from "./logger";
 
 const CredentialsSchema = z.object({
-  claudeAiOauth: z.object({
-    accessToken: z.string(),
-    refreshToken: z.string(),
-    expiresAt: z.number(),
-    scopes: z.array(z.string()),
-    subscriptionType: z.string(),
-  }),
+  claudeAiOauth: z
+    .object({
+      accessToken: z.string(),
+      expiresAt: z.number(),
+    })
+    .passthrough(),
 });
 
 const UsageBucketSchema = z

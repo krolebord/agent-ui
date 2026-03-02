@@ -14,11 +14,34 @@ const CURSOR_VSCDB_PATH = join(
   "state.vscdb",
 );
 
-const PlanUsageSchema = z.object({
-  includedSpend: z.number(),
-  limit: z.number(),
-  totalPercentUsed: z.number(),
-});
+const PlanUsageSchema = z
+  .object({
+    includedSpend: z.number().optional(),
+    remaining: z.number().optional(),
+    limit: z.number(),
+    totalPercentUsed: z.number().optional(),
+  })
+  .transform((planUsage, ctx) => {
+    if (planUsage.includedSpend == null && planUsage.remaining == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["includedSpend"],
+        message: "Expected planUsage.includedSpend or planUsage.remaining",
+      });
+      return z.NEVER;
+    }
+    const includedSpend =
+      planUsage.includedSpend ??
+      Math.max(planUsage.limit - (planUsage.remaining ?? 0), 0);
+    const totalPercentUsed =
+      planUsage.totalPercentUsed ??
+      (planUsage.limit > 0 ? (includedSpend / planUsage.limit) * 100 : 0);
+    return {
+      ...planUsage,
+      includedSpend,
+      totalPercentUsed,
+    };
+  });
 
 const SpendLimitUsageSchema = z.object({
   individualLimit: z.number().optional(),
