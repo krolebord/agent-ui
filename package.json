@@ -25,6 +25,8 @@
     "extract-cursor-models": "bash scripts/extract-cursor-models.sh"
   },
   "dependencies": {
+    "@dnd-kit/dom": "^0.3.2",
+    "@dnd-kit/react": "^0.3.2",
     "@orpc/client": "^1.13.5",
     "@orpc/server": "^1.13.5",
     "@orpc/tanstack-query": "^1.13.5",

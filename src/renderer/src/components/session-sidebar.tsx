@@ -1,3 +1,7 @@
+import { PointerActivationConstraints } from "@dnd-kit/dom";
+import type { DragEndEvent } from "@dnd-kit/react";
+import { DragDropProvider, PointerSensor } from "@dnd-kit/react";
+import { useSortable } from "@dnd-kit/react/sortable";
 import { Button } from "@renderer/components/ui/button";
 import {
   ContextMenu,
@@ -64,7 +68,7 @@ import {
   TrashIcon,
   TriangleAlert,
 } from "lucide-react";
-import { forwardRef, useEffect, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { SessionStatus } from "src/main/sessions/common";
 import type { Session } from "src/main/sessions/state";
@@ -78,6 +82,14 @@ import {
 } from "./session-type-icons";
 import { useSettingsStore } from "./settings-dialog";
 import { useAppState } from "./sync-state-provider";
+
+const projectDragSensors = [
+  PointerSensor.configure({
+    activationConstraints: [
+      new PointerActivationConstraints.Distance({ value: 5 }),
+    ],
+  }),
+];
 
 const statusIndicatorMeta: Record<
   SessionStatus,
@@ -230,6 +242,30 @@ export function SessionSidebar() {
     },
   });
 
+  const reorderProjectsMutation = useMutation({
+    mutationFn: async ({
+      fromPath,
+      toPath,
+    }: {
+      fromPath: string;
+      toPath: string;
+    }) => {
+      await orpc.projects.reorderProjects.call({ fromPath, toPath });
+    },
+  });
+
+  const handleDragEnd = useCallback(
+    (event: Parameters<DragEndEvent>[0]) => {
+      if (event.canceled || !event.operation.source || !event.operation.target)
+        return;
+      const fromPath = String(event.operation.source.id);
+      const toPath = String(event.operation.target.id);
+      if (fromPath === toPath) return;
+      reorderProjectsMutation.mutate({ fromPath, toPath });
+    },
+    [reorderProjectsMutation],
+  );
+
   const setOpenNewSessionDialogCwd = useNewSessionDialogStore(
     (x) => x.setOpenProjectCwd,
   );
@@ -263,165 +299,62 @@ export function SessionSidebar() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         <div className="space-y-1.5">
-          {groups.map((group) => (
-            <section
-              key={group.path}
-              className="group/project rounded-lg border border-transparent bg-white/[0.02] p-0.5 transition hover:border-white/10"
-            >
-              <div className="flex items-center gap-1.5 rounded-md px-0.5 py-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (group.fromProjectList) {
-                      toggleProjectCollapsed.mutate({
-                        path: group.path,
-                        collapsed: !group.collapsed,
-                      });
-                    }
-                  }}
-                  className={cn(
-                    "flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-sm font-medium text-zinc-100 transition",
-                    group.fromProjectList
-                      ? "hover:bg-white/5"
-                      : "cursor-default opacity-90",
-                  )}
-                >
-                  {group.fromProjectList ? (
-                    group.collapsed ? (
-                      <ChevronRight className="size-4 shrink-0 text-zinc-400" />
-                    ) : (
-                      <ChevronDown className="size-4 shrink-0 text-zinc-400" />
-                    )
-                  ) : (
-                    <span className="inline-flex w-4 shrink-0" />
-                  )}
-                  {group.collapsed ? (
-                    <Folder className="size-4 shrink-0 text-zinc-300" />
-                  ) : (
-                    <FolderOpen className="size-4 shrink-0 text-zinc-300" />
-                  )}
-                  <span className="truncate">{group.name}</span>
-                </button>
-
-                {group.fromProjectList ? (
-                  <>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <SidebarIconButton
-                          icon={EllipsisVertical}
-                          label={`Project menu for ${group.name}`}
-                          size="md"
-                          className="opacity-0 focus-visible:opacity-100 group-hover/project:opacity-100"
-                        />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start">
-                        <DropdownMenuItem
-                          onClick={() => setOpenProjectCwd(group.path)}
-                        >
-                          <Settings className="size-3.5" />
-                          Settings
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => openFolderMutation.mutate(group.path)}
-                        >
-                          <FolderOpen className="size-3.5" />
-                          Open project folder
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          disabled={deleteProjectMutation.isPending}
-                          onClick={() =>
-                            deleteProjectMutation.mutate({
-                              path: group.path,
-                              sessions: group.sessions,
-                            })
-                          }
-                        >
-                          <Trash2 className="size-3.5" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    <SidebarIconButton
-                      icon={Plus}
-                      label={`New session in ${group.name}`}
-                      size="md"
-                      className="opacity-0 focus-visible:opacity-100 group-hover/project:opacity-100"
-                      onClick={() => setOpenNewSessionDialogCwd(group.path)}
-                    />
-                  </>
-                ) : null}
-              </div>
-
-              {!group.collapsed ? (
-                <ul className="space-y-0.5 px-1 pb-1">
-                  {group.sessions.length > 0 ? (
-                    group.sessions.map((session) => {
-                      switch (session.type) {
-                        case "claude-local-terminal":
-                          return (
-                            <ClaudeLocalTerminalSessionSidebarItem
-                              key={session.sessionId}
-                              sessionId={session.sessionId}
-                              onRenameSession={(target) => {
-                                setRenameTarget(target);
-                              }}
-                            />
-                          );
-                        case "local-terminal":
-                          return (
-                            <LocalTerminalSessionSidebarItem
-                              key={session.sessionId}
-                              sessionId={session.sessionId}
-                              onRenameSession={(target) => {
-                                setRenameTarget(target);
-                              }}
-                            />
-                          );
-                        case "codex-local-terminal":
-                          return (
-                            <CodexLocalTerminalSessionSidebarItem
-                              key={session.sessionId}
-                              sessionId={session.sessionId}
-                              onRenameSession={(target) => {
-                                setRenameTarget(target);
-                              }}
-                            />
-                          );
-                        case "cursor-agent":
-                          return (
-                            <CursorAgentSessionSidebarItem
-                              key={session.sessionId}
-                              sessionId={session.sessionId}
-                              onRenameSession={(target) => {
-                                setRenameTarget(target);
-                              }}
-                            />
-                          );
-                        case "ralph-loop":
-                          return (
-                            <RalphLoopSessionSidebarItem
-                              key={session.sessionId}
-                              sessionId={session.sessionId}
-                              onRenameSession={(target) => {
-                                setRenameTarget(target);
-                              }}
-                            />
-                          );
-                        default:
-                          return null;
-                      }
+          <DragDropProvider
+            sensors={projectDragSensors}
+            onDragEnd={handleDragEnd}
+          >
+            {groups
+              .filter((g) => g.fromProjectList)
+              .map((group, index) => (
+                <SortableProjectGroup
+                  key={group.path}
+                  group={group}
+                  index={index}
+                  onToggleCollapsed={() =>
+                    toggleProjectCollapsed.mutate({
+                      path: group.path,
+                      collapsed: !group.collapsed,
                     })
-                  ) : (
-                    <li className="px-1.5 py-1 text-xs text-zinc-500">
-                      No sessions yet
-                    </li>
-                  )}
-                </ul>
-              ) : null}
-            </section>
-          ))}
+                  }
+                  onOpenSettings={() => setOpenProjectCwd(group.path)}
+                  onOpenFolder={() => openFolderMutation.mutate(group.path)}
+                  onDelete={() =>
+                    deleteProjectMutation.mutate({
+                      path: group.path,
+                      sessions: group.sessions,
+                    })
+                  }
+                  isDeleting={deleteProjectMutation.isPending}
+                  onNewSession={() => setOpenNewSessionDialogCwd(group.path)}
+                  onRenameSession={setRenameTarget}
+                />
+              ))}
+          </DragDropProvider>
+          {groups
+            .filter((g) => !g.fromProjectList)
+            .map((group) => (
+              <section
+                key={group.path}
+                className="group/project rounded-lg border border-transparent bg-white/[0.02] p-0.5 transition hover:border-white/10"
+              >
+                <div className="flex items-center gap-1.5 rounded-md px-0.5 py-0.5">
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-sm font-medium text-zinc-100 opacity-90 transition"
+                  >
+                    <span className="inline-flex w-4 shrink-0" />
+                    <FolderOpen className="size-4 shrink-0 text-zinc-300" />
+                    <span className="truncate">{group.name}</span>
+                  </button>
+                </div>
+                {!group.collapsed ? (
+                  <GroupSessionsList
+                    sessions={group.sessions}
+                    onRenameSession={setRenameTarget}
+                  />
+                ) : null}
+              </section>
+            ))}
         </div>
       </div>
       <UsagePanel />
@@ -430,6 +363,169 @@ export function SessionSidebar() {
         onRenameTargetChange={setRenameTarget}
       />
     </aside>
+  );
+}
+
+function SortableProjectGroup({
+  group,
+  index,
+  onToggleCollapsed,
+  onOpenSettings,
+  onOpenFolder,
+  onDelete,
+  isDeleting,
+  onNewSession,
+  onRenameSession,
+}: {
+  group: ProjectSessionGroup;
+  index: number;
+  onToggleCollapsed: () => void;
+  onOpenSettings: () => void;
+  onOpenFolder: () => void;
+  onDelete: () => void;
+  isDeleting: boolean;
+  onNewSession: () => void;
+  onRenameSession: (target: RenameSessionTarget) => void;
+}) {
+  const { ref, handleRef, isDragging } = useSortable({
+    id: group.path,
+    index,
+  });
+
+  return (
+    <section
+      ref={ref}
+      className={cn(
+        "group/project rounded-lg border border-transparent bg-white/[0.02] p-0.5 transition hover:border-white/10",
+        isDragging && "opacity-50",
+      )}
+    >
+      <div className="flex items-center gap-1.5 rounded-md px-0.5 py-0.5">
+        <button
+          ref={handleRef}
+          type="button"
+          onClick={onToggleCollapsed}
+          className="flex min-w-0 flex-1 cursor-grab items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-sm font-medium text-zinc-100 transition hover:bg-white/5 active:cursor-grabbing"
+        >
+          {group.collapsed ? (
+            <ChevronRight className="size-4 shrink-0 text-zinc-400" />
+          ) : (
+            <ChevronDown className="size-4 shrink-0 text-zinc-400" />
+          )}
+          {group.collapsed ? (
+            <Folder className="size-4 shrink-0 text-zinc-300" />
+          ) : (
+            <FolderOpen className="size-4 shrink-0 text-zinc-300" />
+          )}
+          <span className="truncate">{group.name}</span>
+        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarIconButton
+              icon={EllipsisVertical}
+              label={`Project menu for ${group.name}`}
+              size="md"
+              className="opacity-0 focus-visible:opacity-100 group-hover/project:opacity-100"
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={onOpenSettings}>
+              <Settings className="size-3.5" />
+              Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onOpenFolder}>
+              <FolderOpen className="size-3.5" />
+              Open project folder
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              disabled={isDeleting}
+              onClick={onDelete}
+            >
+              <Trash2 className="size-3.5" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <SidebarIconButton
+          icon={Plus}
+          label={`New session in ${group.name}`}
+          size="md"
+          className="opacity-0 focus-visible:opacity-100 group-hover/project:opacity-100"
+          onClick={onNewSession}
+        />
+      </div>
+      {!group.collapsed ? (
+        <GroupSessionsList
+          sessions={group.sessions}
+          onRenameSession={onRenameSession}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function GroupSessionsList({
+  sessions,
+  onRenameSession,
+}: {
+  sessions: ProjectSessionGroup["sessions"];
+  onRenameSession: (target: RenameSessionTarget) => void;
+}) {
+  return (
+    <ul className="space-y-0.5 px-1 pb-1">
+      {sessions.length > 0 ? (
+        sessions.map((session) => {
+          switch (session.type) {
+            case "claude-local-terminal":
+              return (
+                <ClaudeLocalTerminalSessionSidebarItem
+                  key={session.sessionId}
+                  sessionId={session.sessionId}
+                  onRenameSession={onRenameSession}
+                />
+              );
+            case "local-terminal":
+              return (
+                <LocalTerminalSessionSidebarItem
+                  key={session.sessionId}
+                  sessionId={session.sessionId}
+                  onRenameSession={onRenameSession}
+                />
+              );
+            case "codex-local-terminal":
+              return (
+                <CodexLocalTerminalSessionSidebarItem
+                  key={session.sessionId}
+                  sessionId={session.sessionId}
+                  onRenameSession={onRenameSession}
+                />
+              );
+            case "cursor-agent":
+              return (
+                <CursorAgentSessionSidebarItem
+                  key={session.sessionId}
+                  sessionId={session.sessionId}
+                  onRenameSession={onRenameSession}
+                />
+              );
+            case "ralph-loop":
+              return (
+                <RalphLoopSessionSidebarItem
+                  key={session.sessionId}
+                  sessionId={session.sessionId}
+                  onRenameSession={onRenameSession}
+                />
+              );
+            default:
+              return null;
+          }
+        })
+      ) : (
+        <li className="px-1.5 py-1 text-xs text-zinc-500">No sessions yet</li>
+      )}
+    </ul>
   );
 }
 

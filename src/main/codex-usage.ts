@@ -37,7 +37,7 @@ const creditsBalanceSchema = z.preprocess((value) => {
 }, z.number().finite());
 
 const codexUsageResponseSchema = z.object({
-  plan_type: z.string().optional(),
+  plan_type: z.string().nullable().optional(),
   rate_limit: z.object({
     primary_window: usageWindowSchema,
     secondary_window: usageWindowSchema,
@@ -63,7 +63,7 @@ const codexUsageWindowSchema = z.object({
 });
 
 const codexUsageDataSchema = z.object({
-  planType: z.string().optional(),
+  planType: z.string().nullable().optional(),
   primaryWindow: codexUsageWindowSchema,
   secondaryWindow: codexUsageWindowSchema,
   credits: z

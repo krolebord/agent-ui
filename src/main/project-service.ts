@@ -172,4 +172,15 @@ export const projectsRouter = {
         projects.splice(idx, 1);
       });
     }),
+  reorderProjects: procedure
+    .input(z.object({ fromPath: projectPathSchema, toPath: projectPathSchema }))
+    .handler(async ({ input, context }) => {
+      context.projectsState.updateState((projects) => {
+        const fromIdx = projects.findIndex((p) => p.path === input.fromPath);
+        const toIdx = projects.findIndex((p) => p.path === input.toPath);
+        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+        const [item] = projects.splice(fromIdx, 1);
+        projects.splice(toIdx, 0, item);
+      });
+    }),
 };
