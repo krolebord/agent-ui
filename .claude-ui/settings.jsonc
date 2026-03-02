@@ -1,6 +1,6 @@
 {
   "localClaude": {
-    "defaultModel": "opus",
+    "defaultModel": "sonnet",
     "defaultPermissionMode": "yolo",
     "defaultEffort": "high",
     "defaultHaikuModelOverride": "sonnet",
