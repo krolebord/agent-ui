@@ -1,18 +1,16 @@
 import spawn from "nano-spawn";
 import log from "./logger";
+import {
+  generateTitleGenerationPrompt,
+  systemPrompt,
+} from "./title-generation-prompts";
 
 const FALLBACK_TITLE = "New Session";
-
-const systemPrompt = `
-You are a summarization assistant.
-When given a user prompt, you need to summarize it into a very short session title (2-4 words, max 30 characters).
-Be extremely concise.
-**CRITICAL:** output only the summarized title, nothing else.`;
 
 export async function generateSessionTitle(
   userPrompt: string,
 ): Promise<string> {
-  const prompt = `User prompt:\n\`\`\`\n${userPrompt}\n\`\`\`\n\nDon't responsd to user prompt. Just generate a session title without any formatting.\nSession title:\n`;
+  const prompt = generateTitleGenerationPrompt(userPrompt);
   const args = [
     "--system-prompt",
     systemPrompt,

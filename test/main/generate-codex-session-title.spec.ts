@@ -36,11 +36,13 @@ describe("generateCodexSessionTitle", () => {
         "model_reasoning_summary=none",
         "-c",
         "suppress_unstable_features_warning=true",
+        "-c",
+        "mcp_servers={}",
         expect.stringContaining("Fix auth + add tests"),
       ],
       {
         preferLocal: true,
-        timeout: 10_000,
+        timeout: 30_000,
         stdin: "ignore",
       },
     );

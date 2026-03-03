@@ -1,25 +1,19 @@
 import spawn from "nano-spawn";
 import log from "./logger";
+import {
+  generateTitleGenerationPrompt,
+  systemPrompt,
+} from "./title-generation-prompts";
 
 const FALLBACK_TITLE = "Codex Session";
-
-function buildTitlePrompt(userPrompt: string): string {
-  return [
-    "Generate a concise session title for this prompt.",
-    "Rules:",
-    "- 2 to 4 words",
-    "- max 30 characters",
-    "- plain text only",
-    "- output only the title",
-    "",
-    "Prompt:",
-    userPrompt,
-  ].join("\n");
-}
 
 export async function generateCodexSessionTitle(
   userPrompt: string,
 ): Promise<string> {
+  const prompt = [systemPrompt, generateTitleGenerationPrompt(userPrompt)]
+    .filter(Boolean)
+    .join("\n\n");
+
   const args = [
     "exec",
     "--model",
@@ -36,7 +30,7 @@ export async function generateCodexSessionTitle(
     "suppress_unstable_features_warning=true",
     "-c",
     "mcp_servers={}",
-    buildTitlePrompt(userPrompt),
+    prompt,
   ];
 
   try {
