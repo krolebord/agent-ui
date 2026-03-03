@@ -124,11 +124,6 @@ export function TerminalPane({
         return;
       }
 
-      console.log(
-        "fitAndNotify",
-        container.clientWidth,
-        container.clientHeight,
-      );
       fitAddon.fit();
       setTerminalSize(terminal.cols, terminal.rows);
       onResizeRef.current(terminal.cols, terminal.rows);

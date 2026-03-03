@@ -48,6 +48,7 @@ import {
   Copy,
   EllipsisVertical,
   EyeOff,
+  FileJson,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -162,6 +163,21 @@ interface RenameSessionTarget {
   sessionId: string;
   type: RenamableSessionType;
   title: string;
+}
+
+interface RawSessionStateTarget {
+  sessionId: string;
+  snapshot: Omit<Session, "bufferedOutput">;
+}
+
+const MAX_RENDERED_RAW_JSON_CHARS = 200_000;
+
+function stripSessionBufferedOutput(
+  session: Session,
+): Omit<Session, "bufferedOutput"> {
+  const { bufferedOutput: _bufferedOutput, ...sessionWithoutBufferedOutput } =
+    session;
+  return sessionWithoutBufferedOutput;
 }
 
 export function SessionSidebar() {
@@ -280,6 +296,21 @@ export function SessionSidebar() {
   const [renameTarget, setRenameTarget] = useState<RenameSessionTarget | null>(
     null,
   );
+  const [rawSessionStateTarget, setRawSessionStateTarget] =
+    useState<RawSessionStateTarget | null>(null);
+  const openRawSessionState = useCallback(
+    (sessionId: string) => {
+      const session = sessions[sessionId];
+      if (!session) {
+        return;
+      }
+      setRawSessionStateTarget({
+        sessionId,
+        snapshot: stripSessionBufferedOutput(session),
+      });
+    },
+    [sessions],
+  );
 
   return (
     <aside className="flex h-full w-[304px] shrink-0 flex-col border-r border-border/70 bg-black/35 backdrop-blur-xl">
@@ -335,6 +366,7 @@ export function SessionSidebar() {
                   isDeleting={deleteProjectMutation.isPending}
                   onNewSession={() => setOpenNewSessionDialogCwd(group.path)}
                   onRenameSession={setRenameTarget}
+                  onViewRawSessionState={openRawSessionState}
                 />
               ))}
           </DragDropProvider>
@@ -359,6 +391,7 @@ export function SessionSidebar() {
                   <GroupSessionsList
                     sessions={group.sessions}
                     onRenameSession={setRenameTarget}
+                    onViewRawSessionState={openRawSessionState}
                   />
                 ) : null}
               </section>
@@ -369,6 +402,10 @@ export function SessionSidebar() {
       <RenameSessionDialog
         renameTarget={renameTarget}
         onRenameTargetChange={setRenameTarget}
+      />
+      <RawSessionStateDialog
+        target={rawSessionStateTarget}
+        onTargetChange={setRawSessionStateTarget}
       />
     </aside>
   );
@@ -384,6 +421,7 @@ function SortableProjectGroup({
   isDeleting,
   onNewSession,
   onRenameSession,
+  onViewRawSessionState,
 }: {
   group: ProjectSessionGroup;
   index: number;
@@ -394,6 +432,7 @@ function SortableProjectGroup({
   isDeleting: boolean;
   onNewSession: () => void;
   onRenameSession: (target: RenameSessionTarget) => void;
+  onViewRawSessionState: (sessionId: string) => void;
 }) {
   const { ref, handleRef, isDragging } = useSortable({
     id: group.path,
@@ -468,6 +507,7 @@ function SortableProjectGroup({
         <GroupSessionsList
           sessions={group.sessions}
           onRenameSession={onRenameSession}
+          onViewRawSessionState={onViewRawSessionState}
         />
       ) : null}
     </section>
@@ -477,9 +517,11 @@ function SortableProjectGroup({
 function GroupSessionsList({
   sessions,
   onRenameSession,
+  onViewRawSessionState,
 }: {
   sessions: ProjectSessionGroup["sessions"];
   onRenameSession: (target: RenameSessionTarget) => void;
+  onViewRawSessionState: (sessionId: string) => void;
 }) {
   return (
     <ul className="space-y-0.5 px-1 pb-1">
@@ -492,6 +534,7 @@ function GroupSessionsList({
                   key={session.sessionId}
                   sessionId={session.sessionId}
                   onRenameSession={onRenameSession}
+                  onViewRawSessionState={onViewRawSessionState}
                 />
               );
             case "local-terminal":
@@ -500,6 +543,7 @@ function GroupSessionsList({
                   key={session.sessionId}
                   sessionId={session.sessionId}
                   onRenameSession={onRenameSession}
+                  onViewRawSessionState={onViewRawSessionState}
                 />
               );
             case "codex-local-terminal":
@@ -508,6 +552,7 @@ function GroupSessionsList({
                   key={session.sessionId}
                   sessionId={session.sessionId}
                   onRenameSession={onRenameSession}
+                  onViewRawSessionState={onViewRawSessionState}
                 />
               );
             case "cursor-agent":
@@ -516,6 +561,7 @@ function GroupSessionsList({
                   key={session.sessionId}
                   sessionId={session.sessionId}
                   onRenameSession={onRenameSession}
+                  onViewRawSessionState={onViewRawSessionState}
                 />
               );
             case "ralph-loop":
@@ -524,6 +570,7 @@ function GroupSessionsList({
                   key={session.sessionId}
                   sessionId={session.sessionId}
                   onRenameSession={onRenameSession}
+                  onViewRawSessionState={onViewRawSessionState}
                 />
               );
             default:
@@ -540,9 +587,11 @@ function GroupSessionsList({
 function CommonSessionContextMenuItems({
   session,
   onRenameSession,
+  onViewRawSessionState,
 }: {
   session: Session;
   onRenameSession: (target: RenameSessionTarget) => void;
+  onViewRawSessionState: (sessionId: string) => void;
 }) {
   return (
     <>
@@ -571,6 +620,14 @@ function CommonSessionContextMenuItems({
       <ContextMenuSeparator />
       <ContextMenuItem
         onClick={() => {
+          onViewRawSessionState(session.sessionId);
+        }}
+      >
+        <FileJson className="size-3.5" />
+        View raw JSON
+      </ContextMenuItem>
+      <ContextMenuItem
+        onClick={() => {
           void navigator.clipboard.writeText(session.sessionId);
           toast.success("Session ID copied");
         }}
@@ -594,9 +651,11 @@ function CommonSessionContextMenuItems({
 function ClaudeLocalTerminalSessionSidebarItem({
   sessionId,
   onRenameSession,
+  onViewRawSessionState,
 }: {
   sessionId: string;
   onRenameSession: (target: RenameSessionTarget) => void;
+  onViewRawSessionState: (sessionId: string) => void;
 }) {
   const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
 
@@ -667,6 +726,10 @@ function ClaudeLocalTerminalSessionSidebarItem({
               }}
             />
           )}
+          <SessionActionsDropdown
+            sessionId={sessionId}
+            onViewRawSessionState={onViewRawSessionState}
+          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -691,6 +754,7 @@ function ClaudeLocalTerminalSessionSidebarItem({
         <CommonSessionContextMenuItems
           session={session}
           onRenameSession={onRenameSession}
+          onViewRawSessionState={onViewRawSessionState}
         />
       </ContextMenuContent>
     </ContextMenu>
@@ -700,9 +764,11 @@ function ClaudeLocalTerminalSessionSidebarItem({
 function LocalTerminalSessionSidebarItem({
   sessionId,
   onRenameSession,
+  onViewRawSessionState,
 }: {
   sessionId: string;
   onRenameSession: (target: RenameSessionTarget) => void;
+  onViewRawSessionState: (sessionId: string) => void;
 }) {
   const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
 
@@ -759,6 +825,10 @@ function LocalTerminalSessionSidebarItem({
               }}
             />
           )}
+          <SessionActionsDropdown
+            sessionId={sessionId}
+            onViewRawSessionState={onViewRawSessionState}
+          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -774,6 +844,7 @@ function LocalTerminalSessionSidebarItem({
         <CommonSessionContextMenuItems
           session={session}
           onRenameSession={onRenameSession}
+          onViewRawSessionState={onViewRawSessionState}
         />
       </ContextMenuContent>
     </ContextMenu>
@@ -783,9 +854,11 @@ function LocalTerminalSessionSidebarItem({
 function CodexLocalTerminalSessionSidebarItem({
   sessionId,
   onRenameSession,
+  onViewRawSessionState,
 }: {
   sessionId: string;
   onRenameSession: (target: RenameSessionTarget) => void;
+  onViewRawSessionState: (sessionId: string) => void;
 }) {
   const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
 
@@ -838,6 +911,10 @@ function CodexLocalTerminalSessionSidebarItem({
               }}
             />
           )}
+          <SessionActionsDropdown
+            sessionId={sessionId}
+            onViewRawSessionState={onViewRawSessionState}
+          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -853,6 +930,7 @@ function CodexLocalTerminalSessionSidebarItem({
         <CommonSessionContextMenuItems
           session={session}
           onRenameSession={onRenameSession}
+          onViewRawSessionState={onViewRawSessionState}
         />
       </ContextMenuContent>
     </ContextMenu>
@@ -862,9 +940,11 @@ function CodexLocalTerminalSessionSidebarItem({
 function CursorAgentSessionSidebarItem({
   sessionId,
   onRenameSession,
+  onViewRawSessionState,
 }: {
   sessionId: string;
   onRenameSession: (target: RenameSessionTarget) => void;
+  onViewRawSessionState: (sessionId: string) => void;
 }) {
   const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
 
@@ -921,6 +1001,10 @@ function CursorAgentSessionSidebarItem({
               }}
             />
           )}
+          <SessionActionsDropdown
+            sessionId={sessionId}
+            onViewRawSessionState={onViewRawSessionState}
+          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -936,6 +1020,7 @@ function CursorAgentSessionSidebarItem({
         <CommonSessionContextMenuItems
           session={session}
           onRenameSession={onRenameSession}
+          onViewRawSessionState={onViewRawSessionState}
         />
       </ContextMenuContent>
     </ContextMenu>
@@ -945,9 +1030,11 @@ function CursorAgentSessionSidebarItem({
 function RalphLoopSessionSidebarItem({
   sessionId,
   onRenameSession,
+  onViewRawSessionState,
 }: {
   sessionId: string;
   onRenameSession: (target: RenameSessionTarget) => void;
+  onViewRawSessionState: (sessionId: string) => void;
 }) {
   const setActiveSessionId = useActiveSessionStore((x) => x.setActiveSessionId);
   const session = useAppState((x) => x.sessions[sessionId]);
@@ -1018,6 +1105,10 @@ function RalphLoopSessionSidebarItem({
               }}
             />
           )}
+          <SessionActionsDropdown
+            sessionId={sessionId}
+            onViewRawSessionState={onViewRawSessionState}
+          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -1042,9 +1133,36 @@ function RalphLoopSessionSidebarItem({
         <CommonSessionContextMenuItems
           session={session}
           onRenameSession={onRenameSession}
+          onViewRawSessionState={onViewRawSessionState}
         />
       </ContextMenuContent>
     </ContextMenu>
+  );
+}
+
+function SessionActionsDropdown({
+  sessionId,
+  onViewRawSessionState,
+}: {
+  sessionId: string;
+  onViewRawSessionState: (sessionId: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <SidebarIconButton icon={EllipsisVertical} label="Session menu" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onClick={() => {
+            onViewRawSessionState(sessionId);
+          }}
+        >
+          <FileJson className="size-3.5" />
+          View raw JSON
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1178,6 +1296,120 @@ function RenameSessionDialog({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RawSessionStateDialog({
+  target,
+  onTargetChange,
+}: {
+  target: RawSessionStateTarget | null;
+  onTargetChange: (target: RawSessionStateTarget | null) => void;
+}) {
+  const [rawJson, setRawJson] = useState("");
+  const [isSerializing, setIsSerializing] = useState(false);
+  const [serializeError, setSerializeError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!target) {
+      setRawJson("");
+      setIsSerializing(false);
+      setSerializeError(null);
+      return;
+    }
+
+    setRawJson("");
+    setIsSerializing(true);
+    setSerializeError(null);
+
+    const timeoutId = window.setTimeout(() => {
+      try {
+        setRawJson(JSON.stringify(target.snapshot, null, 2));
+      } catch {
+        setSerializeError("Failed to serialize session state");
+      } finally {
+        setIsSerializing(false);
+      }
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [target]);
+
+  const renderedJson = useMemo(
+    () =>
+      rawJson.length > MAX_RENDERED_RAW_JSON_CHARS
+        ? `${rawJson.slice(0, MAX_RENDERED_RAW_JSON_CHARS)}\n\n/* Output truncated for rendering. Use Copy JSON for the full payload. */`
+        : rawJson,
+    [rawJson],
+  );
+
+  return (
+    <Dialog
+      open={target !== null}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          onTargetChange(null);
+        }
+      }}
+    >
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>Session state (raw JSON)</DialogTitle>
+          <DialogDescription>
+            Current in-memory session state for debugging and inspection
+            (`bufferedOutput` excluded).
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <p className="truncate text-xs text-zinc-400">
+            Session ID: {target?.sessionId}
+          </p>
+          {isSerializing ? (
+            <p className="rounded-md border border-white/10 bg-black/35 p-3 text-xs text-zinc-300">
+              Preparing JSON...
+            </p>
+          ) : serializeError ? (
+            <p className="rounded-md border border-rose-400/30 bg-rose-950/20 p-3 text-xs text-rose-300">
+              {serializeError}
+            </p>
+          ) : (
+            <pre className="max-h-[60vh] overflow-auto rounded-md border border-white/10 bg-black/35 p-3 text-xs leading-5 text-zinc-200">
+              <code>{renderedJson}</code>
+            </pre>
+          )}
+          {rawJson.length > MAX_RENDERED_RAW_JSON_CHARS ? (
+            <p className="text-xs text-zinc-400">
+              Rendering limited to{" "}
+              {MAX_RENDERED_RAW_JSON_CHARS.toLocaleString()} characters to keep
+              the dialog responsive.
+            </p>
+          ) : null}
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              onTargetChange(null);
+            }}
+          >
+            Close
+          </Button>
+          <Button
+            type="button"
+            disabled={isSerializing || !!serializeError || rawJson.length === 0}
+            onClick={() => {
+              void navigator.clipboard.writeText(rawJson);
+              toast.success("Session state copied");
+            }}
+          >
+            Copy JSON
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
