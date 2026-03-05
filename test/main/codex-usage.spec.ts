@@ -97,6 +97,38 @@ function buildUsageResponseWithPlanTypeJson(
   });
 }
 
+function buildUsageResponseWithNullableFieldsJson() {
+  return JSON.stringify({
+    user_id: "user-123",
+    account_id: "user-123",
+    email: "tester@example.com",
+    plan_type: "free",
+    rate_limit: {
+      allowed: true,
+      limit_reached: false,
+      primary_window: {
+        used_percent: 6,
+        reset_at: 1_738_300_000,
+        limit_window_seconds: 18_000,
+      },
+      secondary_window: null,
+    },
+    code_review_rate_limit: {
+      allowed: false,
+      limit_reached: true,
+      primary_window: {
+        used_percent: 9,
+        reset_at: 1_738_301_000,
+        limit_window_seconds: 18_000,
+      },
+      secondary_window: null,
+    },
+    additional_rate_limits: null,
+    credits: null,
+    promo: null,
+  });
+}
+
 describe("getCodexUsage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -306,5 +338,37 @@ describe("getCodexUsage", () => {
         planType: null,
       },
     });
+  });
+
+  it("accepts nullable usage fields returned by the Codex API", async () => {
+    readFileMock.mockResolvedValue(buildAuthJson());
+    fetchMock.mockResolvedValue(
+      new Response(buildUsageResponseWithNullableFieldsJson(), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const result = await getCodexUsage();
+
+    expect(result).toMatchObject({
+      ok: true,
+      usage: {
+        planType: "free",
+        primaryWindow: {
+          utilization: 6,
+          windowSeconds: 18_000,
+        },
+        secondaryWindow: null,
+      },
+    });
+
+    if (result.ok) {
+      expect(result.usage).toBeDefined();
+      if (!result.usage) {
+        throw new Error("Expected usage payload");
+      }
+      expect(result.usage.credits).toBeUndefined();
+    }
   });
 });

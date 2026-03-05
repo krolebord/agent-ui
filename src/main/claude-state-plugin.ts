@@ -32,7 +32,7 @@ function buildHooksConfig(runtime: HookRuntime) {
   });
 
   return {
-    description: "Emit Claude Code hook events to Claude UI.",
+    description: "Emit Claude Code hook events to Agent UI.",
     hooks: {
       SessionStart: [noMatcher()],
       UserPromptSubmit: [noMatcher()],
@@ -48,12 +48,12 @@ function buildHooksConfig(runtime: HookRuntime) {
 
 function buildPluginManifest() {
   return {
-    name: "claude-ui-state-monitor",
+    name: "agent-ui-state-monitor",
     version: `${PLUGIN_VERSION}.0.0`,
     description:
-      "Managed plugin that emits Claude Code hook lifecycle events for Claude UI state monitoring.",
+      "Managed plugin that emits Claude Code hook lifecycle events for Agent UI state monitoring.",
     author: {
-      name: "claude-ui",
+      name: "agent-ui",
     },
   };
 }
@@ -72,7 +72,7 @@ async function readStdin() {
 }
 
 async function main() {
-  const stateFilePath = process.env.CLAUDE_UI_STATE_FILE;
+  const stateFilePath = process.env.AGENT_UI_STATE_FILE;
   if (!stateFilePath) {
     return;
   }

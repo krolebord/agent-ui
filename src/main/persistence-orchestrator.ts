@@ -4,7 +4,7 @@ import type { ServiceState } from "../shared/service-state";
 import { withDebouncedRunner } from "./debounce-runner";
 
 const PERSISTENCE_DEBOUNCE_MS = 75;
-const STORE_NAME = "claude-ui";
+const STORE_NAME = "agent-ui";
 const SCHEMA_VERSION_KEY = "schemaVersion";
 
 export interface PersistenceErrorEvent {

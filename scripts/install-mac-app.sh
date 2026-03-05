@@ -22,7 +22,7 @@ if [ -z "${APP_BUNDLE:-}" ] || [ ! -d "$APP_BUNDLE" ]; then
 fi
 
 APP_NAME=$(basename "$APP_BUNDLE")
-DEST_ROOT=${CLAUDE_UI_INSTALL_DIR:-/Applications}
+DEST_ROOT=${AGENT_UI_INSTALL_DIR:-/Applications}
 
 if [ ! -w "$DEST_ROOT" ]; then
   DEST_ROOT="$HOME/Applications"

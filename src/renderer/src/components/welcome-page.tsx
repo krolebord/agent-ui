@@ -4,7 +4,7 @@ export function WelcomePage() {
   return (
     <div className="flex h-full items-center justify-center">
       <div className="max-w-md space-y-6 text-center">
-        <h1 className="text-2xl font-semibold text-zinc-100">Claude UI</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100">Agent UI</h1>
         <p className="text-sm leading-relaxed text-zinc-400">
           Add a project from the sidebar, then start a new session to begin
           working with Claude.

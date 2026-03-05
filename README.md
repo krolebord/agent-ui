@@ -1,6 +1,6 @@
-# Claude UI
+# Agent UI
 
-Claude UI is a desktop app that brings Claude Code into a clean multi-session workspace.
+Agent UI is a desktop app that brings Claude Code into a clean multi-session workspace.
 
 ## What You Can Do
 

@@ -26,7 +26,7 @@ describe("ensureManagedCursorStateHooks", () => {
     tempDirs.push(userDataPath);
     tempDirs.push(homePath);
     process.env.HOME = homePath;
-    await mkdir(path.join(homePath, "Library", "Logs", "claude-ui"), {
+    await mkdir(path.join(homePath, "Library", "Logs", "agent-ui"), {
       recursive: true,
     });
 
@@ -78,7 +78,7 @@ describe("ensureManagedCursorStateHooks", () => {
     tempDirs.push(userDataPath);
     tempDirs.push(homePath);
     process.env.HOME = homePath;
-    await mkdir(path.join(homePath, "Library", "Logs", "claude-ui"), {
+    await mkdir(path.join(homePath, "Library", "Logs", "agent-ui"), {
       recursive: true,
     });
 

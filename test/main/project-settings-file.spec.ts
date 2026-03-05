@@ -31,7 +31,7 @@ describe("project-settings-file", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  const settingsPath = () => path.join(tempDir, ".claude-ui", "settings.jsonc");
+  const settingsPath = () => path.join(tempDir, ".agent-ui", "settings.jsonc");
 
   describe("readProjectSettingsFile", () => {
     it("returns null for missing file", async () => {
@@ -40,7 +40,7 @@ describe("project-settings-file", () => {
     });
 
     it("parses valid JSONC with comments", async () => {
-      await mkdir(path.join(tempDir, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
         settingsPath(),
         `{
@@ -71,7 +71,7 @@ describe("project-settings-file", () => {
     });
 
     it("handles invalid JSON gracefully", async () => {
-      await mkdir(path.join(tempDir, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(settingsPath(), "not json at all {{{", "utf-8");
 
       const result = await readProjectSettingsFile(tempDir);
@@ -79,7 +79,7 @@ describe("project-settings-file", () => {
     });
 
     it("uses .catch(undefined) for unknown enum values", async () => {
-      await mkdir(path.join(tempDir, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
         settingsPath(),
         `{
@@ -109,7 +109,7 @@ describe("project-settings-file", () => {
     });
 
     it("strips unknown keys", async () => {
-      await mkdir(path.join(tempDir, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
         settingsPath(),
         `{
@@ -127,7 +127,7 @@ describe("project-settings-file", () => {
     });
 
     it("ignores legacy flat settings schema", async () => {
-      await mkdir(path.join(tempDir, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
         settingsPath(),
         `{ "defaultModel": "opus", "defaultEffort": "high" }`,
@@ -140,7 +140,7 @@ describe("project-settings-file", () => {
   });
 
   describe("writeProjectSettingsFile", () => {
-    it("creates .claude-ui directory and file", async () => {
+    it("creates .agent-ui directory and file", async () => {
       await writeProjectSettingsFile(tempDir, {
         localClaude: {
           defaultModel: "sonnet",
@@ -163,7 +163,7 @@ describe("project-settings-file", () => {
     });
 
     it("preserves existing comments on re-write", async () => {
-      await mkdir(path.join(tempDir, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       const original = `{
   // This is a project comment
   "localClaude": {
@@ -213,7 +213,7 @@ describe("project-settings-file", () => {
     });
 
     it("removes legacy flat keys on write", async () => {
-      await mkdir(path.join(tempDir, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
         settingsPath(),
         `{
@@ -246,9 +246,9 @@ describe("project-settings-file", () => {
       const projectB = path.join(tempDir, "project-b");
       const projectC = path.join(tempDir, "project-c");
 
-      await mkdir(path.join(projectA, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(projectA, ".agent-ui"), { recursive: true });
       await writeFile(
-        path.join(projectA, ".claude-ui", "settings.jsonc"),
+        path.join(projectA, ".agent-ui", "settings.jsonc"),
         '{ "localClaude": { "defaultModel": "opus" } }',
         "utf-8",
       );
@@ -256,9 +256,9 @@ describe("project-settings-file", () => {
       await mkdir(projectB, { recursive: true });
       // project-b has no settings file
 
-      await mkdir(path.join(projectC, ".claude-ui"), { recursive: true });
+      await mkdir(path.join(projectC, ".agent-ui"), { recursive: true });
       await writeFile(
-        path.join(projectC, ".claude-ui", "settings.jsonc"),
+        path.join(projectC, ".agent-ui", "settings.jsonc"),
         '{ "localCodex": { "permissionMode": "yolo" } }',
         "utf-8",
       );

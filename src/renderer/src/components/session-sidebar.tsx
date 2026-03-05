@@ -726,10 +726,6 @@ function ClaudeLocalTerminalSessionSidebarItem({
               }}
             />
           )}
-          <SessionActionsDropdown
-            sessionId={sessionId}
-            onViewRawSessionState={onViewRawSessionState}
-          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -825,10 +821,6 @@ function LocalTerminalSessionSidebarItem({
               }}
             />
           )}
-          <SessionActionsDropdown
-            sessionId={sessionId}
-            onViewRawSessionState={onViewRawSessionState}
-          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -911,10 +903,6 @@ function CodexLocalTerminalSessionSidebarItem({
               }}
             />
           )}
-          <SessionActionsDropdown
-            sessionId={sessionId}
-            onViewRawSessionState={onViewRawSessionState}
-          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -1001,10 +989,6 @@ function CursorAgentSessionSidebarItem({
               }}
             />
           )}
-          <SessionActionsDropdown
-            sessionId={sessionId}
-            onViewRawSessionState={onViewRawSessionState}
-          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -1105,10 +1089,6 @@ function RalphLoopSessionSidebarItem({
               }}
             />
           )}
-          <SessionActionsDropdown
-            sessionId={sessionId}
-            onViewRawSessionState={onViewRawSessionState}
-          />
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -1137,32 +1117,6 @@ function RalphLoopSessionSidebarItem({
         />
       </ContextMenuContent>
     </ContextMenu>
-  );
-}
-
-function SessionActionsDropdown({
-  sessionId,
-  onViewRawSessionState,
-}: {
-  sessionId: string;
-  onViewRawSessionState: (sessionId: string) => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <SidebarIconButton icon={EllipsisVertical} label="Session menu" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem
-          onClick={() => {
-            onViewRawSessionState(sessionId);
-          }}
-        >
-          <FileJson className="size-3.5" />
-          View raw JSON
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
   );
 }
 

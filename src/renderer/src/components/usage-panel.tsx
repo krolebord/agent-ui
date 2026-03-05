@@ -34,12 +34,12 @@ type CodexUsageData = {
     utilization: number;
     resetsAt: string | null;
     windowSeconds: number;
-  };
+  } | null;
   secondaryWindow: {
     utilization: number;
     resetsAt: string | null;
     windowSeconds: number;
-  };
+  } | null;
   credits?: {
     hasCredits: boolean;
     unlimited: boolean;
@@ -260,10 +260,18 @@ export function UsagePanel() {
     if (codexQuery.data?.ok && codexQuery.data.usage) {
       const usage = codexQuery.data.usage as CodexUsageData;
       const planType = usage.planType?.trim();
-      const primaryPct = Math.round(usage.primaryWindow.utilization);
-      const secondaryPct = Math.round(usage.secondaryWindow.utilization);
-      const primaryResetsAt = formatResetsAt(usage.primaryWindow.resetsAt);
-      const secondaryResetsAt = formatResetsAt(usage.secondaryWindow.resetsAt);
+      const primaryPct = usage.primaryWindow
+        ? Math.round(usage.primaryWindow.utilization)
+        : null;
+      const secondaryPct = usage.secondaryWindow
+        ? Math.round(usage.secondaryWindow.utilization)
+        : null;
+      const primaryResetsAt = usage.primaryWindow
+        ? formatResetsAt(usage.primaryWindow.resetsAt)
+        : null;
+      const secondaryResetsAt = usage.secondaryWindow
+        ? formatResetsAt(usage.secondaryWindow.resetsAt)
+        : null;
       return (
         <div className="border-t border-border/70 p-2">
           <div className="space-y-1.5">
@@ -273,52 +281,58 @@ export function UsagePanel() {
                 <span className="tabular-nums text-zinc-300">{planType}</span>
               </div>
             ) : null}
-            <div className="space-y-0.5">
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="text-zinc-400">
-                  5 hour
-                  {primaryResetsAt ? (
-                    <span className="text-zinc-500">{` (${primaryResetsAt})`}</span>
-                  ) : null}
-                </span>
-                <span className={cn("tabular-nums", getTextColor(primaryPct))}>
-                  {primaryPct}%
-                </span>
+            {primaryPct !== null ? (
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-zinc-400">
+                    5 hour
+                    {primaryResetsAt ? (
+                      <span className="text-zinc-500">{` (${primaryResetsAt})`}</span>
+                    ) : null}
+                  </span>
+                  <span
+                    className={cn("tabular-nums", getTextColor(primaryPct))}
+                  >
+                    {primaryPct}%
+                  </span>
+                </div>
+                <div className="h-1 rounded-full bg-white/10">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      getBarColor(primaryPct),
+                    )}
+                    style={{ width: `${Math.min(primaryPct, 100)}%` }}
+                  />
+                </div>
               </div>
-              <div className="h-1 rounded-full bg-white/10">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all",
-                    getBarColor(primaryPct),
-                  )}
-                  style={{ width: `${Math.min(primaryPct, 100)}%` }}
-                />
+            ) : null}
+            {secondaryPct !== null ? (
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="text-zinc-400">
+                    Weekly
+                    {secondaryResetsAt ? (
+                      <span className="text-zinc-500">{` (${secondaryResetsAt})`}</span>
+                    ) : null}
+                  </span>
+                  <span
+                    className={cn("tabular-nums", getTextColor(secondaryPct))}
+                  >
+                    {secondaryPct}%
+                  </span>
+                </div>
+                <div className="h-1 rounded-full bg-white/10">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      getBarColor(secondaryPct),
+                    )}
+                    style={{ width: `${Math.min(secondaryPct, 100)}%` }}
+                  />
+                </div>
               </div>
-            </div>
-            <div className="space-y-0.5">
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="text-zinc-400">
-                  Weekly
-                  {secondaryResetsAt ? (
-                    <span className="text-zinc-500">{` (${secondaryResetsAt})`}</span>
-                  ) : null}
-                </span>
-                <span
-                  className={cn("tabular-nums", getTextColor(secondaryPct))}
-                >
-                  {secondaryPct}%
-                </span>
-              </div>
-              <div className="h-1 rounded-full bg-white/10">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all",
-                    getBarColor(secondaryPct),
-                  )}
-                  style={{ width: `${Math.min(secondaryPct, 100)}%` }}
-                />
-              </div>
-            </div>
+            ) : null}
             {usage.credits?.hasCredits ? (
               <div className="flex items-center justify-between text-[10px]">
                 <span className="text-zinc-400">Credits</span>

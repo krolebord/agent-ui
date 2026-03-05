@@ -6,7 +6,7 @@ export function useActiveSessionId() {
   return useActiveSessionStore((state) => state.activeSessionId);
 }
 
-const STORAGE_KEY = "claude-ui:activeSessionId";
+const STORAGE_KEY = "agent-ui:activeSessionId";
 
 export function switchSession(nextSessionId: string | null): void {
   const prevSessionId = useActiveSessionStore.getState().activeSessionId;

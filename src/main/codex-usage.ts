@@ -25,6 +25,13 @@ const usageWindowSchema = z.object({
   limit_window_seconds: z.number(),
 });
 
+const usageRateLimitSchema = z.object({
+  allowed: z.boolean().optional(),
+  limit_reached: z.boolean().optional(),
+  primary_window: usageWindowSchema.nullable(),
+  secondary_window: usageWindowSchema.nullable().optional(),
+});
+
 const creditsBalanceSchema = z.preprocess((value) => {
   if (typeof value !== "string") {
     return value;
@@ -38,21 +45,15 @@ const creditsBalanceSchema = z.preprocess((value) => {
 
 const codexUsageResponseSchema = z.object({
   plan_type: z.string().nullable().optional(),
-  rate_limit: z.object({
-    primary_window: usageWindowSchema,
-    secondary_window: usageWindowSchema,
-  }),
-  code_review_rate_limit: z
-    .object({
-      primary_window: usageWindowSchema,
-    })
-    .optional(),
+  rate_limit: usageRateLimitSchema,
+  code_review_rate_limit: usageRateLimitSchema.nullable().optional(),
   credits: z
     .object({
       has_credits: z.boolean(),
       unlimited: z.boolean(),
       balance: creditsBalanceSchema,
     })
+    .nullable()
     .optional(),
 });
 
@@ -64,8 +65,8 @@ const codexUsageWindowSchema = z.object({
 
 const codexUsageDataSchema = z.object({
   planType: z.string().nullable().optional(),
-  primaryWindow: codexUsageWindowSchema,
-  secondaryWindow: codexUsageWindowSchema,
+  primaryWindow: codexUsageWindowSchema.nullable(),
+  secondaryWindow: codexUsageWindowSchema.nullable(),
   credits: z
     .object({
       hasCredits: z.boolean(),
@@ -83,6 +84,20 @@ function toIsoDate(unixSeconds: number): string | null {
     return null;
   }
   return date.toISOString();
+}
+
+function normalizeUsageWindow(
+  window: z.infer<typeof usageWindowSchema> | null | undefined,
+): z.infer<typeof codexUsageWindowSchema> | null {
+  if (!window) {
+    return null;
+  }
+
+  return {
+    utilization: window.used_percent,
+    resetsAt: toIsoDate(window.reset_at),
+    windowSeconds: window.limit_window_seconds,
+  };
 }
 
 async function readCodexAuthFromFile(
@@ -161,18 +176,17 @@ async function readCodexAuthPayload(): Promise<
 function normalizeCodexUsage(
   usage: z.infer<typeof codexUsageResponseSchema>,
 ): CodexUsageData {
+  const primaryWindow =
+    usage.rate_limit.primary_window ??
+    usage.code_review_rate_limit?.primary_window;
+  const secondaryWindow =
+    usage.rate_limit.secondary_window ??
+    usage.code_review_rate_limit?.secondary_window;
+
   return {
     planType: usage.plan_type,
-    primaryWindow: {
-      utilization: usage.rate_limit.primary_window.used_percent,
-      resetsAt: toIsoDate(usage.rate_limit.primary_window.reset_at),
-      windowSeconds: usage.rate_limit.primary_window.limit_window_seconds,
-    },
-    secondaryWindow: {
-      utilization: usage.rate_limit.secondary_window.used_percent,
-      resetsAt: toIsoDate(usage.rate_limit.secondary_window.reset_at),
-      windowSeconds: usage.rate_limit.secondary_window.limit_window_seconds,
-    },
+    primaryWindow: normalizeUsageWindow(primaryWindow),
+    secondaryWindow: normalizeUsageWindow(secondaryWindow),
     credits: usage.credits
       ? {
           hasCredits: usage.credits.has_credits,

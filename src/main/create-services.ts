@@ -122,7 +122,7 @@ export async function createServices(options: CreateServicesOptions) {
     defineProjectStatePersistence(projectsState),
   );
 
-  // Hydrate project defaults from .claude-ui/settings.jsonc files
+  // Hydrate project defaults from .agent-ui/settings.jsonc files
   const projectPaths = projectsState.state.map((p) => p.path);
   if (projectPaths.length > 0) {
     const fileSettings = await readProjectSettingsForAll(projectPaths);

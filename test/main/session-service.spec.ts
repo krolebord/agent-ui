@@ -190,7 +190,7 @@ describe("SessionsServiceNew", () => {
       expect(terminalSessionSpies.start).toHaveBeenCalledWith(
         expect.objectContaining({
           env: expect.objectContaining({
-            CLAUDE_UI_STATE_FILE: "/tmp/test-state.ndjson",
+            AGENT_UI_STATE_FILE: "/tmp/test-state.ndjson",
           }),
         }),
       );

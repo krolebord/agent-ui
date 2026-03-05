@@ -16,7 +16,7 @@ import log from "./logger";
 const cursorAgentModeSchema = z.enum(["plan", "ask"]);
 const cursorAgentPermissionModeSchema = z.enum(["default", "yolo"]);
 
-const SETTINGS_DIR = ".claude-ui";
+const SETTINGS_DIR = ".agent-ui";
 const SETTINGS_FILE = "settings.jsonc";
 
 const localClaudeProjectSettingsSchema = z.object({

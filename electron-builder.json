@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
-  "appId": "com.claude-ui.app",
-  "productName": "Claude UI",
+  "appId": "com.agent-ui.app",
+  "productName": "Agent UI",
   "asar": true,
   "directories": {
     "output": "release/${version}"
