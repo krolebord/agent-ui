@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildProjectSessionGroups,
   getProjectDisplayName,
+  groupHasAwaitingUserInput,
+  isAwaitingUserInputStatus,
 } from "../../src/renderer/src/services/terminal-session-selectors";
 
 describe("buildProjectSessionGroups", () => {
@@ -68,5 +70,45 @@ describe("getProjectDisplayName", () => {
         alias: "Core UI",
       }),
     ).toBe("Core UI (app)");
+  });
+});
+
+describe("isAwaitingUserInputStatus", () => {
+  it("matches both supported awaiting-user status values", () => {
+    expect(isAwaitingUserInputStatus("awaiting_user_response")).toBe(true);
+    expect(isAwaitingUserInputStatus("awaiting_user_reply")).toBe(true);
+    expect(isAwaitingUserInputStatus("running")).toBe(false);
+  });
+});
+
+describe("groupHasAwaitingUserInput", () => {
+  it("returns true when any group session is awaiting user input", () => {
+    expect(
+      groupHasAwaitingUserInput({
+        sessions: [
+          {
+            status: "running",
+          },
+          {
+            status: "awaiting_user_response",
+          },
+        ] as never,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false when no group session is awaiting user input", () => {
+    expect(
+      groupHasAwaitingUserInput({
+        sessions: [
+          {
+            status: "idle",
+          },
+          {
+            status: "awaiting_approval",
+          },
+        ] as never,
+      }),
+    ).toBe(false);
   });
 });

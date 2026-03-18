@@ -12,6 +12,7 @@ import {
 } from "@renderer/components/ui/resizable";
 import { Toaster } from "@renderer/components/ui/sonner";
 import { WelcomePage } from "@renderer/components/welcome-page";
+import { WorktreeDeleteDialog } from "@renderer/components/worktree-delete-dialog";
 import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
 import { useEffect } from "react";
 import { useAppState } from "./components/sync-state-provider";
@@ -61,6 +62,7 @@ function App() {
       <NewSessionDialog />
       <ProjectDefaultsDialog />
       <ProjectWorktreeDialog />
+      <WorktreeDeleteDialog />
       <SettingsDialog />
       <Toaster closeButton />
     </>

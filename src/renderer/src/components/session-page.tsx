@@ -1,5 +1,6 @@
 import { type ClientPromiseResult, consumeEventIterator } from "@orpc/client";
 import { ProjectTerminalPane } from "@renderer/components/project-terminal-pane";
+import { SessionHeader } from "@renderer/components/session-header";
 import {
   TerminalPane,
   type TerminalPaneHandle,
@@ -15,22 +16,15 @@ import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
 import { orpc } from "@renderer/orpc-client";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { useMutation } from "@tanstack/react-query";
-import { AlertCircle, Repeat, TerminalSquare } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import {
-  type ComponentType,
   type ReactNode,
-  type SVGProps,
   useCallback,
   useEffect,
   useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
-import {
-  ClaudeCodeIcon,
-  CodexIcon,
-  CursorAgentIcon,
-} from "./session-type-icons";
 import { useAppState } from "./sync-state-provider";
 
 function useActiveSession() {
@@ -40,17 +34,6 @@ function useActiveSession() {
 }
 
 type Session = Exclude<ReturnType<typeof useActiveSession>, null>;
-
-const sessionTypeConfig: Record<
-  Session["type"],
-  { icon: ComponentType<SVGProps<SVGSVGElement>> }
-> = {
-  "claude-local-terminal": { icon: ClaudeCodeIcon },
-  "local-terminal": { icon: TerminalSquare },
-  "ralph-loop": { icon: Repeat },
-  "codex-local-terminal": { icon: CodexIcon },
-  "cursor-agent": { icon: CursorAgentIcon },
-};
 
 export function SessionPage() {
   const session = useActiveSession();
@@ -269,6 +252,11 @@ function TerminalPage({
   bottomPane?: ReactNode;
 }) {
   const terminalRef = useRef<TerminalPaneHandle | null>(null);
+  const activeProject = useAppState((state) =>
+    state.projects.find(
+      (project) => project.path === session.startupConfig.cwd,
+    ),
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: subscribe and bufferedOutput are intentionally captured once per session switch
   useEffect(() => {
@@ -336,17 +324,12 @@ function TerminalPage({
     <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
       <ResizablePanel defaultSize="70" minSize="35">
         <div className="flex h-full min-h-0 flex-col">
-          <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border/70 px-2">
-            {(() => {
-              const Icon = sessionTypeConfig[session.type]?.icon;
-              return Icon ? (
-                <Icon className="size-4 shrink-0 text-muted-foreground" />
-              ) : null;
-            })()}
-            <span className="truncate text-sm font-medium">
-              {session.title}
-            </span>
-          </header>
+          <SessionHeader
+            sessionType={session.type}
+            title={session.title}
+            gitBranch={activeProject?.gitBranch}
+            gitDiffStats={activeProject?.gitDiffStats}
+          />
           {controls}
           {errorMessage ? (
             <div className="mx-4 mt-4 flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">

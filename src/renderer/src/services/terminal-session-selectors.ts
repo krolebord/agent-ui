@@ -105,6 +105,20 @@ export function getVisibleSessionIds(groups: ProjectSessionGroup[]): string[] {
   return ids;
 }
 
+export function isAwaitingUserInputStatus(status: string): boolean {
+  return (
+    status === "awaiting_user_response" || status === "awaiting_user_reply"
+  );
+}
+
+export function groupHasAwaitingUserInput(
+  group: Pick<ProjectSessionGroup, "sessions">,
+): boolean {
+  return group.sessions.some((session) =>
+    isAwaitingUserInputStatus(session.status),
+  );
+}
+
 export function buildProjectSessionGroups(
   state: BuildProjectSessionGroupsInput,
 ): ProjectSessionGroup[] {

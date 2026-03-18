@@ -4,6 +4,7 @@ import { useProjectDefaultsDialogStore } from "@renderer/components/project-defa
 import { useProjectWorktreeDialogStore } from "@renderer/components/project-worktree-dialog";
 import { useSettingsStore } from "@renderer/components/settings-dialog";
 import { useAppState } from "@renderer/components/sync-state-provider";
+import { useWorktreeDeleteDialogStore } from "@renderer/components/worktree-delete-dialog";
 import { orpc } from "@renderer/orpc-client";
 import {
   buildProjectSessionGroups,
@@ -108,13 +109,17 @@ export function useAppShortcuts(): void {
   const openProjectWorktreeDialogPath = useProjectWorktreeDialogStore(
     (state) => state.openProjectPath,
   );
+  const openWorktreeDeleteDialogPath = useWorktreeDeleteDialogStore(
+    (state) => state.target?.path,
+  );
 
   const dialogsAreOpen =
     confirmDialogOpen ||
     Boolean(openNewSessionDialogCwd) ||
     openSettingsDialog ||
     Boolean(openProjectDefaultsDialogCwd) ||
-    Boolean(openProjectWorktreeDialogPath);
+    Boolean(openProjectWorktreeDialogPath) ||
+    Boolean(openWorktreeDeleteDialogPath);
 
   useHotkey(
     "Mod+N",

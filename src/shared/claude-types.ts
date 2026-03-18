@@ -62,11 +62,17 @@ export interface LocalCursorProjectSettings {
   permissionMode?: CursorAgentPermissionMode;
 }
 
+export interface GitDiffStats {
+  addedLines: number;
+  deletedLines: number;
+}
+
 export interface ClaudeProject {
   path: string;
   collapsed: boolean;
   alias?: string;
   gitBranch?: string;
+  gitDiffStats?: GitDiffStats;
   worktreeOriginPath?: string;
   localClaude?: LocalClaudeProjectSettings;
   localCodex?: LocalCodexProjectSettings;

@@ -280,6 +280,7 @@ export const projectsRouter = {
         path: projectPathSchema,
         deleteFolder: z.boolean(),
         deleteBranch: z.boolean(),
+        forceDeleteFolder: z.boolean(),
       }),
     )
     .handler(async ({ input, context }) => {
@@ -292,9 +293,12 @@ export const projectsRouter = {
         path,
         deleteFolder: input.deleteFolder,
         deleteBranch: input.deleteBranch,
+        forceDeleteFolder: input.forceDeleteFolder,
       });
 
-      await removeTrackedProject(path, context);
+      if (!result.requiresForce) {
+        await removeTrackedProject(path, context);
+      }
 
       return result;
     }),

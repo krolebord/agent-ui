@@ -39,6 +39,7 @@ import type { ProjectSessionGroup } from "@renderer/services/terminal-session-se
 import {
   buildProjectSessionGroups,
   getSessionLastActivityLabel,
+  groupHasAwaitingUserInput,
 } from "@renderer/services/terminal-session-selectors";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -84,6 +85,7 @@ import {
 } from "./session-type-icons";
 import { useSettingsStore } from "./settings-dialog";
 import { useAppState } from "./sync-state-provider";
+import { useWorktreeDeleteDialogStore } from "./worktree-delete-dialog";
 
 const projectDragSensors = [
   PointerSensor.configure({
@@ -201,6 +203,7 @@ export function SessionSidebar() {
   const setOpenProjectWorktreePath = useProjectWorktreeDialogStore(
     (x) => x.setOpenProjectPath,
   );
+  const openWorktreeDeleteDialog = useWorktreeDeleteDialogStore((x) => x.open);
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
@@ -216,32 +219,8 @@ export function SessionSidebar() {
   );
 
   const deleteProjectMutation = useMutation({
-    mutationFn: async ({
-      path,
-      isWorktree,
-      deleteFolder,
-      deleteBranch,
-    }: {
-      path: string;
-      isWorktree: boolean;
-      deleteFolder?: boolean;
-      deleteBranch?: boolean;
-    }) => {
-      if (isWorktree) {
-        return await orpc.projects.deleteWorktreeProject.call({
-          path,
-          deleteFolder: deleteFolder === true,
-          deleteBranch: deleteBranch === true,
-        });
-      }
-
+    mutationFn: async ({ path }: { path: string }) => {
       await orpc.projects.deleteProject.call({ path });
-      return {};
-    },
-    onSuccess: (result) => {
-      if (result.warning) {
-        toast.warning(result.warning);
-      }
     },
   });
 
@@ -356,46 +335,10 @@ export function SessionSidebar() {
                   onOpenFolder={() => openFolderMutation.mutate(group.path)}
                   onDelete={() => {
                     if (group.isWorktree) {
-                      useConfirmDialogStore.getState().confirm({
-                        title: "Delete worktree project",
-                        description: `Delete "${group.displayName}" from Agent UI. You can also remove the worktree folder and its local branch.`,
-                        confirmLabel: "Delete",
-                        checkboxes: [
-                          {
-                            id: "deleteFolder",
-                            label: "Also delete project folder",
-                            description:
-                              "Remove the Git worktree from disk using Git. Checked by default for worktree projects.",
-                            defaultChecked: true,
-                          },
-                          {
-                            id: "deleteBranch",
-                            label: "Also delete project branch",
-                            description: group.gitBranch
-                              ? `Delete the local branch "${group.gitBranch}" after the worktree folder is removed.`
-                              : "This worktree does not currently have a resolved local branch.",
-                            defaultChecked: false,
-                            disabled: !group.gitBranch,
-                          },
-                        ],
-                        normalizeCheckboxValues: (values) => {
-                          if (values.deleteBranch) {
-                            return {
-                              ...values,
-                              deleteFolder: true,
-                            };
-                          }
-
-                          return values;
-                        },
-                        onConfirm: async (values) => {
-                          await deleteProjectMutation.mutateAsync({
-                            path: group.path,
-                            isWorktree: true,
-                            deleteFolder: values.deleteFolder === true,
-                            deleteBranch: values.deleteBranch === true,
-                          });
-                        },
+                      openWorktreeDeleteDialog({
+                        path: group.path,
+                        displayName: group.displayName,
+                        gitBranch: group.gitBranch,
                       });
                       return;
                     }
@@ -416,7 +359,6 @@ export function SessionSidebar() {
                       onConfirm: async () => {
                         await deleteProjectMutation.mutateAsync({
                           path: group.path,
-                          isWorktree: false,
                         });
                       },
                     });
@@ -441,7 +383,14 @@ export function SessionSidebar() {
                     className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition"
                   >
                     <span className="inline-flex w-4 shrink-0" />
-                    <FolderOpen className="size-4 shrink-0 text-zinc-300" />
+                    <FolderOpen
+                      className={cn(
+                        "size-4 shrink-0",
+                        groupHasAwaitingUserInput(group)
+                          ? "text-violet-400"
+                          : "text-zinc-300",
+                      )}
+                    />
                     <span className="truncate">{group.displayName}</span>
                   </button>
                 </div>
@@ -505,6 +454,7 @@ function SortableProjectGroup({
     projectMeta.push(`from ${group.worktreeOriginName}`);
   }
   const secondaryLine = projectMeta.filter(Boolean).join(" • ");
+  const hasAwaitingUserInput = groupHasAwaitingUserInput(group);
 
   return (
     <section
@@ -524,9 +474,19 @@ function SortableProjectGroup({
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1 text-sm font-medium text-zinc-100">
               {group.collapsed ? (
-                <Folder className="size-3 shrink-0 text-zinc-400" />
+                <Folder
+                  className={cn(
+                    "size-3 shrink-0",
+                    hasAwaitingUserInput ? "text-violet-400" : "text-zinc-400",
+                  )}
+                />
               ) : (
-                <FolderOpen className="size-3 shrink-0 text-zinc-400" />
+                <FolderOpen
+                  className={cn(
+                    "size-3 shrink-0",
+                    hasAwaitingUserInput ? "text-violet-400" : "text-zinc-400",
+                  )}
+                />
               )}
               <span className="truncate">{group.displayName}</span>
             </span>
