@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@renderer/components/ui/select";
 import { Textarea } from "@renderer/components/ui/textarea";
+import { Toggle } from "@renderer/components/ui/toggle";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -138,6 +139,7 @@ export function ProjectDefaultsDialog() {
     useState<CodexPermissionMode>("default");
   const [codexModelReasoningEffort, setCodexModelReasoningEffort] =
     useState<CodexModelReasoningEffort>("high");
+  const [codexFastMode, setCodexFastMode] = useState(false);
   const [codexConfigOverrides, setCodexConfigOverrides] = useState("");
   const [cursorModel, setCursorModel] = useState("");
   const [cursorMode, setCursorMode] = useState<CursorAgentMode | undefined>(
@@ -178,6 +180,7 @@ export function ProjectDefaultsDialog() {
     setCodexModelReasoningEffort(
       project.localCodex?.modelReasoningEffort ?? "high",
     );
+    setCodexFastMode(project.localCodex?.fastMode ?? false);
     setCodexConfigOverrides(project.localCodex?.configOverrides ?? "");
     setCursorModel(project.localCursor?.model ?? "");
     setCursorMode(project.localCursor?.mode);
@@ -245,6 +248,7 @@ export function ProjectDefaultsDialog() {
                 model: codexModel || undefined,
                 permissionMode: codexPermissionMode,
                 modelReasoningEffort: codexModelReasoningEffort,
+                fastMode: codexFastMode,
                 configOverrides: codexConfigOverrides || undefined,
               },
               localCursor: {
@@ -463,6 +467,20 @@ export function ProjectDefaultsDialog() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="w-fit shrink-0 space-y-2">
+                  <Label className="whitespace-nowrap">Fast mode</Label>
+                  <Toggle
+                    type="button"
+                    variant="outline"
+                    pressed={codexFastMode}
+                    onPressedChange={setCodexFastMode}
+                    aria-label="Toggle fast mode"
+                    className="min-w-16"
+                  >
+                    {codexFastMode ? "On" : "Off"}
+                  </Toggle>
                 </div>
               </div>
 

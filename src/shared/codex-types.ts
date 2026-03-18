@@ -8,6 +8,8 @@ export const codexPermissionModeSchema = z.enum([
 
 export type CodexPermissionMode = z.infer<typeof codexPermissionModeSchema>;
 
+export const codexFastModeSchema = z.boolean();
+
 export const codexModelReasoningEffortSchema = z.enum([
   "minimal",
   "low",

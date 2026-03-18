@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@renderer/components/ui/select";
 import { Textarea } from "@renderer/components/ui/textarea";
+import { Toggle } from "@renderer/components/ui/toggle";
 import {
   ToggleGroup,
   ToggleGroupItem,
@@ -843,6 +844,9 @@ function CodexSessionForm() {
     useState<CodexModelReasoningEffort>(
       project?.localCodex?.modelReasoningEffort ?? "high",
     );
+  const [fastMode, setFastMode] = useState(
+    project?.localCodex?.fastMode ?? false,
+  );
   const [permissionMode, setPermissionMode] = useState<CodexPermissionMode>(
     project?.localCodex?.permissionMode ?? "default",
   );
@@ -880,6 +884,7 @@ function CodexSessionForm() {
           sessionName: sessionName || undefined,
           model: model || undefined,
           modelReasoningEffort,
+          fastMode,
           permissionMode,
           initialPrompt: initialPrompt || undefined,
           configOverrides: configOverrides || undefined,
@@ -975,6 +980,20 @@ function CodexSessionForm() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+
+        <div className="w-fit shrink-0 space-y-2">
+          <Label className="whitespace-nowrap">Fast mode</Label>
+          <Toggle
+            type="button"
+            variant="outline"
+            pressed={fastMode}
+            onPressedChange={setFastMode}
+            aria-label="Toggle fast mode"
+            className="min-w-16"
+          >
+            {fastMode ? "On" : "Off"}
+          </Toggle>
         </div>
       </div>
 

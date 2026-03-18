@@ -6,6 +6,7 @@ import {
   claudePermissionModeSchema,
 } from "../shared/claude-types";
 import {
+  codexFastModeSchema,
   codexModelReasoningEffortSchema,
   codexPermissionModeSchema,
 } from "../shared/codex-types";
@@ -34,6 +35,7 @@ const localCodexProjectSettingsSchema = z.object({
   modelReasoningEffort: codexModelReasoningEffortSchema
     .optional()
     .catch(undefined),
+  fastMode: codexFastModeSchema.optional().catch(undefined),
   configOverrides: z.string().optional().catch(undefined),
 });
 

@@ -49,6 +49,7 @@ export interface LocalCodexProjectSettings {
   model?: string;
   permissionMode?: CodexPermissionMode;
   modelReasoningEffort?: CodexModelReasoningEffort;
+  fastMode?: boolean;
   configOverrides?: string;
 }
 

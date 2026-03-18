@@ -43,6 +43,7 @@ describe("CodexSessionsManager title generation", () => {
       sessionName: undefined,
       permissionMode: "default",
       modelReasoningEffort: "high",
+      fastMode: false,
       initialPrompt: "  write release notes  ",
     });
 
@@ -69,6 +70,7 @@ describe("CodexSessionsManager title generation", () => {
       sessionName: "Custom Session",
       permissionMode: "default",
       modelReasoningEffort: "high",
+      fastMode: false,
       initialPrompt: "write release notes",
     });
 
@@ -83,6 +85,7 @@ describe("CodexSessionsManager title generation", () => {
       sessionName: undefined,
       permissionMode: "default",
       modelReasoningEffort: "high",
+      fastMode: false,
       initialPrompt: " /plan   draft implementation plan ",
     });
 
@@ -102,6 +105,7 @@ describe("CodexSessionsManager title generation", () => {
       sessionName: undefined,
       permissionMode: "default",
       modelReasoningEffort: "high",
+      fastMode: false,
       initialPrompt: "/plan   ",
     });
 
@@ -116,6 +120,7 @@ describe("CodexSessionsManager title generation", () => {
       sessionName: undefined,
       permissionMode: "default",
       modelReasoningEffort: "high",
+      fastMode: false,
       initialPrompt: "Summarize open tasks",
     });
 
@@ -137,6 +142,7 @@ describe("CodexSessionsManager title generation", () => {
       sessionName: undefined,
       permissionMode: "default",
       modelReasoningEffort: "high",
+      fastMode: false,
       initialPrompt: "Summarize open tasks",
     });
 

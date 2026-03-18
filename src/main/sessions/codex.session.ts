@@ -2,6 +2,7 @@ import { call, EventPublisher } from "@orpc/server";
 import {
   type CodexModelReasoningEffort,
   type CodexPermissionMode,
+  codexFastModeSchema,
   codexModelReasoningEffortSchema,
 } from "@shared/codex-types";
 import type { TerminalEvent } from "@shared/terminal-types";
@@ -33,6 +34,7 @@ export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
     cwd: z.string(),
     model: z.string().optional(),
     modelReasoningEffort: codexModelReasoningEffortSchema.default("high"),
+    fastMode: codexFastModeSchema.optional(),
     permissionMode: z.enum(["default", "full-auto", "yolo"]).default("default"),
     initialPrompt: z.string().optional(),
     configOverrides: z.string().optional(),
@@ -52,6 +54,7 @@ const startCodexSessionSchema = z.object({
     .transform((value) => value?.trim() || undefined),
   model: z.string().optional(),
   modelReasoningEffort: codexModelReasoningEffortSchema.default("high"),
+  fastMode: codexFastModeSchema.default(false),
   permissionMode: z.enum(["default", "full-auto", "yolo"]).default("default"),
   initialPrompt: z
     .string()
@@ -101,6 +104,7 @@ export const codexSessionsRouter = {
         cwd: session.startupConfig.cwd,
         model: session.startupConfig.model,
         modelReasoningEffort: session.startupConfig.modelReasoningEffort,
+        fastMode: session.startupConfig.fastMode,
         permissionMode: session.startupConfig
           .permissionMode as CodexPermissionMode,
         initialPrompt: session.startupConfig.initialPrompt,
@@ -219,6 +223,7 @@ export class CodexSessionsManager {
         cwd: input.cwd,
         model: input.model,
         modelReasoningEffort: input.modelReasoningEffort,
+        fastMode: input.fastMode,
         permissionMode: input.permissionMode,
         initialPrompt,
         configOverrides: input.configOverrides,
@@ -275,6 +280,7 @@ export class CodexSessionsManager {
     cwd,
     model,
     modelReasoningEffort,
+    fastMode,
     permissionMode,
     initialPrompt,
     configOverrides,
@@ -285,6 +291,7 @@ export class CodexSessionsManager {
     cwd: string;
     model?: string;
     modelReasoningEffort: CodexModelReasoningEffort;
+    fastMode?: boolean;
     permissionMode: CodexPermissionMode;
     initialPrompt?: string;
     configOverrides?: string;
@@ -333,6 +340,7 @@ export class CodexSessionsManager {
       permissionMode,
       model,
       modelReasoningEffort,
+      fastMode,
       configOverrides,
       initialPrompt: isPlanMode ? undefined : initialPrompt,
     });

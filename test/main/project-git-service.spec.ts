@@ -280,6 +280,7 @@ describe("ProjectGitService", () => {
         localCodex: {
           permissionMode: "yolo",
           modelReasoningEffort: "high",
+          fastMode: true,
         },
       });
     });
@@ -338,6 +339,7 @@ describe("ProjectGitService", () => {
         localCodex: {
           permissionMode: "yolo",
           modelReasoningEffort: "high",
+          fastMode: true,
         },
         localCursor: undefined,
       },
@@ -354,6 +356,7 @@ describe("ProjectGitService", () => {
         localCodex: {
           permissionMode: "yolo",
           modelReasoningEffort: "high",
+          fastMode: true,
         },
       },
       {
@@ -368,6 +371,7 @@ describe("ProjectGitService", () => {
         localCodex: {
           permissionMode: "yolo",
           modelReasoningEffort: "high",
+          fastMode: true,
         },
         gitBranch: "feature/new-ui",
       },
