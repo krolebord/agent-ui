@@ -1,6 +1,7 @@
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
 import { useNewSessionDialogStore } from "@renderer/components/new-session-dialog";
 import { useProjectDefaultsDialogStore } from "@renderer/components/project-defaults-dialog";
+import { useProjectWorktreeDialogStore } from "@renderer/components/project-worktree-dialog";
 import { useSettingsStore } from "@renderer/components/settings-dialog";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { orpc } from "@renderer/orpc-client";
@@ -104,12 +105,16 @@ export function useAppShortcuts(): void {
   const openProjectDefaultsDialogCwd = useProjectDefaultsDialogStore(
     (state) => state.openProjectCwd,
   );
+  const openProjectWorktreeDialogPath = useProjectWorktreeDialogStore(
+    (state) => state.openProjectPath,
+  );
 
   const dialogsAreOpen =
     confirmDialogOpen ||
     Boolean(openNewSessionDialogCwd) ||
     openSettingsDialog ||
-    Boolean(openProjectDefaultsDialogCwd);
+    Boolean(openProjectDefaultsDialogCwd) ||
+    Boolean(openProjectWorktreeDialogPath);
 
   useHotkey(
     "Mod+N",

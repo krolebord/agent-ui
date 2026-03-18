@@ -37,7 +37,7 @@ import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { orpc } from "@renderer/orpc-client";
 import {
-  getProjectNameFromPath,
+  getProjectDisplayName,
   MODEL_OPTIONS,
 } from "@renderer/services/terminal-session-selectors";
 import type {
@@ -164,7 +164,7 @@ export function NewSessionDialog() {
   }
 
   const projectPath = project?.path ?? openProjectCwd;
-  const projectName = getProjectNameFromPath(projectPath);
+  const projectName = project ? getProjectDisplayName(project) : projectPath;
 
   const closeDialog = () => {
     setSessionType("claude");

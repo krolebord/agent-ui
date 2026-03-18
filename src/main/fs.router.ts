@@ -25,6 +25,30 @@ export const fsRouter = {
 
     return result.filePaths[0] ?? null;
   }),
+  selectFolderWithOptions: procedure
+    .input(
+      z.object({
+        title: z.string().trim().min(1).optional(),
+        defaultPath: z.string().trim().min(1).optional(),
+      }),
+    )
+    .handler(async ({ context, input }) => {
+      const dialogOptions: Electron.OpenDialogOptions = {
+        title: input.title ?? "Select Folder",
+        defaultPath: input.defaultPath,
+        properties: ["openDirectory", "createDirectory"],
+      };
+      const mainWindow = context.getMainWindow();
+      const result = mainWindow
+        ? await dialog.showOpenDialog(mainWindow, dialogOptions)
+        : await dialog.showOpenDialog(dialogOptions);
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return null;
+      }
+
+      return result.filePaths[0] ?? null;
+    }),
   openLogFolder: procedure.handler(async () => {
     const logPath = app.getPath("logs");
     await shell.openPath(logPath);

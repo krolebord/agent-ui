@@ -1,6 +1,7 @@
 import { ConfirmDialog } from "@renderer/components/confirm-dialog";
 import { NewSessionDialog } from "@renderer/components/new-session-dialog";
 import { ProjectDefaultsDialog } from "@renderer/components/project-defaults-dialog";
+import { ProjectWorktreeDialog } from "@renderer/components/project-worktree-dialog";
 import { SessionPage } from "@renderer/components/session-page";
 import { SessionSidebar } from "@renderer/components/session-sidebar";
 import { SettingsDialog } from "@renderer/components/settings-dialog";
@@ -59,6 +60,7 @@ function App() {
       <ConfirmDialog />
       <NewSessionDialog />
       <ProjectDefaultsDialog />
+      <ProjectWorktreeDialog />
       <SettingsDialog />
       <Toaster closeButton />
     </>

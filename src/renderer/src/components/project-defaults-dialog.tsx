@@ -28,7 +28,7 @@ import {
 } from "@renderer/components/ui/toggle-group";
 import { orpc } from "@renderer/orpc-client";
 import {
-  getProjectNameFromPath,
+  getProjectDisplayName,
   MODEL_OPTIONS,
 } from "@renderer/services/terminal-session-selectors";
 import type {
@@ -189,7 +189,7 @@ export function ProjectDefaultsDialog() {
   }
 
   const projectPath = project.path;
-  const projectName = getProjectNameFromPath(projectPath);
+  const projectName = getProjectDisplayName(project);
   const effectiveClaudePermissionMode =
     claudeDefaultPermissionMode ?? "default";
   const hasCursorModelOption = cursorModels.some(

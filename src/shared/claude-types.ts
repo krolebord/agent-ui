@@ -64,7 +64,9 @@ export interface LocalCursorProjectSettings {
 export interface ClaudeProject {
   path: string;
   collapsed: boolean;
+  alias?: string;
   gitBranch?: string;
+  worktreeOriginPath?: string;
   localClaude?: LocalClaudeProjectSettings;
   localCodex?: LocalCodexProjectSettings;
   localCursor?: LocalCursorProjectSettings;

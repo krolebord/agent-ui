@@ -42,8 +42,6 @@ import {
 } from "@renderer/services/terminal-session-selectors";
 import { useMutation } from "@tanstack/react-query";
 import {
-  ChevronDown,
-  ChevronRight,
   CircleDot,
   Copy,
   EllipsisVertical,
@@ -74,8 +72,10 @@ import { forwardRef, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { SessionStatus } from "src/main/sessions/common";
 import type { Session } from "src/main/sessions/state";
+import { useConfirmDialogStore } from "./confirm-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
+import { useProjectWorktreeDialogStore } from "./project-worktree-dialog";
 import {
   ClaudeCodeIcon,
   CodexIcon,
@@ -198,6 +198,9 @@ export function SessionSidebar() {
   const setOpenProjectCwd = useProjectDefaultsDialogStore(
     (x) => x.setOpenProjectCwd,
   );
+  const setOpenProjectWorktreePath = useProjectWorktreeDialogStore(
+    (x) => x.setOpenProjectPath,
+  );
 
   const createProjectMutation = useMutation({
     mutationFn: async () => {
@@ -215,41 +218,30 @@ export function SessionSidebar() {
   const deleteProjectMutation = useMutation({
     mutationFn: async ({
       path,
-      sessions,
+      isWorktree,
+      deleteFolder,
+      deleteBranch,
     }: {
       path: string;
-      sessions: ProjectSessionGroup["sessions"];
+      isWorktree: boolean;
+      deleteFolder?: boolean;
+      deleteBranch?: boolean;
     }) => {
-      for (const session of sessions) {
-        switch (session.type) {
-          case "claude-local-terminal":
-            await orpc.sessions.localClaude.deleteSession.call({
-              sessionId: session.sessionId,
-            });
-            break;
-          case "local-terminal":
-            await orpc.sessions.localTerminal.deleteSession.call({
-              sessionId: session.sessionId,
-            });
-            break;
-          case "ralph-loop":
-            await orpc.sessions.ralphLoop.deleteSession.call({
-              sessionId: session.sessionId,
-            });
-            break;
-          case "codex-local-terminal":
-            await orpc.sessions.codex.deleteSession.call({
-              sessionId: session.sessionId,
-            });
-            break;
-          case "cursor-agent":
-            await orpc.sessions.cursorAgent.deleteSession.call({
-              sessionId: session.sessionId,
-            });
-            break;
-        }
+      if (isWorktree) {
+        return await orpc.projects.deleteWorktreeProject.call({
+          path,
+          deleteFolder: deleteFolder === true,
+          deleteBranch: deleteBranch === true,
+        });
       }
+
       await orpc.projects.deleteProject.call({ path });
+      return {};
+    },
+    onSuccess: (result) => {
+      if (result.warning) {
+        toast.warning(result.warning);
+      }
     },
   });
 
@@ -356,14 +348,79 @@ export function SessionSidebar() {
                       collapsed: !group.collapsed,
                     })
                   }
+                  onCreateWorktree={() =>
+                    setOpenProjectWorktreePath(group.path)
+                  }
+                  canCreateWorktree={Boolean(group.gitBranch)}
                   onOpenSettings={() => setOpenProjectCwd(group.path)}
                   onOpenFolder={() => openFolderMutation.mutate(group.path)}
-                  onDelete={() =>
-                    deleteProjectMutation.mutate({
-                      path: group.path,
-                      sessions: group.sessions,
-                    })
-                  }
+                  onDelete={() => {
+                    if (group.isWorktree) {
+                      useConfirmDialogStore.getState().confirm({
+                        title: "Delete worktree project",
+                        description: `Delete "${group.displayName}" from Agent UI. You can also remove the worktree folder and its local branch.`,
+                        confirmLabel: "Delete",
+                        checkboxes: [
+                          {
+                            id: "deleteFolder",
+                            label: "Also delete project folder",
+                            description:
+                              "Remove the Git worktree from disk using Git. Checked by default for worktree projects.",
+                            defaultChecked: true,
+                          },
+                          {
+                            id: "deleteBranch",
+                            label: "Also delete project branch",
+                            description: group.gitBranch
+                              ? `Delete the local branch "${group.gitBranch}" after the worktree folder is removed.`
+                              : "This worktree does not currently have a resolved local branch.",
+                            defaultChecked: false,
+                            disabled: !group.gitBranch,
+                          },
+                        ],
+                        normalizeCheckboxValues: (values) => {
+                          if (values.deleteBranch) {
+                            return {
+                              ...values,
+                              deleteFolder: true,
+                            };
+                          }
+
+                          return values;
+                        },
+                        onConfirm: async (values) => {
+                          await deleteProjectMutation.mutateAsync({
+                            path: group.path,
+                            isWorktree: true,
+                            deleteFolder: values.deleteFolder === true,
+                            deleteBranch: values.deleteBranch === true,
+                          });
+                        },
+                      });
+                      return;
+                    }
+
+                    const sessionCount = group.sessions.length;
+                    const sessionLabel =
+                      sessionCount === 1
+                        ? "1 session"
+                        : `${sessionCount} sessions`;
+
+                    useConfirmDialogStore.getState().confirm({
+                      title: "Delete project",
+                      description:
+                        sessionCount > 0
+                          ? `Delete "${group.displayName}" and its ${sessionLabel}? This will also delete the project's sessions from Agent UI.`
+                          : `Delete "${group.displayName}" from Agent UI? This cannot be undone.`,
+                      confirmLabel: "Delete",
+                      onConfirm: async () => {
+                        await deleteProjectMutation.mutateAsync({
+                          path: group.path,
+                          isWorktree: false,
+                        });
+                      },
+                    });
+                  }}
                   isDeleting={deleteProjectMutation.isPending}
                   onNewSession={() => setOpenNewSessionDialogCwd(group.path)}
                   onRenameSession={setRenameTarget}
@@ -385,7 +442,7 @@ export function SessionSidebar() {
                   >
                     <span className="inline-flex w-4 shrink-0" />
                     <FolderOpen className="size-4 shrink-0 text-zinc-300" />
-                    <span className="truncate">{group.name}</span>
+                    <span className="truncate">{group.displayName}</span>
                   </button>
                 </div>
                 {!group.collapsed ? (
@@ -416,6 +473,8 @@ function SortableProjectGroup({
   group,
   index,
   onToggleCollapsed,
+  onCreateWorktree,
+  canCreateWorktree,
   onOpenSettings,
   onOpenFolder,
   onDelete,
@@ -427,6 +486,8 @@ function SortableProjectGroup({
   group: ProjectSessionGroup;
   index: number;
   onToggleCollapsed: () => void;
+  onCreateWorktree: () => void;
+  canCreateWorktree: boolean;
   onOpenSettings: () => void;
   onOpenFolder: () => void;
   onDelete: () => void;
@@ -439,6 +500,11 @@ function SortableProjectGroup({
     id: group.path,
     index,
   });
+  const projectMeta = [group.gitBranch];
+  if (group.isWorktree && group.worktreeOriginName) {
+    projectMeta.push(`from ${group.worktreeOriginName}`);
+  }
+  const secondaryLine = projectMeta.filter(Boolean).join(" • ");
 
   return (
     <section
@@ -455,24 +521,23 @@ function SortableProjectGroup({
           onClick={onToggleCollapsed}
           className="flex min-w-0 flex-1 cursor-grab items-center gap-1.5 px-1.5 py-1 text-left transition hover:bg-white/8 active:cursor-grabbing"
         >
-          {group.collapsed ? (
-            <ChevronRight className="size-4 shrink-0 text-zinc-400" />
-          ) : (
-            <ChevronDown className="size-4 shrink-0 text-zinc-400" />
-          )}
-          {group.collapsed ? (
-            <Folder className="size-4 shrink-0 text-zinc-300" />
-          ) : (
-            <FolderOpen className="size-4 shrink-0 text-zinc-300" />
-          )}
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-zinc-100">
-              {group.name}
+            <span className="flex items-center gap-1 text-sm font-medium text-zinc-100">
+              {group.collapsed ? (
+                <Folder className="size-3 shrink-0 text-zinc-400" />
+              ) : (
+                <FolderOpen className="size-3 shrink-0 text-zinc-400" />
+              )}
+              <span className="truncate">{group.displayName}</span>
             </span>
-            {group.subtitle ? (
+            {secondaryLine ? (
               <span className="mt-0.5 flex items-center gap-1 text-xs text-zinc-400">
-                <GitBranch className="size-3 shrink-0" />
-                <span className="truncate">{group.subtitle}</span>
+                {group.isWorktree ? (
+                  <GitFork className="size-3 shrink-0" />
+                ) : (
+                  <GitBranch className="size-3 shrink-0" />
+                )}
+                <span className="truncate">{secondaryLine}</span>
               </span>
             ) : null}
           </span>
@@ -481,12 +546,19 @@ function SortableProjectGroup({
           <DropdownMenuTrigger asChild>
             <SidebarIconButton
               icon={EllipsisVertical}
-              label={`Project menu for ${group.name}`}
+              label={`Project menu for ${group.displayName}`}
               size="md"
               className="h-auto w-7 self-stretch rounded-none opacity-0 focus-visible:opacity-100 group-hover/project:opacity-100"
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
+            {canCreateWorktree ? (
+              <DropdownMenuItem onClick={onCreateWorktree}>
+                <GitFork className="size-3.5" />
+                Create worktree project
+              </DropdownMenuItem>
+            ) : null}
+            {canCreateWorktree ? <DropdownMenuSeparator /> : null}
             <DropdownMenuItem onClick={onOpenSettings}>
               <Settings className="size-3.5" />
               Settings
@@ -508,7 +580,7 @@ function SortableProjectGroup({
         </DropdownMenu>
         <SidebarIconButton
           icon={Plus}
-          label={`New session in ${group.name}`}
+          label={`New session in ${group.displayName}`}
           size="md"
           className="h-auto w-7 self-stretch rounded-none opacity-0 focus-visible:opacity-100 group-hover/project:opacity-100"
           onClick={onNewSession}

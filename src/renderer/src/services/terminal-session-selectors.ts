@@ -3,10 +3,12 @@ import type { Session } from "src/main/sessions/state";
 
 export interface ProjectSessionGroup {
   path: string;
-  name: string;
-  subtitle?: string;
+  displayName: string;
   collapsed: boolean;
   fromProjectList: boolean;
+  gitBranch?: string;
+  isWorktree: boolean;
+  worktreeOriginName?: string;
   sessions: Session[];
 }
 
@@ -31,6 +33,16 @@ export function getProjectNameFromPath(path: string): string {
   const segments = normalized.split("/").filter(Boolean);
 
   return segments[segments.length - 1] ?? path;
+}
+
+export function getProjectDisplayName(project: {
+  path: string;
+  alias?: string;
+}): string {
+  const baseName = getProjectNameFromPath(project.path);
+  const alias = project.alias?.trim();
+
+  return alias ? `${alias} (${baseName})` : baseName;
 }
 
 export function getSessionLastActivityLabel(
@@ -117,10 +129,14 @@ export function buildProjectSessionGroups(
   for (const project of state.projects) {
     groups.push({
       path: project.path,
-      name: getProjectNameFromPath(project.path),
-      subtitle: project.gitBranch,
+      displayName: getProjectDisplayName(project),
       collapsed: project.collapsed,
       fromProjectList: true,
+      gitBranch: project.gitBranch,
+      isWorktree: Boolean(project.worktreeOriginPath),
+      worktreeOriginName: project.worktreeOriginPath
+        ? getProjectNameFromPath(project.worktreeOriginPath)
+        : undefined,
       sessions: sessionsByPath.get(project.path) ?? [],
     });
     seenPaths.add(project.path);
@@ -133,9 +149,10 @@ export function buildProjectSessionGroups(
 
     groups.push({
       path,
-      name: getProjectNameFromPath(path),
+      displayName: getProjectNameFromPath(path),
       collapsed: false,
       fromProjectList: false,
+      isWorktree: false,
       sessions,
     });
   }

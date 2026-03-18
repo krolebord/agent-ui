@@ -16,7 +16,6 @@ const queryClient = new QueryClient({
     },
   },
 });
-
 createSyncStateStore()
   .then((syncState) => {
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

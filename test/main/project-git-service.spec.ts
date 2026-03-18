@@ -3,9 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const simpleGitFactoryMock = vi.hoisted(() => vi.fn());
 const checkIsRepoMock = vi.hoisted(() => vi.fn());
 const branchLocalMock = vi.hoisted(() => vi.fn());
+const rawMock = vi.hoisted(() => vi.fn());
+const readdirMock = vi.hoisted(() => vi.fn());
+const writeProjectSettingsFileMock = vi.hoisted(() => vi.fn());
 
 vi.mock("simple-git", () => ({
   default: simpleGitFactoryMock,
+}));
+
+vi.mock("node:fs/promises", () => ({
+  readdir: readdirMock,
+}));
+
+vi.mock("../../src/main/project-settings-file", () => ({
+  writeProjectSettingsFile: writeProjectSettingsFileMock,
 }));
 
 import { ProjectGitService } from "../../src/main/project-git-service";
@@ -33,7 +44,11 @@ describe("ProjectGitService", () => {
     simpleGitFactoryMock.mockImplementation((projectPath: string) => ({
       checkIsRepo: () => checkIsRepoMock(projectPath),
       branchLocal: () => branchLocalMock(projectPath),
+      raw: (args: string[]) => rawMock(projectPath, args),
     }));
+    readdirMock.mockRejectedValue(
+      Object.assign(new Error("missing"), { code: "ENOENT" }),
+    );
   });
 
   it("hydrates git branches for all tracked projects", async () => {
@@ -201,5 +216,323 @@ describe("ProjectGitService", () => {
         gitBranch: "feature/new-project",
       },
     ]);
+  });
+
+  it("returns worktree creation data for local branches", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({
+      current: "main",
+      branches: {
+        main: {},
+        develop: {},
+      },
+    });
+
+    const service = new ProjectGitService(defineProjectState(), {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.getWorktreeCreationData("/repo-one");
+
+    expect(result).toEqual({
+      currentBranch: "main",
+      localBranches: ["develop", "main"],
+      suggestedDestinationPath: "/repo-one-main",
+      suggestedDestinationParentPath: "/",
+      sourceProjectName: "repo-one",
+    });
+  });
+
+  it("returns worktree creation data for detached HEAD repositories", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({
+      current: "(no branch)",
+      branches: {
+        main: {},
+        develop: {},
+      },
+    });
+
+    const service = new ProjectGitService(defineProjectState(), {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.getWorktreeCreationData("/repo-one");
+
+    expect(result).toEqual({
+      currentBranch: "develop",
+      localBranches: ["develop", "main"],
+      suggestedDestinationPath: "/repo-one-develop",
+      suggestedDestinationParentPath: "/",
+      sourceProjectName: "repo-one",
+    });
+  });
+
+  it("creates a worktree project with alias and origin metadata", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+        localClaude: {
+          defaultModel: "opus",
+          defaultEffort: "high",
+        },
+        localCodex: {
+          permissionMode: "yolo",
+          modelReasoningEffort: "high",
+        },
+      });
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockImplementation(async (projectPath: string) => {
+      if (projectPath === "/repo-one") {
+        return {
+          current: "main",
+          branches: {
+            main: {},
+            develop: {},
+          },
+        };
+      }
+
+      if (projectPath === "/repo-one-feature-new-ui") {
+        return {
+          current: "feature/new-ui",
+          branches: {
+            "feature/new-ui": {},
+          },
+        };
+      }
+
+      return { current: null, branches: {} };
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.createWorktreeProject({
+      sourcePath: "/repo-one",
+      fromBranch: "main",
+      newBranch: "feature/new-ui",
+      destinationPath: "/repo-one-feature-new-ui",
+      alias: "UI Worktree",
+    });
+
+    expect(result).toEqual({ path: "/repo-one-feature-new-ui" });
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+      "worktree",
+      "add",
+      "-b",
+      "feature/new-ui",
+      "/repo-one-feature-new-ui",
+      "main",
+    ]);
+    expect(writeProjectSettingsFileMock).toHaveBeenCalledWith(
+      "/repo-one-feature-new-ui",
+      {
+        localClaude: {
+          defaultModel: "opus",
+          defaultEffort: "high",
+        },
+        localCodex: {
+          permissionMode: "yolo",
+          modelReasoningEffort: "high",
+        },
+        localCursor: undefined,
+      },
+    );
+    expect(projectsState.state).toEqual([
+      {
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+        localClaude: {
+          defaultModel: "opus",
+          defaultEffort: "high",
+        },
+        localCodex: {
+          permissionMode: "yolo",
+          modelReasoningEffort: "high",
+        },
+      },
+      {
+        path: "/repo-one-feature-new-ui",
+        collapsed: false,
+        alias: "UI Worktree",
+        worktreeOriginPath: "/repo-one",
+        localClaude: {
+          defaultModel: "opus",
+          defaultEffort: "high",
+        },
+        localCodex: {
+          permissionMode: "yolo",
+          modelReasoningEffort: "high",
+        },
+        gitBranch: "feature/new-ui",
+      },
+    ]);
+  });
+
+  it("creates a worktree project from a detached HEAD repository", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockImplementation(async (projectPath: string) => {
+      if (projectPath === "/repo-one") {
+        return {
+          current: "(no branch)",
+          branches: {
+            main: {},
+            develop: {},
+          },
+        };
+      }
+
+      if (projectPath === "/repo-one-feature-new-ui") {
+        return {
+          current: "feature/new-ui",
+          branches: {
+            "feature/new-ui": {},
+          },
+        };
+      }
+
+      return { current: null, branches: {} };
+    });
+
+    const service = new ProjectGitService(defineProjectState(), {
+      refreshIntervalMs: 60_000,
+    });
+
+    await expect(
+      service.createWorktreeProject({
+        sourcePath: "/repo-one",
+        fromBranch: "main",
+        newBranch: "feature/new-ui",
+        destinationPath: "/repo-one-feature-new-ui",
+      }),
+    ).resolves.toEqual({ path: "/repo-one-feature-new-ui" });
+
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+      "worktree",
+      "add",
+      "-b",
+      "feature/new-ui",
+      "/repo-one-feature-new-ui",
+      "main",
+    ]);
+  });
+
+  it("rejects worktree creation when the destination path is non-empty", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({
+      current: "main",
+      branches: {
+        main: {},
+      },
+    });
+    readdirMock.mockResolvedValue(["README.md"]);
+
+    const service = new ProjectGitService(defineProjectState(), {
+      refreshIntervalMs: 60_000,
+    });
+
+    await expect(
+      service.createWorktreeProject({
+        sourcePath: "/repo-one",
+        fromBranch: "main",
+        newBranch: "feature/new-ui",
+        destinationPath: "/repo-one-feature-new-ui",
+      }),
+    ).rejects.toThrow("Destination path already exists and is not empty.");
+  });
+
+  it("removes a worktree folder and branch when requested", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one-feature-new-ui",
+        collapsed: false,
+        gitBranch: "feature/new-ui",
+        worktreeOriginPath: "/repo-one",
+      });
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.deleteWorktreeProject({
+      path: "/repo-one-feature-new-ui",
+      deleteFolder: true,
+      deleteBranch: true,
+    });
+
+    expect(result).toEqual({});
+    expect(rawMock).toHaveBeenNthCalledWith(1, "/repo-one", [
+      "worktree",
+      "remove",
+      "/repo-one-feature-new-ui",
+    ]);
+    expect(rawMock).toHaveBeenNthCalledWith(2, "/repo-one", [
+      "branch",
+      "-d",
+      "feature/new-ui",
+    ]);
+  });
+
+  it("returns a warning when branch deletion fails after worktree removal", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one-feature-new-ui",
+        collapsed: false,
+        gitBranch: "feature/new-ui",
+        worktreeOriginPath: "/repo-one",
+      });
+    });
+
+    rawMock.mockImplementationOnce(async () => "");
+    rawMock.mockImplementationOnce(async () => {
+      throw new Error("branch is not fully merged");
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.deleteWorktreeProject({
+      path: "/repo-one-feature-new-ui",
+      deleteFolder: true,
+      deleteBranch: true,
+    });
+
+    expect(result.warning).toContain(
+      'deleting local branch "feature/new-ui" failed',
+    );
+    expect(result.warning).toContain("branch is not fully merged");
+  });
+
+  it("rejects deleting a worktree branch without deleting the folder", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one-feature-new-ui",
+        collapsed: false,
+        gitBranch: "feature/new-ui",
+        worktreeOriginPath: "/repo-one",
+      });
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+
+    await expect(
+      service.deleteWorktreeProject({
+        path: "/repo-one-feature-new-ui",
+        deleteFolder: false,
+        deleteBranch: true,
+      }),
+    ).rejects.toThrow(
+      "Deleting a worktree branch also requires deleting the folder.",
+    );
   });
 });
