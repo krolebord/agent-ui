@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-import type { ClaudeProject } from "@shared/claude-types";
+import type { ClaudeProject, GitDiffStats } from "@shared/claude-types";
 import { buildSuggestedWorktreePath } from "@shared/project-worktree";
 import simpleGit from "simple-git";
 import log from "./logger";
@@ -11,9 +11,13 @@ import {
 } from "./project-settings-file";
 
 const DEFAULT_GIT_REFRESH_INTERVAL_MS = 15_000;
+const EMPTY_GIT_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+type ProjectGitMetadata = Pick<ClaudeProject, "gitBranch" | "gitDiffStats">;
 
 interface ProjectGitData {
   currentBranch?: string;
+  diffStats: GitDiffStats;
   isRepo: boolean;
   localBranches: string[];
   git: ReturnType<typeof simpleGit>;
@@ -49,6 +53,49 @@ async function isExistingNonEmptyPath(targetPath: string): Promise<boolean> {
   }
 }
 
+function parseGitDiffStats(diffSummary: string): GitDiffStats {
+  let addedLines = 0;
+  let deletedLines = 0;
+
+  for (const line of diffSummary.trim().split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    const [addedValue, deletedValue] = trimmed.split("\t");
+    const added = Number.parseInt(addedValue ?? "", 10);
+    const deleted = Number.parseInt(deletedValue ?? "", 10);
+
+    if (Number.isFinite(added)) {
+      addedLines += added;
+    }
+    if (Number.isFinite(deleted)) {
+      deletedLines += deleted;
+    }
+  }
+
+  return { addedLines, deletedLines };
+}
+
+function countUntrackedFiles(statusSummary: string): number {
+  return statusSummary
+    .trim()
+    .split("\n")
+    .filter((line) => line.startsWith("?? ")).length;
+}
+
+async function resolveDiffBaseRef(
+  git: ReturnType<typeof simpleGit>,
+): Promise<string> {
+  try {
+    await git.raw(["rev-parse", "--verify", "HEAD"]);
+    return "HEAD";
+  } catch {
+    return EMPTY_GIT_TREE_HASH;
+  }
+}
+
 async function readProjectGitData(
   projectPath: string,
 ): Promise<ProjectGitData> {
@@ -58,29 +105,59 @@ async function readProjectGitData(
     return {
       git,
       isRepo: false,
+      diffStats: { addedLines: 0, deletedLines: 0 },
       localBranches: [],
     };
   }
 
   const summary = await git.branchLocal();
+  const diffBaseRef = await resolveDiffBaseRef(git);
+  const diffSummary = await git.raw([
+    "diff",
+    "--numstat",
+    "--no-renames",
+    diffBaseRef,
+  ]);
+  const statusSummary = await git.raw(["status", "--porcelain"]);
+  const diffStats = parseGitDiffStats(diffSummary);
+  diffStats.addedLines += countUntrackedFiles(statusSummary);
+
   return {
     git,
     isRepo: true,
     currentBranch: summary.current ?? undefined,
+    diffStats,
     localBranches: getLocalBranchNames(summary),
   };
 }
 
-async function resolveGitBranch(
+function projectGitMetadataEquals(
+  current: ProjectGitMetadata | undefined,
+  next: ProjectGitMetadata,
+): boolean {
+  return (
+    current?.gitBranch === next.gitBranch &&
+    current?.gitDiffStats?.addedLines === next.gitDiffStats?.addedLines &&
+    current?.gitDiffStats?.deletedLines === next.gitDiffStats?.deletedLines
+  );
+}
+
+async function resolveProjectGitMetadata(
   projectPath: string,
-): Promise<string | undefined> {
+): Promise<ProjectGitMetadata> {
   try {
     const projectGitData = await readProjectGitData(projectPath);
     if (!projectGitData.isRepo) {
-      return undefined;
+      return {
+        gitBranch: undefined,
+        gitDiffStats: undefined,
+      };
     }
 
-    return projectGitData.currentBranch;
+    return {
+      gitBranch: projectGitData.currentBranch,
+      gitDiffStats: projectGitData.diffStats,
+    };
   } catch (error) {
     const gitError = error as { message?: string };
     if (gitError?.message) {
@@ -90,7 +167,10 @@ async function resolveGitBranch(
       });
     }
 
-    return undefined;
+    return {
+      gitBranch: undefined,
+      gitDiffStats: undefined,
+    };
   }
 }
 
@@ -134,6 +214,26 @@ function getDefaultWorktreeBranch(projectGitData: ProjectGitData): string {
   );
 }
 
+function isDirtyWorktreeRemovalError(error: unknown): boolean {
+  const gitError = error as { message?: string };
+  return (
+    typeof gitError?.message === "string" &&
+    gitError.message.includes("contains modified or untracked files")
+  );
+}
+
+export type DeleteWorktreeProjectResult =
+  | {
+      warning?: string;
+      requiresForce?: false;
+      errorMessage?: undefined;
+    }
+  | {
+      requiresForce: true;
+      errorMessage: string;
+      warning?: undefined;
+    };
+
 export class ProjectGitService {
   private readonly refreshIntervalMs: number;
   private refreshTimer: NodeJS.Timeout | null = null;
@@ -158,7 +258,7 @@ export class ProjectGitService {
   }
 
   async refreshProject(projectPath: string): Promise<void> {
-    const gitBranch = await resolveGitBranch(projectPath);
+    const metadata = await resolveProjectGitMetadata(projectPath);
     if (this.disposed) {
       return;
     }
@@ -166,16 +266,17 @@ export class ProjectGitService {
     const project = this.projectsState.state.find(
       (item) => item.path === projectPath,
     );
-    if (!project || project.gitBranch === gitBranch) {
+    if (!project || projectGitMetadataEquals(project, metadata)) {
       return;
     }
 
     this.projectsState.updateState((projects) => {
       const draft = projects.find((item) => item.path === projectPath);
-      if (!draft || draft.gitBranch === gitBranch) {
+      if (!draft || projectGitMetadataEquals(draft, metadata)) {
         return;
       }
-      draft.gitBranch = gitBranch;
+      draft.gitBranch = metadata.gitBranch;
+      draft.gitDiffStats = metadata.gitDiffStats;
     });
   }
 
@@ -288,7 +389,8 @@ export class ProjectGitService {
     path: string;
     deleteFolder: boolean;
     deleteBranch: boolean;
-  }): Promise<{ warning?: string }> {
+    forceDeleteFolder: boolean;
+  }): Promise<DeleteWorktreeProjectResult> {
     const projectPath = input.path.trim();
     const project = this.projectsState.state.find(
       (item) => item.path === projectPath,
@@ -312,7 +414,25 @@ export class ProjectGitService {
     }
 
     const sourceGit = simpleGit(project.worktreeOriginPath);
-    await sourceGit.raw(["worktree", "remove", projectPath]);
+    const removeWorktreeArgs = ["worktree", "remove"];
+    if (input.forceDeleteFolder) {
+      removeWorktreeArgs.push("--force");
+    }
+    removeWorktreeArgs.push(projectPath);
+
+    try {
+      await sourceGit.raw(removeWorktreeArgs);
+    } catch (error) {
+      if (!input.forceDeleteFolder && isDirtyWorktreeRemovalError(error)) {
+        return {
+          requiresForce: true,
+          errorMessage:
+            "Project folder has modified or untracked files. Enable force delete to remove the worktree and discard those changes.",
+        };
+      }
+
+      throw error;
+    }
 
     if (!input.deleteBranch || !project.gitBranch) {
       return {};
@@ -340,10 +460,13 @@ export class ProjectGitService {
       const projectPaths = this.projectsState.state.map(
         (project) => project.path,
       );
-      const branches = await Promise.all(
+      const metadataEntries = await Promise.all(
         projectPaths.map(
           async (projectPath) =>
-            [projectPath, await resolveGitBranch(projectPath)] as const,
+            [
+              projectPath,
+              await resolveProjectGitMetadata(projectPath),
+            ] as const,
         ),
       );
 
@@ -351,16 +474,15 @@ export class ProjectGitService {
         return;
       }
 
-      const branchByPath = new Map(branches);
-      const currentBranchByPath = new Map(
-        this.projectsState.state.map((project) => [
-          project.path,
-          project.gitBranch,
-        ]),
-      );
-      const hasChanges = branches.some(
-        ([projectPath, gitBranch]) =>
-          currentBranchByPath.get(projectPath) !== gitBranch,
+      const metadataByPath = new Map(metadataEntries);
+      const hasChanges = metadataEntries.some(
+        ([projectPath, metadata]) =>
+          !projectGitMetadataEquals(
+            this.projectsState.state.find(
+              (project) => project.path === projectPath,
+            ),
+            metadata,
+          ),
       );
 
       if (!hasChanges) {
@@ -369,16 +491,17 @@ export class ProjectGitService {
 
       this.projectsState.updateState((projects) => {
         for (const project of projects) {
-          if (!branchByPath.has(project.path)) {
+          const metadata = metadataByPath.get(project.path);
+          if (!metadata) {
             continue;
           }
 
-          const gitBranch = branchByPath.get(project.path);
-          if (project.gitBranch === gitBranch) {
+          if (projectGitMetadataEquals(project, metadata)) {
             continue;
           }
 
-          project.gitBranch = gitBranch;
+          project.gitBranch = metadata.gitBranch;
+          project.gitDiffStats = metadata.gitDiffStats;
         }
       });
     })().finally(() => {

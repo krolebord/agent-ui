@@ -46,6 +46,12 @@ describe("ProjectGitService", () => {
       branchLocal: () => branchLocalMock(projectPath),
       raw: (args: string[]) => rawMock(projectPath, args),
     }));
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "rev-parse") {
+        return "0123456789abcdef\n";
+      }
+      return "";
+    });
     readdirMock.mockRejectedValue(
       Object.assign(new Error("missing"), { code: "ENOENT" }),
     );
@@ -74,8 +80,18 @@ describe("ProjectGitService", () => {
     await service.refreshAll();
 
     expect(projectsState.state).toEqual([
-      { path: "/repo-one", collapsed: false, gitBranch: "main" },
-      { path: "/repo-two", collapsed: false, gitBranch: undefined },
+      {
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
+      },
+      {
+        path: "/repo-two",
+        collapsed: false,
+        gitBranch: undefined,
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
+      },
     ]);
   });
 
@@ -98,17 +114,27 @@ describe("ProjectGitService", () => {
 
     expect(projectsState.state).toEqual([
       { path: "/repo-one", collapsed: false, gitBranch: "main" },
-      { path: "/repo-two", collapsed: false, gitBranch: "release" },
+      {
+        path: "/repo-two",
+        collapsed: false,
+        gitBranch: "release",
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
+      },
     ]);
     expect(simpleGitFactoryMock).toHaveBeenCalledWith("/repo-two");
     expect(checkIsRepoMock).toHaveBeenCalledWith("/repo-two");
     expect(branchLocalMock).toHaveBeenCalledWith("/repo-two");
   });
 
-  it("skips branch lookup when the path is not a git repo", async () => {
+  it("clears git metadata when the path is not a git repo", async () => {
     const projectsState = defineProjectState();
     projectsState.updateState((projects) => {
-      projects.push({ path: "/plain-dir", collapsed: false });
+      projects.push({
+        path: "/plain-dir",
+        collapsed: false,
+        gitBranch: "stale-branch",
+        gitDiffStats: { addedLines: 12, deletedLines: 4 },
+      });
     });
 
     checkIsRepoMock.mockResolvedValue(false);
@@ -123,6 +149,7 @@ describe("ProjectGitService", () => {
     ]);
     expect(checkIsRepoMock).toHaveBeenCalledWith("/plain-dir");
     expect(branchLocalMock).not.toHaveBeenCalled();
+    expect(rawMock).not.toHaveBeenCalled();
   });
 
   it("starts refreshing in the background without blocking startup", async () => {
@@ -157,7 +184,12 @@ describe("ProjectGitService", () => {
 
     await vi.waitFor(() => {
       expect(projectsState.state).toEqual([
-        { path: "/repo-one", collapsed: false, gitBranch: "main" },
+        {
+          path: "/repo-one",
+          collapsed: false,
+          gitBranch: "main",
+          gitDiffStats: { addedLines: 0, deletedLines: 0 },
+        },
       ]);
     });
 
@@ -202,6 +234,7 @@ describe("ProjectGitService", () => {
         path: "/repo-two",
         collapsed: false,
         gitBranch: "feature/new-project",
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
       },
     ]);
 
@@ -209,11 +242,150 @@ describe("ProjectGitService", () => {
     await refreshAllPromise;
 
     expect(projectsState.state).toEqual([
-      { path: "/repo-one", collapsed: false, gitBranch: "main" },
+      {
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
+      },
       {
         path: "/repo-two",
         collapsed: false,
         gitBranch: "feature/new-project",
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
+      },
+    ]);
+  });
+
+  it("hydrates clean repos with zero diff stats", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+      });
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    await service.refreshProject("/repo-one");
+
+    expect(projectsState.state).toEqual([
+      {
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
+      },
+    ]);
+  });
+
+  it("counts untracked files in diff stats", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+      });
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+    rawMock.mockImplementation(async (projectPath: string, args: string[]) => {
+      if (projectPath !== "/repo-one") {
+        return "";
+      }
+      if (args[0] === "rev-parse") {
+        return "0123456789abcdef\n";
+      }
+      if (args[0] === "status" && args[1] === "--porcelain") {
+        return "?? new-file.txt\n?? src/new-module.ts\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    await service.refreshProject("/repo-one");
+
+    expect(projectsState.state).toEqual([
+      {
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+        gitDiffStats: { addedLines: 2, deletedLines: 0 },
+      },
+    ]);
+  });
+
+  it("does not update state when git metadata is unchanged", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
+      });
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+
+    const updateStateSpy = vi.spyOn(projectsState, "updateState");
+    updateStateSpy.mockClear();
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    await service.refreshAll();
+
+    expect(updateStateSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the empty tree when HEAD does not exist yet", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({ path: "/repo-one", collapsed: false });
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+    rawMock.mockImplementation(async (projectPath: string, args: string[]) => {
+      if (projectPath !== "/repo-one") {
+        return "";
+      }
+      if (args[0] === "rev-parse") {
+        throw new Error("Needed a single revision");
+      }
+      if (
+        args[0] === "diff" &&
+        args[1] === "--numstat" &&
+        args[3] === "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+      ) {
+        return "3\t1\tsrc/index.ts\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    await service.refreshProject("/repo-one");
+
+    expect(projectsState.state).toEqual([
+      {
+        path: "/repo-one",
+        collapsed: false,
+        gitBranch: "main",
+        gitDiffStats: { addedLines: 3, deletedLines: 1 },
       },
     ]);
   });
@@ -374,6 +546,7 @@ describe("ProjectGitService", () => {
           fastMode: true,
         },
         gitBranch: "feature/new-ui",
+        gitDiffStats: { addedLines: 0, deletedLines: 0 },
       },
     ]);
   });
@@ -468,6 +641,7 @@ describe("ProjectGitService", () => {
       path: "/repo-one-feature-new-ui",
       deleteFolder: true,
       deleteBranch: true,
+      forceDeleteFolder: false,
     });
 
     expect(result).toEqual({});
@@ -506,6 +680,7 @@ describe("ProjectGitService", () => {
       path: "/repo-one-feature-new-ui",
       deleteFolder: true,
       deleteBranch: true,
+      forceDeleteFolder: false,
     });
 
     expect(result.warning).toContain(
@@ -534,9 +709,118 @@ describe("ProjectGitService", () => {
         path: "/repo-one-feature-new-ui",
         deleteFolder: false,
         deleteBranch: true,
+        forceDeleteFolder: false,
       }),
     ).rejects.toThrow(
       "Deleting a worktree branch also requires deleting the folder.",
     );
+  });
+
+  it("returns a force-delete response for dirty worktrees", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one-feature-new-ui",
+        collapsed: false,
+        gitBranch: "feature/new-ui",
+        worktreeOriginPath: "/repo-one",
+      });
+    });
+
+    rawMock.mockImplementationOnce(async () => {
+      throw new Error(
+        "fatal: '/repo-one-feature-new-ui' contains modified or untracked files, use --force to delete it",
+      );
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.deleteWorktreeProject({
+      path: "/repo-one-feature-new-ui",
+      deleteFolder: true,
+      deleteBranch: true,
+      forceDeleteFolder: false,
+    });
+
+    expect(result).toEqual({
+      requiresForce: true,
+      errorMessage:
+        "Project folder has modified or untracked files. Enable force delete to remove the worktree and discard those changes.",
+    });
+    expect(rawMock).toHaveBeenCalledTimes(1);
+    expect(rawMock).toHaveBeenNthCalledWith(1, "/repo-one", [
+      "worktree",
+      "remove",
+      "/repo-one-feature-new-ui",
+    ]);
+  });
+
+  it("forces dirty worktree removal when requested", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one-feature-new-ui",
+        collapsed: false,
+        gitBranch: "feature/new-ui",
+        worktreeOriginPath: "/repo-one",
+      });
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.deleteWorktreeProject({
+      path: "/repo-one-feature-new-ui",
+      deleteFolder: true,
+      deleteBranch: false,
+      forceDeleteFolder: true,
+    });
+
+    expect(result).toEqual({});
+    expect(rawMock).toHaveBeenNthCalledWith(1, "/repo-one", [
+      "worktree",
+      "remove",
+      "--force",
+      "/repo-one-feature-new-ui",
+    ]);
+  });
+
+  it("returns a warning when forced worktree branch deletion fails", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({
+        path: "/repo-one-feature-new-ui",
+        collapsed: false,
+        gitBranch: "feature/new-ui",
+        worktreeOriginPath: "/repo-one",
+      });
+    });
+
+    rawMock.mockImplementationOnce(async () => "");
+    rawMock.mockImplementationOnce(async () => {
+      throw new Error("branch is not fully merged");
+    });
+
+    const service = new ProjectGitService(projectsState, {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.deleteWorktreeProject({
+      path: "/repo-one-feature-new-ui",
+      deleteFolder: true,
+      deleteBranch: true,
+      forceDeleteFolder: true,
+    });
+
+    expect(result.warning).toContain(
+      'deleting local branch "feature/new-ui" failed',
+    );
+    expect(result.warning).toContain("branch is not fully merged");
+    expect(rawMock).toHaveBeenNthCalledWith(1, "/repo-one", [
+      "worktree",
+      "remove",
+      "--force",
+      "/repo-one-feature-new-ui",
+    ]);
   });
 });
