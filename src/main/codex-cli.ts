@@ -12,10 +12,13 @@ export interface BuildCodexArgsInput {
   fastMode?: CodexFastMode;
   configOverrides?: string;
   initialPrompt?: string;
+  resumeSessionId?: string;
 }
 
 export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
-  const args: string[] = ["--no-alt-screen"];
+  const args: string[] = input.resumeSessionId
+    ? ["resume", input.resumeSessionId, "--no-alt-screen"]
+    : ["--no-alt-screen"];
 
   if (input.permissionMode === "full-auto") {
     args.push("--full-auto");
@@ -47,7 +50,7 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
     }
   }
 
-  if (input.initialPrompt?.trim()) {
+  if (!input.resumeSessionId && input.initialPrompt?.trim()) {
     args.push(shellQuote(input.initialPrompt));
   }
 

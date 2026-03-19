@@ -1,4 +1,5 @@
 import { call, EventPublisher } from "@orpc/server";
+import type { ClaudeActivityState } from "@shared/claude-types";
 import {
   type CodexFastMode,
   type CodexModelReasoningEffort,
@@ -9,6 +10,7 @@ import {
 import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
 import { z } from "zod";
+import { CodexActivityMonitor } from "../codex-activity-monitor";
 import { buildCodexArgs } from "../codex-cli";
 import type { CodexSessionLogFileManager } from "../codex-session-log-file-manager";
 import { getCodexUsage } from "../codex-usage";
@@ -31,6 +33,7 @@ const DEFAULT_CODEX_SESSION_TITLE = "Codex Session";
 
 export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
   type: z.literal("codex-local-terminal"),
+  codexSessionId: z.string().optional(),
   startupConfig: z.object({
     cwd: z.string(),
     model: z.string().optional(),
@@ -102,13 +105,16 @@ export const codexSessionsRouter = {
 
       context.sessions.codex.startLiveSession({
         sessionId,
+        codexSessionId: session.codexSessionId,
         cwd: session.startupConfig.cwd,
         model: session.startupConfig.model,
         modelReasoningEffort: session.startupConfig.modelReasoningEffort,
         fastMode: session.startupConfig.fastMode,
         permissionMode: session.startupConfig
           .permissionMode as CodexPermissionMode,
-        initialPrompt: session.startupConfig.initialPrompt,
+        initialPrompt: session.codexSessionId
+          ? undefined
+          : session.startupConfig.initialPrompt,
         configOverrides: session.startupConfig.configOverrides,
         cols: input.cols,
         rows: input.rows,
@@ -175,6 +181,7 @@ export const codexSessionsRouter = {
 
 interface CodexSessionRecord {
   terminal: TerminalSession;
+  activityMonitor: CodexActivityMonitor | null;
   dispose: () => Promise<void>;
 }
 
@@ -182,6 +189,32 @@ interface CodexSessionsManagerOptions {
   state: SessionServiceState;
   titleManager?: SessionTitleManager;
   sessionLogFileManager?: CodexSessionLogFileManager;
+}
+
+function getCodexSessionStatus(
+  terminal: TerminalSession,
+  activityState: ClaudeActivityState | null,
+): SessionStatus {
+  const terminalStatus = terminal.status;
+
+  if (terminalStatus === "starting") return "starting";
+  if (terminalStatus === "stopping") return "stopping";
+  if (terminalStatus === "error") return "error";
+  if (terminalStatus === "stopped") return "stopped";
+
+  if (activityState === "awaiting_approval") return "awaiting_approval";
+  if (activityState === "awaiting_user_response")
+    return "awaiting_user_response";
+  if (activityState === "working") return "running";
+
+  return "idle";
+}
+
+function normalizeCodexTitlePrompt(prompt: string): string {
+  const trimmedPrompt = prompt.trim();
+  return /^\/plan(?:\s+|$)/.test(trimmedPrompt)
+    ? trimmedPrompt.replace(/^\/plan(?:\s+)?/, "").trim()
+    : trimmedPrompt;
 }
 
 export class CodexSessionsManager {
@@ -220,6 +253,7 @@ export class CodexSessionsManager {
       lastActivityAt: Date.now(),
       status: "stopped",
       title: sessionName ?? DEFAULT_CODEX_SESSION_TITLE,
+      codexSessionId: undefined,
       startupConfig: {
         cwd: input.cwd,
         model: input.model,
@@ -247,22 +281,25 @@ export class CodexSessionsManager {
     sessionId: string,
     initialPrompt: string,
   ) {
-    const prompt = /^\/plan(?:\s+|$)/.test(initialPrompt)
-      ? initialPrompt.replace(/^\/plan(?:\s+)?/, "").trim()
-      : initialPrompt;
+    const prompt = normalizeCodexTitlePrompt(initialPrompt);
     if (!prompt) {
       return;
     }
 
+    this.triggerTitleGeneration(sessionId, prompt);
+  }
+
+  private triggerTitleGeneration(sessionId: string, prompt: string) {
+    const state = this.sessionsState;
     this.titleManager.maybeGenerate({
       sessionId,
       prompt,
       sessionExists: () => {
-        const session = this.sessionsState.state[sessionId];
+        const session = state.state[sessionId];
         return !!session && session.type === "codex-local-terminal";
       },
       onTitleReady: (title) => {
-        this.sessionsState.updateState((state) => {
+        state.updateState((state) => {
           const session = state[sessionId];
           if (!session || session.type !== "codex-local-terminal") {
             return;
@@ -278,6 +315,7 @@ export class CodexSessionsManager {
 
   startLiveSession({
     sessionId,
+    codexSessionId,
     cwd,
     model,
     modelReasoningEffort,
@@ -289,6 +327,7 @@ export class CodexSessionsManager {
     rows,
   }: {
     sessionId: string;
+    codexSessionId?: string;
     cwd: string;
     model?: string;
     modelReasoningEffort: CodexModelReasoningEffort;
@@ -338,6 +377,7 @@ export class CodexSessionsManager {
         : undefined) || undefined;
 
     const { args } = buildCodexArgs({
+      resumeSessionId: codexSessionId,
       permissionMode,
       model,
       modelReasoningEffort,
@@ -353,6 +393,72 @@ export class CodexSessionsManager {
       });
     }
 
+    const activityMonitor = sessionLogPath
+      ? new CodexActivityMonitor({
+          onStatusChange: (nextActivityStatus) => {
+            activityState = nextActivityStatus;
+            setSessionStatus(getCodexSessionStatus(terminal, activityState));
+            if (
+              nextActivityStatus === "awaiting_approval" ||
+              nextActivityStatus === "awaiting_user_response"
+            ) {
+              syncBufferedOutput.flush();
+            }
+          },
+          onLogEvent: (event) => {
+            if (event.kind !== "codex_event") {
+              return;
+            }
+
+            if (event.payload?.msg?.type !== "user_message") {
+              if (event.payload?.msg?.type !== "session_configured") {
+                return;
+              }
+
+              const nextCodexSessionId =
+                typeof event.payload.msg.session_id === "string"
+                  ? event.payload.msg.session_id
+                  : undefined;
+              if (!nextCodexSessionId) {
+                return;
+              }
+
+              state.updateState((state) => {
+                const session = state[sessionId];
+                if (!session || session.type !== "codex-local-terminal") {
+                  return;
+                }
+                session.codexSessionId = nextCodexSessionId;
+              });
+              return;
+            }
+
+            const session = state.state[sessionId];
+            if (
+              !session ||
+              session.type !== "codex-local-terminal" ||
+              session.title !== DEFAULT_CODEX_SESSION_TITLE
+            ) {
+              return;
+            }
+
+            const prompt =
+              typeof event.payload.msg.message === "string"
+                ? normalizeCodexTitlePrompt(event.payload.msg.message)
+                : "";
+            if (!prompt) {
+              return;
+            }
+
+            this.triggerTitleGeneration(sessionId, prompt);
+          },
+        })
+      : null;
+
+    let activityState: ClaudeActivityState | null = activityMonitor
+      ? activityMonitor.getState()
+      : null;
+
     const terminal = createTerminalSession({
       onData: ({ chunk }) => {
         this.eventPublisher.publish(sessionId, {
@@ -363,7 +469,7 @@ export class CodexSessionsManager {
         syncBufferedOutput.schedule();
       },
       onStatusChange: (status) => {
-        setSessionStatus(status === "running" ? "idle" : status);
+        setSessionStatus(getCodexSessionStatus(terminal, activityState));
         if (status === "stopped") {
           syncBufferedOutput.flush();
         }
@@ -393,6 +499,13 @@ export class CodexSessionsManager {
       },
     });
     disposable.addDisposable(() => terminal.stop());
+    if (activityMonitor) {
+      disposable.addDisposable(() => activityMonitor.stopMonitoring());
+    }
+
+    if (activityMonitor && sessionLogPath) {
+      activityMonitor.startMonitoring(sessionLogPath);
+    }
 
     terminal.start({
       file: "codex",
@@ -411,6 +524,7 @@ export class CodexSessionsManager {
 
     const session: CodexSessionRecord = {
       terminal,
+      activityMonitor,
       dispose: disposable.dispose,
     };
     this.liveSessions.set(sessionId, session);

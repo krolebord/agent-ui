@@ -47,4 +47,22 @@ describe("buildCodexArgs", () => {
     expect(args).toContain("fast_mode");
     expect(args).not.toContain("service_tier=fast");
   });
+
+  it("builds resume args when a codex session id is provided", () => {
+    const { args } = buildCodexArgs({
+      permissionMode: "default",
+      resumeSessionId: "019d0192-767b-7cc1-bdd9-9c8a13484557",
+      initialPrompt: "should not be forwarded",
+    });
+
+    expect(args).toEqual([
+      "resume",
+      "019d0192-767b-7cc1-bdd9-9c8a13484557",
+      "--no-alt-screen",
+      "--model",
+      "gpt-5.3-codex",
+      "-c",
+      "model_reasoning_effort=high",
+    ]);
+  });
 });
