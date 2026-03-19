@@ -26,9 +26,14 @@ import {
   FolderSearch,
   LoaderCircle,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
+import {
+  filterVisibleBranches,
+  getInitialActiveBranch,
+  getNextActiveBranch,
+} from "./project-worktree-dialog-helpers";
 
 type WorktreeCreationData = Awaited<
   ReturnType<(typeof orpc.projects.getWorktreeCreationData)["call"]>
@@ -107,12 +112,14 @@ export function ProjectWorktreeDialog() {
   const [fromBranch, setFromBranch] = useState("");
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [branchQuery, setBranchQuery] = useState("");
+  const [activeBranch, setActiveBranch] = useState<string | null>(null);
   const [newBranch, setNewBranch] = useState("");
   const [alias, setAlias] = useState("");
   const [parentPath, setParentPath] = useState("");
   const [destinationPath, setDestinationPath] = useState("");
   const [destinationWasEdited, setDestinationWasEdited] = useState(false);
   const branchSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const branchListboxId = useId();
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -148,6 +155,7 @@ export function ProjectWorktreeDialog() {
       setFromBranch("");
       setBranchPickerOpen(false);
       setBranchQuery("");
+      setActiveBranch(null);
       setNewBranch("");
       setAlias("");
       setParentPath("");
@@ -172,6 +180,7 @@ export function ProjectWorktreeDialog() {
         setFromBranch(data.currentBranch);
         setBranchPickerOpen(false);
         setBranchQuery("");
+        setActiveBranch(null);
         setNewBranch("");
         setAlias("");
         setParentPath(data.suggestedDestinationParentPath);
@@ -221,6 +230,19 @@ export function ProjectWorktreeDialog() {
     );
   }, [creationData, destinationWasEdited, newBranch, parentPath]);
 
+  const visibleBranches = useMemo(
+    () => filterVisibleBranches(creationData?.localBranches ?? [], branchQuery),
+    [creationData?.localBranches, branchQuery],
+  );
+
+  useEffect(() => {
+    if (!branchPickerOpen) {
+      return;
+    }
+
+    setActiveBranch(getInitialActiveBranch(visibleBranches, fromBranch));
+  }, [branchPickerOpen, fromBranch, visibleBranches]);
+
   if (!openProjectPath) {
     return null;
   }
@@ -229,13 +251,12 @@ export function ProjectWorktreeDialog() {
     ? getProjectDisplayName(project)
     : (creationData?.sourceProjectName ?? openProjectPath);
   const isPending = isLoading || createMutation.isPending;
-  const normalizedBranchQuery = branchQuery.trim().toLocaleLowerCase();
-  const visibleBranches =
-    creationData?.localBranches.filter((branch) =>
-      normalizedBranchQuery
-        ? branch.toLocaleLowerCase().includes(normalizedBranchQuery)
-        : true,
-    ) ?? [];
+  const selectBranch = (branch: string) => {
+    setFromBranch(branch);
+    setBranchPickerOpen(false);
+    setBranchQuery("");
+    setActiveBranch(null);
+  };
 
   const closeDialog = () => {
     if (createMutation.isPending) {
@@ -328,6 +349,7 @@ export function ProjectWorktreeDialog() {
                 setBranchPickerOpen(open);
                 if (!open) {
                   setBranchQuery("");
+                  setActiveBranch(null);
                 }
               }}
             >
@@ -364,14 +386,58 @@ export function ProjectWorktreeDialog() {
               >
                 <div className="border-b p-2">
                   <Input
+                    aria-autocomplete="list"
+                    aria-controls={branchListboxId}
+                    aria-activedescendant={
+                      activeBranch && visibleBranches.includes(activeBranch)
+                        ? `${branchListboxId}-${visibleBranches.indexOf(activeBranch)}`
+                        : undefined
+                    }
                     ref={branchSearchInputRef}
                     value={branchQuery}
                     onChange={(event) => {
                       setBranchQuery(event.target.value);
                     }}
                     onKeyDown={(event) => {
+                      if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        setActiveBranch(
+                          getNextActiveBranch(
+                            visibleBranches,
+                            activeBranch,
+                            "next",
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setActiveBranch(
+                          getNextActiveBranch(
+                            visibleBranches,
+                            activeBranch,
+                            "previous",
+                          ),
+                        );
+                        return;
+                      }
+
                       if (event.key === "Enter") {
                         event.preventDefault();
+                        const branchToSelect =
+                          activeBranch && visibleBranches.includes(activeBranch)
+                            ? activeBranch
+                            : getInitialActiveBranch(
+                                visibleBranches,
+                                fromBranch,
+                              );
+
+                        if (!branchToSelect) {
+                          return;
+                        }
+
+                        selectBranch(branchToSelect);
                       }
                     }}
                     placeholder="Search branches..."
@@ -379,28 +445,33 @@ export function ProjectWorktreeDialog() {
                   />
                 </div>
                 <div
+                  id={branchListboxId}
                   className="max-h-64 overflow-y-auto p-1"
                   role="listbox"
                   aria-label="Branches"
                 >
                   {visibleBranches.length ? (
-                    visibleBranches.map((branch) => {
+                    visibleBranches.map((branch, index) => {
                       const isSelected = branch === fromBranch;
+                      const isActive = branch === activeBranch;
 
                       return (
                         <button
                           key={branch}
+                          id={`${branchListboxId}-${index}`}
                           type="button"
                           role="option"
                           aria-selected={isSelected}
                           className={cn(
                             "hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden",
-                            isSelected && "bg-accent text-accent-foreground",
+                            (isSelected || isActive) &&
+                              "bg-accent text-accent-foreground",
                           )}
+                          onMouseEnter={() => {
+                            setActiveBranch(branch);
+                          }}
                           onClick={() => {
-                            setFromBranch(branch);
-                            setBranchPickerOpen(false);
-                            setBranchQuery("");
+                            selectBranch(branch);
                           }}
                         >
                           <Check
