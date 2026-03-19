@@ -253,7 +253,7 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
 
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
-      <ResizablePanel defaultSize={80} minSize={40}>
+      <ResizablePanel defaultSize="80" minSize="40">
         <div className="h-full min-w-0 bg-black/10">
           {!hasCwd ? (
             <div className="flex h-full items-center justify-center p-6">
@@ -295,7 +295,7 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
         </div>
       </ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel defaultSize={20} minSize={12} maxSize={40}>
+      <ResizablePanel defaultSize="20" minSize="12" maxSize="40">
         <aside className="flex h-full flex-col border-l border-border/70 bg-black/15">
           <div className="flex h-7 border-b border-border/70">
             <div className="flex flex-1 items-center gap-1.5 px-2">
