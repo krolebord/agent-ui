@@ -399,6 +399,15 @@ describe("ProjectGitService", () => {
         develop: {},
       },
     });
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "branch") {
+        return "main\ndevelop\n";
+      }
+      if (args[0] === "rev-parse") {
+        return "0123456789abcdef\n";
+      }
+      return "";
+    });
 
     const service = new ProjectGitService(defineProjectState(), {
       refreshIntervalMs: 60_000,
@@ -407,7 +416,7 @@ describe("ProjectGitService", () => {
 
     expect(result).toEqual({
       currentBranch: "main",
-      localBranches: ["develop", "main"],
+      localBranches: ["main", "develop"],
       suggestedDestinationPath: "/repo-one-main",
       suggestedDestinationParentPath: "/",
       sourceProjectName: "repo-one",
@@ -423,6 +432,15 @@ describe("ProjectGitService", () => {
         develop: {},
       },
     });
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "branch") {
+        return "develop\nmain\n";
+      }
+      if (args[0] === "rev-parse") {
+        return "0123456789abcdef\n";
+      }
+      return "";
+    });
 
     const service = new ProjectGitService(defineProjectState(), {
       refreshIntervalMs: 60_000,
@@ -436,6 +454,33 @@ describe("ProjectGitService", () => {
       suggestedDestinationParentPath: "/",
       sourceProjectName: "repo-one",
     });
+  });
+
+  it("falls back to alphabetical branch ordering when recency lookup fails", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({
+      current: "main",
+      branches: {
+        main: {},
+        develop: {},
+      },
+    });
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "branch") {
+        throw new Error("branch sort failed");
+      }
+      if (args[0] === "rev-parse") {
+        return "0123456789abcdef\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(defineProjectState(), {
+      refreshIntervalMs: 60_000,
+    });
+    const result = await service.getWorktreeCreationData("/repo-one");
+
+    expect(result.localBranches).toEqual(["develop", "main"]);
   });
 
   it("creates a worktree project with alias and origin metadata", async () => {

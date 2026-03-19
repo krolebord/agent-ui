@@ -23,7 +23,7 @@ interface ProjectGitData {
   git: ReturnType<typeof simpleGit>;
 }
 
-function getLocalBranchNames(summary: {
+function getDiscoveredLocalBranchNames(summary: {
   current?: string | null;
   branches?: Record<string, unknown>;
 }): string[] {
@@ -36,7 +36,58 @@ function getLocalBranchNames(summary: {
     localBranches.push(summary.current);
   }
 
-  return localBranches.sort((a, b) => a.localeCompare(b));
+  return localBranches;
+}
+
+function alphabetizeBranchNames(branches: string[]): string[] {
+  return [...branches].sort((a, b) => a.localeCompare(b));
+}
+
+function parseBranchOrderOutput(output: string): string[] {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+async function getLocalBranchNames(
+  git: ReturnType<typeof simpleGit>,
+  summary: {
+    current?: string | null;
+    branches?: Record<string, unknown>;
+  },
+): Promise<string[]> {
+  const discoveredBranches = getDiscoveredLocalBranchNames(summary);
+  if (!discoveredBranches.length) {
+    return [];
+  }
+
+  try {
+    const orderedBranchesOutput = await git.raw([
+      "branch",
+      "--format=%(refname:short)",
+      "--sort=-committerdate",
+    ]);
+    const discoveredBranchSet = new Set(discoveredBranches);
+    const orderedBranches = parseBranchOrderOutput(
+      orderedBranchesOutput,
+    ).filter((branch) => discoveredBranchSet.has(branch));
+
+    if (!orderedBranches.length) {
+      return alphabetizeBranchNames(discoveredBranches);
+    }
+
+    const seenBranches = new Set(orderedBranches);
+    for (const branch of alphabetizeBranchNames(discoveredBranches)) {
+      if (!seenBranches.has(branch)) {
+        orderedBranches.push(branch);
+      }
+    }
+
+    return orderedBranches;
+  } catch {
+    return alphabetizeBranchNames(discoveredBranches);
+  }
 }
 
 async function isExistingNonEmptyPath(targetPath: string): Promise<boolean> {
@@ -127,7 +178,7 @@ async function readProjectGitData(
     isRepo: true,
     currentBranch: summary.current ?? undefined,
     diffStats,
-    localBranches: getLocalBranchNames(summary),
+    localBranches: await getLocalBranchNames(git, summary),
   };
 }
 
