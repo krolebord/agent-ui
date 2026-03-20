@@ -190,11 +190,9 @@ export function SessionHeader({ session }: { session: Session }) {
             </span>
           ) : null}
           {aheadCommits ? (
-            <>
-              <span className={addedLines || deletedLines ? "ml-2" : undefined}>
-                ↑{aheadCommits}
-              </span>
-            </>
+            <span className={addedLines || deletedLines ? "ml-2" : undefined}>
+              ↑{aheadCommits}
+            </span>
           ) : null}
           {behindCommits ? (
             <span
