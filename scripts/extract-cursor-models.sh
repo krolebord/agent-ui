@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Run agent with an invalid model to get the list of available models
-OUTPUT=$(agent --model "invalid model" 2>&1 || true)
+# Fetch the list of available models from Cursor Agent.
+OUTPUT=$(agent --list-models 2>&1)
 
-# Extract everything after "Available models: "
-MODELS_RAW=$(echo "$OUTPUT" | sed -n 's/.*Available models: //p')
+# Strip ANSI escape sequences and parse model ids from lines like:
+# gpt-5.3-codex-high - GPT-5.3 Codex High
+SANITIZED_OUTPUT=$(printf "%s\n" "$OUTPUT" | sed -E $'s/\x1B\\[[0-9;]*[[:alpha:]]//g')
+MODELS=()
+while IFS= read -r model; do
+  [ -z "$model" ] && continue
+  MODELS+=("$model")
+done < <(
+  printf "%s\n" "$SANITIZED_OUTPUT" | sed -nE 's/^([a-z0-9][a-z0-9.-]*) - .*/\1/p'
+)
 
-if [ -z "$MODELS_RAW" ]; then
+if [ "${#MODELS[@]}" -eq 0 ]; then
   echo "Error: Could not extract models from agent output" >&2
   echo "Output was: $OUTPUT" >&2
   exit 1
@@ -28,8 +36,6 @@ TARGET="src/shared/cursor-models.ts"
   echo ""
   echo "export const cursorModels: CursorModel[] = ["
 
-  # Split on ", " and process each model
-  IFS=', ' read -ra MODELS <<< "$MODELS_RAW"
   for model in "${MODELS[@]}"; do
     # Skip empty strings from splitting
     [ -z "$model" ] && continue
@@ -59,4 +65,4 @@ TARGET="src/shared/cursor-models.ts"
   echo "];"
 } > "$TARGET"
 
-echo "Generated $TARGET with $(echo "$MODELS_RAW" | tr ',' '\n' | wc -l | tr -d ' ') models"
+echo "Generated $TARGET with ${#MODELS[@]} models"
