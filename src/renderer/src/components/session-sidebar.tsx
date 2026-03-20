@@ -183,6 +183,48 @@ function stripSessionBufferedOutput(
   return sessionWithoutBufferedOutput;
 }
 
+function isSessionActive(session: Session): boolean {
+  if (session.type === "ralph-loop") {
+    return session.loopState.autonomousEnabled || session.status !== "stopped";
+  }
+
+  return session.status !== "stopped";
+}
+
+async function stopSession(session: Session): Promise<void> {
+  switch (session.type) {
+    case "claude-local-terminal":
+      await orpc.sessions.localClaude.stopLiveSession.call({
+        sessionId: session.sessionId,
+      });
+      return;
+    case "local-terminal":
+      await orpc.sessions.localTerminal.stopLiveSession.call({
+        sessionId: session.sessionId,
+      });
+      return;
+    case "ralph-loop":
+      await orpc.sessions.ralphLoop.stopLoop.call({
+        sessionId: session.sessionId,
+      });
+      return;
+    case "codex-local-terminal":
+      await orpc.sessions.codex.stopLiveSession.call({
+        sessionId: session.sessionId,
+      });
+      return;
+    case "cursor-agent":
+      await orpc.sessions.cursorAgent.stopLiveSession.call({
+        sessionId: session.sessionId,
+      });
+      return;
+    default: {
+      const exhaustiveCheck = session satisfies never;
+      return exhaustiveCheck;
+    }
+  }
+}
+
 export function SessionSidebar() {
   const projects = useAppState((x) => x.projects);
   const sessions = useAppState((x) => x.sessions);
@@ -455,6 +497,38 @@ function SortableProjectGroup({
   }
   const secondaryLine = projectMeta.filter(Boolean).join(" • ");
   const hasAwaitingUserInput = groupHasAwaitingUserInput(group);
+  const activeSessions = group.sessions.filter(isSessionActive);
+
+  const stopAllActiveSessionsMutation = useMutation({
+    mutationFn: async (sessionsToStop: Session[]) => {
+      const stopResults = await Promise.allSettled(
+        sessionsToStop.map((session) => stopSession(session)),
+      );
+      const failedCount = stopResults.filter(
+        (result) => result.status === "rejected",
+      ).length;
+      if (failedCount > 0) {
+        throw new Error(
+          `Failed to stop ${failedCount} session${failedCount === 1 ? "" : "s"}.`,
+        );
+      }
+    },
+    onSuccess: (_, sessionsToStop) => {
+      if (sessionsToStop.length === 0) {
+        return;
+      }
+      toast.success(
+        `Stopped ${sessionsToStop.length} active session${sessionsToStop.length === 1 ? "" : "s"}.`,
+      );
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to stop active sessions",
+      );
+    },
+  });
 
   return (
     <section
@@ -518,6 +592,19 @@ function SortableProjectGroup({
                 </DropdownMenuItem>
               ) : null}
               {canCreateWorktree ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuItem
+                disabled={
+                  stopAllActiveSessionsMutation.isPending ||
+                  activeSessions.length === 0
+                }
+                onClick={() => {
+                  stopAllActiveSessionsMutation.mutate(activeSessions);
+                }}
+              >
+                <SquareIcon className="size-3.5" />
+                Stop all active sessions
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={onOpenSettings}>
                 <Settings className="size-3.5" />
                 Settings
