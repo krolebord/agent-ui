@@ -19,14 +19,13 @@ describe("CursorActivityMonitor", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("reduces matching hook events to activity states", async () => {
+  it("reduces hook events in a per-session file to activity states", async () => {
     const filePath = path.join(tempDir, "events.ndjson");
     const onStatusChange = vi.fn();
     const monitor = new CursorActivityMonitor({ onStatusChange });
 
     await monitor.startMonitoring({
       stateFilePath: filePath,
-      conversationId: "chat-1",
     });
 
     await appendRaw(
@@ -34,7 +33,6 @@ describe("CursorActivityMonitor", () => {
       `${JSON.stringify({
         timestamp: new Date().toISOString(),
         hook_event_name: "preToolUse",
-        conversation_id: "chat-1",
       })}\n`,
     );
     await appendRaw(
@@ -43,7 +41,6 @@ describe("CursorActivityMonitor", () => {
         timestamp: new Date().toISOString(),
         hook_event_name: "stop",
         status: "completed",
-        conversation_id: "chat-1",
       })}\n`,
     );
     await appendRaw(
@@ -51,7 +48,6 @@ describe("CursorActivityMonitor", () => {
       `${JSON.stringify({
         timestamp: new Date().toISOString(),
         hook_event_name: "sessionEnd",
-        conversation_id: "chat-1",
       })}\n`,
     );
 
@@ -64,14 +60,14 @@ describe("CursorActivityMonitor", () => {
     monitor.stopMonitoring();
   });
 
-  it("ignores events for other conversations", async () => {
+  it("emits hook events without conversation filtering", async () => {
     const filePath = path.join(tempDir, "events.ndjson");
     const onStatusChange = vi.fn();
-    const monitor = new CursorActivityMonitor({ onStatusChange });
+    const onHookEvent = vi.fn();
+    const monitor = new CursorActivityMonitor({ onStatusChange, onHookEvent });
 
     await monitor.startMonitoring({
       stateFilePath: filePath,
-      conversationId: "chat-1",
     });
 
     await appendRaw(
@@ -83,8 +79,15 @@ describe("CursorActivityMonitor", () => {
       })}\n`,
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 140));
-    expect(onStatusChange).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(onHookEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversation_id: "chat-2",
+          hook_event_name: "preToolUse",
+        }),
+      );
+      expect(onStatusChange).toHaveBeenCalledWith("working");
+    });
 
     monitor.stopMonitoring();
   });

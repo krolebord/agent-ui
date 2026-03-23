@@ -43,7 +43,13 @@ const activityMonitorSpies = vi.hoisted(() => {
     instances: [] as Array<{
       startMonitoring: ReturnType<typeof vi.fn>;
       stopMonitoring: ReturnType<typeof vi.fn>;
-      callbacks: { onStatusChange: (status: HookState) => void };
+      callbacks: {
+        onStatusChange: (status: HookState) => void;
+        onHookEvent?: (event: {
+          conversation_id?: string;
+          session_id?: string;
+        }) => void;
+      };
     }>,
   };
 });
@@ -108,7 +114,7 @@ function seedCursorSession(
       permissionMode: "default",
       initialPrompt: undefined,
     },
-    cursorChatId: "chat-1",
+    cursorChatId: undefined,
     bufferedOutput: "",
   };
 }
@@ -131,34 +137,64 @@ describe("CursorAgentSessionsManager", () => {
     activityMonitorSpies.state = "unknown";
   });
 
+  it("creates sessions with an undefined cursor chat id by default", async () => {
+    const sessionsState = createState();
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      cursorConfigDir: "/tmp/cursor-config",
+      sessionLogFileManager: {
+        create: vi.fn(() => "/tmp/cursor-session-1.ndjson"),
+        cleanup: vi.fn(),
+      },
+    });
+
+    const sessionId = await manager.createSession({
+      cwd: "/tmp/project",
+      permissionMode: "default",
+      sessionName: undefined,
+      initialPrompt: undefined,
+    });
+
+    expect(
+      (sessionsState.state as Record<string, CursorAgentSessionData>)[sessionId]
+        ?.cursorChatId,
+    ).toBeUndefined();
+  });
+
   it("derives status from terminal + cursor hook activity", async () => {
     const sessionsState = createState();
     seedCursorSession(
       sessionsState.state as Record<string, CursorAgentSessionData>,
       "session-1",
     );
+    const sessionLogFileManager = {
+      create: vi.fn(() => "/tmp/cursor-session-1.ndjson"),
+      cleanup: vi.fn(),
+    };
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
       cursorConfigDir: "/tmp/cursor-config",
-      cursorHookEventsFilePath: "/tmp/cursor-events.ndjson",
+      sessionLogFileManager,
     });
 
     await manager.startLiveSession({
       sessionId: "session-1",
       cwd: "/tmp/project",
       permissionMode: "default",
-      cursorChatId: "chat-1",
+      cursorChatId: undefined,
     });
 
     const monitor = activityMonitorSpies.instances[0];
     expect(monitor?.startMonitoring).toHaveBeenCalledWith({
-      stateFilePath: "/tmp/cursor-events.ndjson",
-      conversationId: "chat-1",
+      stateFilePath: "/tmp/cursor-session-1.ndjson",
     });
     expect(terminalSessionSpies.start).toHaveBeenCalledWith(
       expect.objectContaining({
-        env: { CURSOR_CONFIG_DIR: "/tmp/cursor-config" },
+        env: {
+          AGENT_UI_CURSOR_STATE_FILE: "/tmp/cursor-session-1.ndjson",
+          CURSOR_CONFIG_DIR: "/tmp/cursor-config",
+        },
       }),
     );
 
@@ -169,6 +205,13 @@ describe("CursorAgentSessionsManager", () => {
         "session-1"
       ]?.status,
     ).toBe("idle");
+
+    monitor?.callbacks.onHookEvent?.({ conversation_id: "chat-1" });
+    expect(
+      (sessionsState.state as Record<string, CursorAgentSessionData>)[
+        "session-1"
+      ]?.cursorChatId,
+    ).toBe("chat-1");
 
     monitor?.callbacks.onStatusChange("working");
     expect(
@@ -183,23 +226,76 @@ describe("CursorAgentSessionsManager", () => {
         "session-1"
       ]?.status,
     ).toBe("awaiting_user_response");
+
+    await manager.stopLiveSession("session-1");
+    expect(sessionLogFileManager.cleanup).toHaveBeenCalledWith(
+      "/tmp/cursor-session-1.ndjson",
+    );
+  });
+
+  it("reuses a hydrated cursor chat id on a later live start", async () => {
+    const sessionsState = createState();
+    seedCursorSession(
+      sessionsState.state as Record<string, CursorAgentSessionData>,
+      "session-2",
+    );
+    const sessionLogFileManager = {
+      create: vi
+        .fn()
+        .mockReturnValueOnce("/tmp/cursor-session-2a.ndjson")
+        .mockReturnValueOnce("/tmp/cursor-session-2b.ndjson"),
+      cleanup: vi.fn(),
+    };
+
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      cursorConfigDir: "/tmp/cursor-config",
+      sessionLogFileManager,
+    });
+
+    await manager.startLiveSession({
+      sessionId: "session-2",
+      cwd: "/tmp/project",
+      permissionMode: "default",
+      cursorChatId: undefined,
+    });
+
+    activityMonitorSpies.instances[0]?.callbacks.onHookEvent?.({
+      session_id: "chat-2",
+    });
+    await manager.stopLiveSession("session-2");
+
+    await manager.startLiveSession({
+      sessionId: "session-2",
+      cwd: "/tmp/project",
+      permissionMode: "default",
+      cursorChatId: (
+        sessionsState.state as Record<string, CursorAgentSessionData>
+      )["session-2"]?.cursorChatId,
+    });
+
+    expect(terminalSessionSpies.start.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        args: expect.arrayContaining(["--resume", "chat-2"]),
+      }),
+    );
   });
 
   it("falls back to terminal-only status when hook monitor is unavailable", async () => {
     const sessionsState = createState();
     seedCursorSession(
       sessionsState.state as Record<string, CursorAgentSessionData>,
-      "session-2",
+      "session-3",
     );
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
       cursorConfigDir: null,
-      cursorHookEventsFilePath: null,
+      sessionLogFileManager: null,
     });
 
     await manager.startLiveSession({
-      sessionId: "session-2",
+      sessionId: "session-3",
       cwd: "/tmp/project",
       permissionMode: "default",
       cursorChatId: undefined,
@@ -210,7 +306,7 @@ describe("CursorAgentSessionsManager", () => {
     callbacks?.onStatusChange("running");
     expect(
       (sessionsState.state as Record<string, CursorAgentSessionData>)[
-        "session-2"
+        "session-3"
       ]?.status,
     ).toBe("idle");
   });

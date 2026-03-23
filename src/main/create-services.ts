@@ -5,6 +5,7 @@ import {
 } from "./app-settings";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import { CodexSessionLogFileManager } from "./codex-session-log-file-manager";
+import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { generateCodexSessionTitle } from "./generate-codex-session-title";
 import log from "./logger";
@@ -50,7 +51,6 @@ interface ManagedPluginInitializationResult {
 
 interface ManagedCursorHooksInitializationResult {
   cursorConfigDir: string | null;
-  cursorHookEventsFilePath: string | null;
   cursorHooksWarning: string | null;
 }
 
@@ -81,13 +81,11 @@ async function initializeManagedCursorHooks(
     const managedHooks = await ensureManagedCursorStateHooks(userDataPath);
     return {
       cursorConfigDir: managedHooks.configDir,
-      cursorHookEventsFilePath: managedHooks.eventsFilePath,
       cursorHooksWarning: null,
     };
   } catch (error) {
     return {
       cursorConfigDir: null,
-      cursorHookEventsFilePath: null,
       cursorHooksWarning:
         error instanceof Error
           ? `Cursor hook monitoring failed to initialize: ${error.message}`
@@ -102,7 +100,7 @@ export async function createServices(options: CreateServicesOptions) {
   const { userDataPath, getMainWindow } = options;
   const { managedPluginDir, pluginWarning } =
     await initializeManagedPlugin(userDataPath);
-  const { cursorConfigDir, cursorHookEventsFilePath, cursorHooksWarning } =
+  const { cursorConfigDir, cursorHooksWarning } =
     await initializeManagedCursorHooks(userDataPath);
 
   const titleManager = new SessionTitleManager();
@@ -112,6 +110,9 @@ export async function createServices(options: CreateServicesOptions) {
 
   const stateFileManager = new SessionStateFileManager(userDataPath);
   const codexSessionLogFileManager = new CodexSessionLogFileManager(
+    userDataPath,
+  );
+  const cursorSessionLogFileManager = new CursorSessionLogFileManager(
     userDataPath,
   );
 
@@ -185,7 +186,7 @@ export async function createServices(options: CreateServicesOptions) {
   const cursorAgentSessionsManager = new CursorAgentSessionsManager({
     state: sessionsState,
     cursorConfigDir,
-    cursorHookEventsFilePath,
+    sessionLogFileManager: cursorSessionLogFileManager,
     cursorHooksWarning,
   });
   const powerSaveBlockerManager = new PowerSaveBlockerManager(

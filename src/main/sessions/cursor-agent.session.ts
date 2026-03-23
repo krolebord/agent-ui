@@ -1,7 +1,6 @@
 import { call, EventPublisher } from "@orpc/server";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
-import spawn from "nano-spawn";
 import { z } from "zod";
 import type { ClaudeActivityState } from "../../shared/claude-types";
 import { CursorActivityMonitor } from "../cursor-activity-monitor";
@@ -204,20 +203,13 @@ interface CursorAgentSessionsManagerOptions {
   state: SessionServiceState;
   titleManager?: SessionTitleManager;
   cursorConfigDir?: string | null;
-  cursorHookEventsFilePath?: string | null;
+  sessionLogFileManager?: CursorSessionLogFileStore | null;
   cursorHooksWarning?: string | null;
 }
 
-/**
- * Runs `cursor agent create-chat` and returns the chatId from stdout.
- */
-async function createCursorChat(): Promise<string> {
-  const { stdout } = await spawn("cursor", ["agent", "create-chat"]);
-  const chatId = stdout.trim();
-  if (!chatId) {
-    throw new Error("cursor agent create-chat returned empty output");
-  }
-  return chatId;
+interface CursorSessionLogFileStore {
+  create(sessionId: string): string;
+  cleanup(logFilePath: string | null): void;
 }
 
 function getCursorSessionStatus(
@@ -249,7 +241,7 @@ export class CursorAgentSessionsManager {
   private readonly sessionsState: SessionServiceState;
   private readonly titleManager: SessionTitleManager;
   private readonly cursorConfigDir: string | null;
-  private readonly cursorHookEventsFilePath: string | null;
+  private readonly sessionLogFileManager: CursorSessionLogFileStore | null;
   private readonly cursorHooksWarning: string | null;
 
   constructor(
@@ -261,7 +253,7 @@ export class CursorAgentSessionsManager {
         generateTitle: generateCursorSessionTitle,
       });
       this.cursorConfigDir = null;
-      this.cursorHookEventsFilePath = null;
+      this.sessionLogFileManager = null;
       this.cursorHooksWarning = null;
       return;
     }
@@ -271,23 +263,17 @@ export class CursorAgentSessionsManager {
       options.titleManager ??
       new SessionTitleManager({ generateTitle: generateCursorSessionTitle });
     this.cursorConfigDir = options.cursorConfigDir ?? null;
-    this.cursorHookEventsFilePath = options.cursorHookEventsFilePath ?? null;
+    this.sessionLogFileManager = options.sessionLogFileManager ?? null;
     this.cursorHooksWarning = options.cursorHooksWarning ?? null;
   }
 
-  private buildSessionWarning(
-    cursorChatId: string | undefined,
-  ): string | undefined {
+  private buildSessionWarning(): string | undefined {
     if (this.cursorHooksWarning) {
       return this.cursorHooksWarning;
     }
 
-    if (!this.cursorConfigDir || !this.cursorHookEventsFilePath) {
+    if (!this.cursorConfigDir || !this.sessionLogFileManager) {
       return "Cursor hook monitoring is disabled; live status may be less accurate.";
-    }
-
-    if (!cursorChatId) {
-      return "Cursor chat ID unavailable; hook-driven status tracking is disabled for this session.";
     }
 
     return undefined;
@@ -300,16 +286,6 @@ export class CursorAgentSessionsManager {
     const sessionName = input.sessionName?.trim() || undefined;
     const initialPrompt = input.initialPrompt?.trim() || undefined;
 
-    let cursorChatId: string | undefined;
-    try {
-      cursorChatId = await createCursorChat();
-    } catch (error) {
-      log.error(
-        "Failed to create cursor chat, proceeding without chatId",
-        error,
-      );
-    }
-
     const newSession: CursorAgentSessionData = {
       sessionId,
       type: "cursor-agent",
@@ -317,7 +293,7 @@ export class CursorAgentSessionsManager {
       lastActivityAt: Date.now(),
       status: "stopped",
       title: sessionName ?? DEFAULT_CURSOR_AGENT_SESSION_TITLE,
-      warningMessage: this.buildSessionWarning(cursorChatId),
+      warningMessage: this.buildSessionWarning(),
       startupConfig: {
         cwd: input.cwd,
         model: input.model,
@@ -325,7 +301,7 @@ export class CursorAgentSessionsManager {
         permissionMode: input.permissionMode,
         initialPrompt,
       },
-      cursorChatId,
+      cursorChatId: undefined,
       bufferedOutput: "",
     };
 
@@ -425,22 +401,49 @@ export class CursorAgentSessionsManager {
       });
     };
 
-    const activityMonitor =
-      cursorChatId && this.cursorHookEventsFilePath
-        ? new CursorActivityMonitor({
-            onStatusChange: (nextActivityStatus) => {
-              activityState = nextActivityStatus;
-              setSessionStatus(getCursorSessionStatus(terminal, activityState));
-              if (
-                nextActivityStatus === "idle" ||
-                nextActivityStatus === "awaiting_approval" ||
-                nextActivityStatus === "awaiting_user_response"
-              ) {
-                syncBufferedOutput.flush();
-              }
-            },
-          })
+    const hookLogFilePath =
+      this.cursorConfigDir && this.sessionLogFileManager
+        ? this.sessionLogFileManager.create(sessionId)
         : null;
+    if (hookLogFilePath) {
+      disposable.addDisposable(() =>
+        this.sessionLogFileManager?.cleanup(hookLogFilePath),
+      );
+    }
+
+    const activityMonitor = hookLogFilePath
+      ? new CursorActivityMonitor({
+          onStatusChange: (nextActivityStatus) => {
+            activityState = nextActivityStatus;
+            setSessionStatus(getCursorSessionStatus(terminal, activityState));
+            if (
+              nextActivityStatus === "idle" ||
+              nextActivityStatus === "awaiting_approval" ||
+              nextActivityStatus === "awaiting_user_response"
+            ) {
+              syncBufferedOutput.flush();
+            }
+          },
+          onHookEvent: (event) => {
+            const hydratedCursorChatId =
+              event.conversation_id ?? event.session_id;
+            if (!hydratedCursorChatId) {
+              return;
+            }
+
+            state.updateState((state) => {
+              const session = state[sessionId];
+              if (!session || session.type !== "cursor-agent") {
+                return;
+              }
+              if (session.cursorChatId) {
+                return;
+              }
+              session.cursorChatId = hydratedCursorChatId;
+            });
+          },
+        })
+      : null;
 
     let activityState: ClaudeActivityState | null = activityMonitor
       ? activityMonitor.getState()
@@ -485,10 +488,9 @@ export class CursorAgentSessionsManager {
       disposable.addDisposable(() => activityMonitor.stopMonitoring());
     }
 
-    if (activityMonitor && this.cursorHookEventsFilePath && cursorChatId) {
+    if (activityMonitor && hookLogFilePath) {
       await activityMonitor.startMonitoring({
-        stateFilePath: this.cursorHookEventsFilePath,
-        conversationId: cursorChatId,
+        stateFilePath: hookLogFilePath,
       });
     }
 
@@ -502,6 +504,11 @@ export class CursorAgentSessionsManager {
       env: this.cursorConfigDir
         ? {
             CURSOR_CONFIG_DIR: this.cursorConfigDir,
+            ...(hookLogFilePath
+              ? {
+                  AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath,
+                }
+              : {}),
           }
         : undefined,
     });

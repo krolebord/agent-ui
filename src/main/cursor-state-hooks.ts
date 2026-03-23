@@ -9,7 +9,6 @@ const HOOK_CONFIG_VERSION = 1;
 
 interface ManagedCursorHooks {
   configDir: string;
-  eventsFilePath: string;
 }
 
 type HookConfigEntry = {
@@ -140,13 +139,10 @@ async function upsertManagedUserHooksConfig(
   );
 }
 
-function buildHookScript(runtime: HookRuntime, eventsFilePath: string): string {
-  const escapedEventsFilePath = JSON.stringify(eventsFilePath);
+function buildHookScript(runtime: HookRuntime): string {
   return `#!/usr/bin/env ${runtime}
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-
-const eventsFilePath = ${escapedEventsFilePath};
 
 function readStdin() {
   return new Promise((resolve, reject) => {
@@ -238,6 +234,14 @@ function normalizeEvent(payload) {
 }
 
 async function main() {
+  const eventsFilePath = process.env.AGENT_UI_CURSOR_STATE_FILE;
+  if (!eventsFilePath) {
+    process.stdout.write(
+      JSON.stringify(defaultResponse()) + "\\n",
+    );
+    return;
+  }
+
   const rawInput = await readStdin();
   let payload = null;
   try {
@@ -284,17 +288,14 @@ export async function ensureManagedCursorStateHooks(
   const root = path.join(userDataPath, "cursor-hooks");
   const configDir = path.join(root, "config");
   const hooksDir = path.join(configDir, "hooks");
-  const stateDir = path.join(root, "state");
   const scriptPath = path.join(hooksDir, "emit-state.mjs");
   const hooksPath = path.join(configDir, "hooks.json");
-  const eventsFilePath = path.join(stateDir, "events.ndjson");
 
   const runtime = await detectHookRuntime();
 
   await mkdir(hooksDir, { recursive: true });
-  await mkdir(stateDir, { recursive: true });
 
-  await writeFile(scriptPath, buildHookScript(runtime, eventsFilePath), "utf8");
+  await writeFile(scriptPath, buildHookScript(runtime), "utf8");
   if (process.platform !== "win32") {
     await chmod(scriptPath, 0o755);
   }
@@ -312,20 +313,12 @@ export async function ensureManagedCursorStateHooks(
   );
   await copyUserCliConfigIfPresent(configDir);
 
-  try {
-    await readFile(eventsFilePath, "utf8");
-  } catch {
-    await writeFile(eventsFilePath, "", "utf8");
-  }
-
   log.info("Managed Cursor hooks created", {
     configDir,
-    eventsFilePath,
     runtime,
   });
 
   return {
     configDir,
-    eventsFilePath,
   };
 }

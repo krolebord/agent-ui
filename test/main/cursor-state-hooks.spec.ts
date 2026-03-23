@@ -18,7 +18,7 @@ afterAll(async () => {
 });
 
 describe("ensureManagedCursorStateHooks", () => {
-  it("creates managed hook config, state file, and user hooks config", async () => {
+  it("creates managed hook config and user hooks config", async () => {
     const userDataPath = await mkdtemp(
       path.join(tmpdir(), "cursor-state-hooks-test-"),
     );
@@ -43,7 +43,6 @@ describe("ensureManagedCursorStateHooks", () => {
       path.join(homePath, ".cursor", "hooks.json"),
       "utf8",
     );
-    const stateFileRaw = await readFile(managed.eventsFilePath, "utf8");
 
     const hooksConfig = JSON.parse(hooksConfigRaw) as {
       version: number;
@@ -64,8 +63,7 @@ describe("ensureManagedCursorStateHooks", () => {
       "emit-state.mjs",
     );
     expect(script).toContain("hook_event_name");
-    expect(script).toContain("eventsFilePath");
-    expect(stateFileRaw).toBe("");
+    expect(script).toContain("AGENT_UI_CURSOR_STATE_FILE");
   });
 
   it("merges managed hooks with existing user hooks without duplicates", async () => {

@@ -28,10 +28,7 @@ export class CursorActivityMonitor {
     return this.state;
   }
 
-  async startMonitoring(input: {
-    stateFilePath: string;
-    conversationId: string;
-  }): Promise<void> {
+  async startMonitoring(input: { stateFilePath: string }): Promise<void> {
     this.stopMonitoring({ preserveState: false });
     const generation = this.watcherGeneration;
 
@@ -43,13 +40,6 @@ export class CursorActivityMonitor {
       startFromBeginning: false,
       onData: (event) => {
         if (this.watcher !== watcher || this.watcherGeneration !== generation) {
-          return;
-        }
-
-        if (
-          event.conversation_id !== input.conversationId &&
-          event.session_id !== input.conversationId
-        ) {
           return;
         }
 
