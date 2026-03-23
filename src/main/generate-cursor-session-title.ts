@@ -14,7 +14,7 @@ export async function generateCursorSessionTitle(
     .filter(Boolean)
     .join("\n\n");
 
-  const args = ["agent", "-p", "--trust", "--model", "composer-1", prompt];
+  const args = ["agent", "-p", "--trust", "--model", "composer-2", prompt];
 
   try {
     const { output } = await spawn("cursor", args, {
