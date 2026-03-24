@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { appSettingsRouter } from "./app-settings";
 import { fsRouter } from "./fs.router";
+import { moveStoppedSessionToProject } from "./move-stopped-session-to-project";
 import { procedure } from "./orpc";
 import { projectsRouter } from "./project-service";
 import { projectTerminalsRouter } from "./project-terminals";
@@ -32,6 +33,20 @@ const sessionsRouter = {
           session.status = "awaiting_user_response";
         }
       });
+    }),
+  moveSessionToProject: procedure
+    .input(
+      z.object({
+        sessionId: z.string().trim().min(1),
+        targetProjectPath: z.string().trim().min(1),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      moveStoppedSessionToProject(
+        context,
+        input.sessionId,
+        input.targetProjectPath,
+      );
     }),
   localClaude: claudeSessionsRouter,
   localTerminal: localTerminalRouter,

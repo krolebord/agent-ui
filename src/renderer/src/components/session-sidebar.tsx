@@ -8,6 +8,9 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@renderer/components/ui/context-menu";
 import {
@@ -38,6 +41,7 @@ import { orpc } from "@renderer/orpc-client";
 import type { ProjectSessionGroup } from "@renderer/services/terminal-session-selectors";
 import {
   buildProjectSessionGroups,
+  getProjectDisplayName,
   getSessionLastActivityLabel,
   groupHasAwaitingUserInput,
 } from "@renderer/services/terminal-session-selectors";
@@ -94,6 +98,10 @@ const projectDragSensors = [
     ],
   }),
 ];
+
+function sessionMovableBetweenProjects(session: Session): boolean {
+  return session.status === "stopped" && session.type !== "worktree-setup";
+}
 
 const statusIndicatorMeta: Record<
   SessionStatus,
@@ -302,6 +310,7 @@ export function SessionSidebar() {
     (event: Parameters<DragEndEvent>[0]) => {
       if (event.canceled || !event.operation.source) return;
       const { source } = event.operation;
+
       if (!isSortable(source)) return;
       const fromIndex = source.sortable.initialIndex;
       const toIndex = source.sortable.index;
@@ -318,7 +327,7 @@ export function SessionSidebar() {
         toPath: toGroup.path,
       });
     },
-    [reorderProjectsMutation, groups],
+    [groups, reorderProjectsMutation],
   );
 
   const setOpenNewSessionDialogCwd = useNewSessionDialogStore(
@@ -440,40 +449,40 @@ export function SessionSidebar() {
                   onViewRawSessionState={openRawSessionState}
                 />
               ))}
-          </DragDropProvider>
-          {groups
-            .filter((g) => !g.fromProjectList)
-            .map((group) => (
-              <section
-                key={group.path}
-                className="group/project border-b border-border/40"
-              >
-                <div className="flex items-center">
-                  <button
-                    type="button"
-                    className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition"
-                  >
-                    <span className="inline-flex w-4 shrink-0" />
-                    <FolderOpen
-                      className={cn(
-                        "size-4 shrink-0",
-                        groupHasAwaitingUserInput(group)
-                          ? "text-violet-400"
-                          : "text-zinc-300",
-                      )}
+            {groups
+              .filter((g) => !g.fromProjectList)
+              .map((group) => (
+                <section
+                  key={group.path}
+                  className="group/project border-b border-border/40"
+                >
+                  <div className="flex items-center">
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition"
+                    >
+                      <span className="inline-flex w-4 shrink-0" />
+                      <FolderOpen
+                        className={cn(
+                          "size-4 shrink-0",
+                          groupHasAwaitingUserInput(group)
+                            ? "text-violet-400"
+                            : "text-zinc-300",
+                        )}
+                      />
+                      <span className="truncate">{group.displayName}</span>
+                    </button>
+                  </div>
+                  {!group.collapsed ? (
+                    <GroupSessionsList
+                      sessions={group.sessions}
+                      onRenameSession={setRenameTarget}
+                      onViewRawSessionState={openRawSessionState}
                     />
-                    <span className="truncate">{group.displayName}</span>
-                  </button>
-                </div>
-                {!group.collapsed ? (
-                  <GroupSessionsList
-                    sessions={group.sessions}
-                    onRenameSession={setRenameTarget}
-                    onViewRawSessionState={openRawSessionState}
-                  />
-                ) : null}
-              </section>
-            ))}
+                  ) : null}
+                </section>
+              ))}
+          </DragDropProvider>
         </div>
       </div>
       <UsagePanel />
@@ -763,6 +772,60 @@ function GroupSessionsList({
   );
 }
 
+function MoveSessionToProjectSubmenu({ session }: { session: Session }) {
+  const projects = useAppState((s) => s.projects);
+  const moveSessionToProjectMutation = useMutation({
+    mutationFn: (input: { sessionId: string; targetProjectPath: string }) =>
+      orpc.sessions.moveSessionToProject.call(input),
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to move session",
+      );
+    },
+  });
+
+  const targets = useMemo(() => {
+    if (!sessionMovableBetweenProjects(session)) {
+      return [];
+    }
+    const cwd = session.startupConfig.cwd.trim();
+    return projects.filter(
+      (p) => p.path !== cwd && p.interactionDisabled !== true,
+    );
+  }, [projects, session]);
+
+  if (targets.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>
+          <Folder className="size-3.5" />
+          Move to project
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          {targets.map((project) => (
+            <ContextMenuItem
+              key={project.path}
+              onClick={() => {
+                moveSessionToProjectMutation.mutate({
+                  sessionId: session.sessionId,
+                  targetProjectPath: project.path,
+                });
+              }}
+            >
+              {getProjectDisplayName(project)}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuSeparator />
+    </>
+  );
+}
+
 function CommonSessionContextMenuItems({
   session,
   onRenameSession,
@@ -774,6 +837,7 @@ function CommonSessionContextMenuItems({
 }) {
   return (
     <>
+      <MoveSessionToProjectSubmenu session={session} />
       <ContextMenuItem
         onClick={() => {
           onRenameSession({
