@@ -2,6 +2,7 @@ import { PointerActivationConstraints } from "@dnd-kit/dom";
 import type { DragEndEvent } from "@dnd-kit/react";
 import { DragDropProvider, PointerSensor } from "@dnd-kit/react";
 import { isSortable, useSortable } from "@dnd-kit/react/sortable";
+import type { Session } from "@main/sessions/state";
 import { Button } from "@renderer/components/ui/button";
 import { ContextMenuItem } from "@renderer/components/ui/context-menu";
 import {
@@ -38,7 +39,6 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
-import type { Session } from "src/main/sessions/state";
 import { useConfirmDialogStore } from "./confirm-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";

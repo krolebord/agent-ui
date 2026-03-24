@@ -1,3 +1,4 @@
+import type { Session } from "@main/sessions/state";
 import { orpc } from "@renderer/orpc-client";
 import {
   type OpenInAppTarget,
@@ -20,7 +21,6 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import type { Session } from "src/main/sessions/state";
 import { create } from "zustand";
 import { combine, persist } from "zustand/middleware";
 import {

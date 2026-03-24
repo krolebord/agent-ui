@@ -13,13 +13,13 @@
   "scripts": {
     "dev": "vite",
     "dev:static": "vite build --sourcemap && electron .",
-    "build": "tsc && vite build",
+    "build": "tsgo --noEmit && vite build",
     "analyze": "ANALYZE=true vite build",
     "app:dist": "pnpm build && electron-builder",
     "app:dist:mac": "pnpm build && electron-builder --mac",
     "app:dist:mac:dir": "pnpm build && electron-builder --mac dir",
     "app:install": "pnpm app:dist:mac:dir && ./scripts/install-mac-app.sh",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "format": "biome check --write .",
     "test": "vitest run",
     "extract-cursor-models": "bash scripts/extract-cursor-models.sh"
@@ -67,6 +67,7 @@
     ]
   },
   "devDependencies": {
+    "@typescript/native-preview": "7.0.0-dev.20260324.1",
     "@biomejs/biome": "^2.0.0",
     "@tailwindcss/vite": "^4.2.0",
     "@types/node": "^25.0.0",
@@ -78,7 +79,7 @@
     "lefthook": "^2.1.1",
     "rollup-plugin-visualizer": "^7.0.0",
     "tailwindcss": "^4.2.0",
-    "typescript": "^5.9.2",
+    "typescript": "^6.0.2",
     "vite": "^7.0.0",
     "vite-plugin-electron": "^0.29.0",
     "vite-plugin-electron-renderer": "^0.14.6",

@@ -1,5 +1,5 @@
+import type { Session } from "@main/sessions/state";
 import type { ClaudeModel, ClaudeProject } from "@shared/claude-types";
-import type { Session } from "src/main/sessions/state";
 
 export interface ProjectSessionGroup {
   path: string;

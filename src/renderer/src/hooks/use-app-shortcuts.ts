@@ -1,3 +1,4 @@
+import type { Session } from "@main/sessions/state";
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
 import { useNewSessionDialogStore } from "@renderer/components/new-session-dialog";
 import { useProjectDefaultsDialogStore } from "@renderer/components/project-defaults-dialog";
@@ -11,7 +12,6 @@ import {
   getVisibleSessionIds,
 } from "@renderer/services/terminal-session-selectors";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import type { Session } from "src/main/sessions/state";
 import { switchSession, useActiveSessionId } from "./use-active-session-id";
 
 function isProjectPathInteractionLocked(

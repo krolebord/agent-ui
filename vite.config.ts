@@ -18,6 +18,7 @@ export default defineConfig(({ command }) => {
   const sourcemap = isServe || !!process.env.VSCODE_DEBUG;
   const externalDependencies = Object.keys(pkg.dependencies ?? {});
   const aliases = {
+    "@main": path.join(__dirname, "src/main"),
     "@renderer": path.join(__dirname, "src/renderer/src"),
     "@shared": path.join(__dirname, "src/shared"),
   };

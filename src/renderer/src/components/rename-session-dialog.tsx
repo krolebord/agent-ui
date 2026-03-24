@@ -1,3 +1,4 @@
+import type { Session } from "@main/sessions/state";
 import { Button } from "@renderer/components/ui/button";
 import {
   Dialog,
@@ -13,7 +14,6 @@ import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import type { Session } from "src/main/sessions/state";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 

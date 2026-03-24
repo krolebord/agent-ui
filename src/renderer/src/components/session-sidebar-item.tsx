@@ -1,3 +1,5 @@
+import type { SessionStatus } from "@main/sessions/common";
+import type { Session } from "@main/sessions/state";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -39,8 +41,6 @@ import {
 } from "lucide-react";
 import { forwardRef } from "react";
 import { toast } from "sonner";
-import type { SessionStatus } from "src/main/sessions/common";
-import type { Session } from "src/main/sessions/state";
 import { useRawSessionStateDialogStore } from "./raw-session-state-dialog";
 import { useRenameSessionDialogStore } from "./rename-session-dialog";
 import {

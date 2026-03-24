@@ -1,3 +1,4 @@
+import type { Session } from "@main/sessions/state";
 import { Button } from "@renderer/components/ui/button";
 import {
   Dialog,
@@ -9,7 +10,6 @@ import {
 } from "@renderer/components/ui/dialog";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import type { Session } from "src/main/sessions/state";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 

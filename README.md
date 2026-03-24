@@ -45,9 +45,15 @@ Open the usage panel to track key usage buckets and extra usage progress.
 
 ### Requirements
 
-- Node.js 18+
+- Node.js 22+
 - pnpm
 - Claude CLI available in your `PATH`
+
+### TypeScript Tooling
+
+- `pnpm typecheck` and `pnpm build` use `tsgo` from `@typescript/native-preview`.
+- The repo still keeps `typescript` installed for tool compatibility, but `tsc` is not the default checker.
+- In VS Code and Cursor, install the recommended `TypeScriptTeam.native-preview` extension. The committed workspace setting enables `tsgo` automatically.
 
 ### Run in Development
 
@@ -61,6 +67,8 @@ pnpm dev
 ```sh
 pnpm build
 ```
+
+This runs `tsgo --noEmit` before the Vite build.
 
 ### Package macOS App
 
