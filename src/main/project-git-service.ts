@@ -137,13 +137,6 @@ function parseGitDiffStats(diffSummary: string): GitDiffStats {
   return { addedLines, deletedLines };
 }
 
-function countUntrackedFiles(statusSummary: string): number {
-  return statusSummary
-    .trim()
-    .split("\n")
-    .filter((line) => line.startsWith("?? ")).length;
-}
-
 function parseAheadBehindSummary(
   revListSummary: string,
 ): { aheadCommits: number; behindCommits: number } | undefined {
@@ -228,15 +221,15 @@ async function readProjectGitData(
   const summary = await git.branchLocal();
   const currentBranch = summary.current ?? undefined;
   const diffBaseRef = await resolveDiffBaseRef(git);
+  await git.raw(["add", "-A"]);
   const diffSummary = await git.raw([
     "diff",
+    "--cached",
     "--numstat",
     "--no-renames",
     diffBaseRef,
   ]);
-  const statusSummary = await git.raw(["status", "--porcelain"]);
   const diffStats = parseGitDiffStats(diffSummary);
-  diffStats.addedLines += countUntrackedFiles(statusSummary);
 
   return {
     git,
