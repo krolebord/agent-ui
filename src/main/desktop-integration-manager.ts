@@ -65,12 +65,12 @@ export class DesktopIntegrationManager {
       return;
     }
 
-    const hasActiveSessions = Object.values(this.sessionsState.state).some(
-      (session) => session.status !== "stopped" && session.status !== "error",
+    const hasRunningSession = Object.values(this.sessionsState.state).some(
+      (session) => session.status === "running",
     );
 
     const shouldBlock =
-      this.appSettingsState.state.preventSleep && hasActiveSessions;
+      this.appSettingsState.state.preventSleep && hasRunningSession;
 
     if (shouldBlock) {
       this.startBlockerIfNeeded();

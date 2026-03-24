@@ -74,7 +74,7 @@ describe("DesktopIntegrationManager", () => {
     setPlatform(originalPlatform);
   });
 
-  it("activates blocker when first active session appears", () => {
+  it("activates blocker when first running session appears", () => {
     const sessionsState = defineSessionServiceState();
     const appSettingsState = defineAppSettingsState();
     const manager = new DesktopIntegrationManager(
@@ -83,7 +83,7 @@ describe("DesktopIntegrationManager", () => {
     );
 
     sessionsState.updateState((state) => {
-      state["session-1"] = makeLocalTerminalSession("session-1", "starting");
+      state["session-1"] = makeLocalTerminalSession("session-1", "running");
     });
 
     expect(powerSaveBlockerMock.start).toHaveBeenCalledTimes(1);
@@ -91,6 +91,24 @@ describe("DesktopIntegrationManager", () => {
       "prevent-display-sleep",
     );
     expect(powerSaveBlockerMock.stop).not.toHaveBeenCalled();
+
+    manager.dispose();
+  });
+
+  it("does not start blocker for idle or starting sessions", () => {
+    const sessionsState = defineSessionServiceState();
+    const appSettingsState = defineAppSettingsState();
+    const manager = new DesktopIntegrationManager(
+      sessionsState,
+      appSettingsState,
+    );
+
+    sessionsState.updateState((state) => {
+      state["session-1"] = makeLocalTerminalSession("session-1", "idle");
+      state["session-2"] = makeLocalTerminalSession("session-2", "starting");
+    });
+
+    expect(powerSaveBlockerMock.start).not.toHaveBeenCalled();
 
     manager.dispose();
   });
@@ -104,10 +122,10 @@ describe("DesktopIntegrationManager", () => {
     );
 
     sessionsState.updateState((state) => {
-      state["session-1"] = makeLocalTerminalSession("session-1", "starting");
+      state["session-1"] = makeLocalTerminalSession("session-1", "running");
     });
     sessionsState.updateState((state) => {
-      state["session-1"].status = "idle";
+      state["session-1"].title = "Updated";
     });
 
     expect(powerSaveBlockerMock.start).toHaveBeenCalledTimes(1);
@@ -148,7 +166,7 @@ describe("DesktopIntegrationManager", () => {
 
     sessionsState.updateState((state) => {
       state["session-1"] = makeLocalTerminalSession("session-1", "running");
-      state["session-2"] = makeLocalTerminalSession("session-2", "idle");
+      state["session-2"] = makeLocalTerminalSession("session-2", "running");
     });
     sessionsState.updateState((state) => {
       state["session-1"].status = "stopped";
@@ -160,7 +178,7 @@ describe("DesktopIntegrationManager", () => {
     manager.dispose();
   });
 
-  it("reactivates blocker after all sessions go inactive and active again", () => {
+  it("reactivates blocker after running stops then starts again", () => {
     const sessionsState = defineSessionServiceState();
     powerSaveBlockerMock.start
       .mockReturnValueOnce(101)
@@ -175,10 +193,10 @@ describe("DesktopIntegrationManager", () => {
       state["session-1"] = makeLocalTerminalSession("session-1", "running");
     });
     sessionsState.updateState((state) => {
-      state["session-1"].status = "error";
+      state["session-1"].status = "idle";
     });
     sessionsState.updateState((state) => {
-      state["session-1"].status = "awaiting_user_response";
+      state["session-1"].status = "running";
     });
 
     expect(powerSaveBlockerMock.start).toHaveBeenCalledTimes(2);

@@ -201,7 +201,7 @@ function PreventSleepToggle() {
       <div className="space-y-0.5">
         <div className="text-sm font-medium">Prevent sleep</div>
         <div className="text-xs text-muted-foreground">
-          Keep display awake while sessions are active
+          Keep display awake while at least one session is running
         </div>
       </div>
       <Switch
