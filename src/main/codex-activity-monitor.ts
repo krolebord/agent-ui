@@ -98,6 +98,9 @@ export class CodexActivityMonitor {
       case "task_started": {
         return "working";
       }
+      case "item_started": {
+        return this.state === "awaiting_approval" ? "working" : this.state;
+      }
       case "request_user_input": {
         return "awaiting_approval";
       }
