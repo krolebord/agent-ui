@@ -373,6 +373,13 @@ function SortableProjectGroup({
   const secondaryLine = projectMeta.filter(Boolean).join(" • ");
   const hasAwaitingUserInput = groupHasAwaitingUserInput(group);
   const activeSessions = group.sessions.filter(isSessionActive);
+  const hasRunningTerminal = useAppState((state) => {
+    const workspace = state.projectTerminals[group.path];
+    if (!workspace) return false;
+    return Object.values(workspace.terminals).some(
+      (t) => t.status === "running",
+    );
+  });
 
   const stopAllActiveSessionsMutation = useMutation({
     mutationFn: async (sessionsToStop: Session[]) => {
@@ -449,6 +456,9 @@ function SortableProjectGroup({
                 />
               )}
               <span className="truncate">{group.displayName}</span>
+              {hasRunningTerminal && (
+                <span className="size-1.5 shrink-0 rounded-full bg-emerald-400" />
+              )}
             </span>
             {secondaryLine ? (
               <span className="mt-0.5 flex items-center gap-1 text-xs text-zinc-400">

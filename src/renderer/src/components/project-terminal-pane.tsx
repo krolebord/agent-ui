@@ -11,27 +11,17 @@ import {
 } from "@renderer/components/ui/resizable";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
-import {
-  AlertCircle,
-  CircleDot,
-  LoaderCircle,
-  Plus,
-  TerminalSquare,
-  X,
-} from "lucide-react";
+import { AlertCircle, CircleDot, Plus, TerminalSquare, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useAppState } from "./sync-state-provider";
 
 function getTerminalStatusMeta(status: string) {
   switch (status) {
-    case "starting":
     case "running":
-    case "stopping":
       return {
-        icon: LoaderCircle,
-        className: "text-zinc-400",
-        animate: true,
+        icon: CircleDot,
+        className: "text-emerald-400",
       };
     case "error":
       return {
@@ -46,7 +36,7 @@ function getTerminalStatusMeta(status: string) {
     default:
       return {
         icon: CircleDot,
-        className: "text-emerald-400",
+        className: "text-zinc-400",
       };
   }
 }
@@ -373,11 +363,7 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                       disabled={projectLocked || isClosing || isSelecting}
                     >
                       <StatusIcon
-                        className={cn(
-                          "size-3 shrink-0",
-                          statusMeta.className,
-                          statusMeta.animate && "animate-spin",
-                        )}
+                        className={cn("size-3 shrink-0", statusMeta.className)}
                       />
                       <span className="truncate text-xs">{terminal.title}</span>
                     </button>

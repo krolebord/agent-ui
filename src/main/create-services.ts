@@ -35,6 +35,7 @@ import {
   removeLegacyLocalTerminalSessions,
 } from "./sessions/state";
 import { WorktreeSetupSessionsManager } from "./sessions/worktree-setup.session";
+import { ensureShellIntegrationScripts } from "./shell-integration/scripts";
 import { StateOrchestrator } from "./state-orchestrator";
 
 const STORAGE_SCHEMA_VERSION = 3;
@@ -45,6 +46,10 @@ interface CreateServicesOptions {
   disposeSignal: AbortSignal;
 }
 
+interface ShellIntegrationInitResult {
+  shellIntegrationEnv: Record<string, string>;
+}
+
 interface ManagedPluginInitializationResult {
   managedPluginDir: string | null;
   pluginWarning: string | null;
@@ -53,6 +58,18 @@ interface ManagedPluginInitializationResult {
 interface ManagedCursorHooksInitializationResult {
   cursorConfigDir: string | null;
   cursorHooksWarning: string | null;
+}
+
+async function initializeShellIntegration(
+  userDataPath: string,
+): Promise<ShellIntegrationInitResult> {
+  try {
+    const scripts = await ensureShellIntegrationScripts(userDataPath);
+    return { shellIntegrationEnv: scripts.env };
+  } catch (error) {
+    log.error("Shell integration setup failed", error);
+    return { shellIntegrationEnv: {} };
+  }
 }
 
 async function initializeManagedPlugin(
@@ -99,10 +116,15 @@ export type CreateServicesResult = Awaited<ReturnType<typeof createServices>>;
 
 export async function createServices(options: CreateServicesOptions) {
   const { userDataPath, getMainWindow, disposeSignal } = options;
-  const { managedPluginDir, pluginWarning } =
-    await initializeManagedPlugin(userDataPath);
-  const { cursorConfigDir, cursorHooksWarning } =
-    await initializeManagedCursorHooks(userDataPath);
+  const [
+    { managedPluginDir, pluginWarning },
+    { cursorConfigDir, cursorHooksWarning },
+    { shellIntegrationEnv },
+  ] = await Promise.all([
+    initializeManagedPlugin(userDataPath),
+    initializeManagedCursorHooks(userDataPath),
+    initializeShellIntegration(userDataPath),
+  ]);
 
   const titleManager = new SessionTitleManager();
   const codexTitleManager = new SessionTitleManager({
@@ -173,6 +195,7 @@ export async function createServices(options: CreateServicesOptions) {
   );
   const projectTerminalsManager = new ProjectTerminalsManager(
     projectTerminalsState,
+    shellIntegrationEnv,
   );
   const codexSessionsManager = new CodexSessionsManager({
     state: sessionsState,

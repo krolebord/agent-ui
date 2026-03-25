@@ -9,9 +9,12 @@ import { defineStatePersistence } from "./persistence-orchestrator";
 import { assertProjectPathInteractionAllowed } from "./project-service";
 import {
   generateUniqueSessionId,
-  type SessionStatus,
   sessionStatusSchema,
 } from "./sessions/common";
+import {
+  ShellIntegrationMonitor,
+  stripOsc133,
+} from "./shell-integration/osc-parser";
 import {
   createTerminalSession,
   type TerminalSession,
@@ -121,14 +124,11 @@ export const defineProjectTerminalsPersistence = (
     schema: projectTerminalStateSchema,
   });
 
-function toIdleStatus(status: TerminalSession["status"]): SessionStatus {
-  return status === "running" ? "idle" : status;
-}
-
 interface LiveProjectTerminal {
   cwd: string;
   terminalId: string;
   terminal: TerminalSession;
+  shellMonitor: ShellIntegrationMonitor;
   dispose: () => Promise<void>;
 }
 
@@ -255,7 +255,10 @@ export class ProjectTerminalsManager {
     maxBufferedEvents: 0,
   });
 
-  constructor(private readonly state: ProjectTerminalsState) {}
+  constructor(
+    private readonly state: ProjectTerminalsState,
+    private readonly shellIntegrationEnv: Record<string, string> = {},
+  ) {}
 
   ensureWorkspace({
     cwd,
@@ -413,12 +416,13 @@ export class ProjectTerminalsManager {
 
   subscribeToTerminalEvents(terminalId: string, signal?: AbortSignal) {
     const liveTerminal = this.liveTerminals.get(terminalId);
+    const rawBuffered =
+      liveTerminal?.terminal.bufferedOutput ??
+      this.findTerminalState(terminalId)?.bufferedOutput ??
+      "";
     return {
       isLive: !!liveTerminal,
-      bufferedOutput:
-        liveTerminal?.terminal.bufferedOutput ??
-        this.findTerminalState(terminalId)?.bufferedOutput ??
-        "",
+      bufferedOutput: stripOsc133(rawBuffered),
       stream: this.eventPublisher.subscribe(terminalId, { signal }),
     };
   }
@@ -456,9 +460,22 @@ export class ProjectTerminalsManager {
     const disposable = createDisposable({
       onError: () => {},
     });
+
+    const shellMonitor = new ShellIntegrationMonitor({
+      onActivityChange: (activity) => {
+        const live = this.liveTerminals.get(terminalId);
+        if (!live || live.terminal.status !== "running") return;
+        this.updateTerminalState(cwd, terminalId, (terminal) => {
+          terminal.status = activity === "running" ? "running" : "idle";
+        });
+      },
+    });
+
     const syncBufferedOutput = withDebouncedRunner(() => {
       const liveTerminal = this.liveTerminals.get(terminalId);
-      const bufferedOutput = liveTerminal?.terminal.bufferedOutput ?? "";
+      const bufferedOutput = stripOsc133(
+        liveTerminal?.terminal.bufferedOutput ?? "",
+      );
       this.updateTerminalState(cwd, terminalId, (terminal) => {
         terminal.bufferedOutput = bufferedOutput;
         terminal.lastActivityAt = Date.now();
@@ -468,15 +485,23 @@ export class ProjectTerminalsManager {
 
     const terminal = createTerminalSession({
       onData: ({ chunk }) => {
-        this.eventPublisher.publish(terminalId, {
-          type: "data",
-          data: chunk,
-        });
+        const cleanChunk = shellMonitor.processChunk(chunk);
+        if (cleanChunk) {
+          this.eventPublisher.publish(terminalId, {
+            type: "data",
+            data: cleanChunk,
+          });
+        }
         syncBufferedOutput.schedule();
       },
       onStatusChange: (status) => {
         this.updateTerminalState(cwd, terminalId, (terminal) => {
-          terminal.status = toIdleStatus(status);
+          if (status === "running") {
+            terminal.status =
+              shellMonitor.getState() === "running" ? "running" : "idle";
+          } else {
+            terminal.status = status;
+          }
           if (status !== "error") {
             terminal.errorMessage = undefined;
           }
@@ -501,12 +526,14 @@ export class ProjectTerminalsManager {
       cwd,
       cols,
       rows,
+      env: this.shellIntegrationEnv,
     });
 
     this.liveTerminals.set(terminalId, {
       cwd,
       terminalId,
       terminal,
+      shellMonitor,
       dispose: disposable.dispose,
     });
     disposable.addDisposable(() => this.liveTerminals.delete(terminalId));
