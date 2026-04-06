@@ -1,3 +1,4 @@
+import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { ConfirmDialog } from "@renderer/components/confirm-dialog";
 import { NewSessionDialog } from "@renderer/components/new-session-dialog";
 import { ProjectDefaultsDialog } from "@renderer/components/project-defaults-dialog";
@@ -15,7 +16,9 @@ import { Toaster } from "@renderer/components/ui/sonner";
 import { WorktreeDeleteDialog } from "@renderer/components/worktree-delete-dialog";
 import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
 import { useEffect } from "react";
+import { ProjectDiffPane } from "./components/diff-review-sheet";
 import { useAppState } from "./components/sync-state-provider";
+import { diffsWorkerFactory } from "./diff-worker";
 import {
   useActiveSessionId,
   useActiveSessionStore,
@@ -59,6 +62,17 @@ function App() {
       <WorktreeDeleteDialog />
       <ProjectDeletionToastListener />
       <SettingsDialog />
+      <WorkerPoolContextProvider
+        poolOptions={{
+          workerFactory: diffsWorkerFactory,
+        }}
+        highlighterOptions={{
+          theme: { dark: "pierre-dark", light: "pierre-light" },
+          langs: ["typescript", "javascript", "css", "html"],
+        }}
+      >
+        <ProjectDiffPane />
+      </WorkerPoolContextProvider>
       <Toaster closeButton />
     </>
   );

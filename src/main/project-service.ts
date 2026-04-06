@@ -1,3 +1,4 @@
+import { type FileDiffMetadata, parsePatchFiles } from "@pierre/diffs";
 import z from "zod";
 import {
   type ClaudeProject,
@@ -349,6 +350,16 @@ export const projectsRouter = {
     .handler(async ({ input, context }) => {
       assertProjectPathInteractionAllowed(input.path, context);
       return refreshTrackedProject(input.path, context);
+    }),
+  getUncommittedDiff: procedure
+    .input(z.object({ path: projectPathSchema }))
+    .handler(async ({ input, context }) => {
+      const diff = await context.projectGitService.getUncommittedDiff(
+        normalizeProjectPath(input.path),
+      );
+      if (!diff) return [] as FileDiffMetadata[];
+      const files = parsePatchFiles(diff).flatMap((p) => p.files);
+      return files;
     }),
   createWorktreeProject: procedure
     .input(

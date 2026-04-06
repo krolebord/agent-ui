@@ -403,6 +403,21 @@ export class ProjectGitService {
     });
   }
 
+  async getUncommittedDiff(projectPath: string): Promise<string | null> {
+    try {
+      const git = simpleGit(projectPath);
+      const isRepo = await git.checkIsRepo();
+      if (!isRepo) return null;
+      const diffBaseRef = await resolveDiffBaseRef(git);
+      await git.raw(["add", "-A"]);
+      const diff = await git.raw(["diff", "--cached", diffBaseRef]);
+      const trimmed = diff.trim();
+      return trimmed || null;
+    } catch {
+      return null;
+    }
+  }
+
   async getWorktreeCreationData(projectPath: string): Promise<{
     currentBranch: string;
     localBranches: string[];

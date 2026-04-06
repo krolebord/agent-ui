@@ -1,5 +1,6 @@
 import type { Session } from "@main/sessions/state";
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
+import { useDiffReviewStore } from "@renderer/components/diff-review-sheet";
 import { useNewSessionDialogStore } from "@renderer/components/new-session-dialog";
 import { useProjectDefaultsDialogStore } from "@renderer/components/project-defaults-dialog";
 import { useProjectWorktreeDialogStore } from "@renderer/components/project-worktree-dialog";
@@ -41,6 +42,12 @@ export const SHORTCUT_DEFINITIONS = [
     id: "delete-session",
     label: "Delete session",
     key: "⌫",
+    cmdOrCtrl: true,
+  },
+  {
+    id: "project-diff",
+    label: "Project diff",
+    key: "R",
     cmdOrCtrl: true,
   },
 ] as const;
@@ -120,6 +127,9 @@ export function useAppShortcuts(): void {
   const openWorktreeDeleteDialogPath = useWorktreeDeleteDialogStore(
     (state) => state.target?.path,
   );
+  const isDiffReviewPaneOpen = useDiffReviewStore(
+    (state) => state.openedProjectPath !== null,
+  );
 
   const dialogsAreOpen =
     confirmDialogOpen ||
@@ -127,7 +137,8 @@ export function useAppShortcuts(): void {
     openSettingsDialog ||
     Boolean(openProjectDefaultsDialogCwd) ||
     Boolean(openProjectWorktreeDialogPath) ||
-    Boolean(openWorktreeDeleteDialogPath);
+    Boolean(openWorktreeDeleteDialogPath) ||
+    isDiffReviewPaneOpen;
 
   useHotkey(
     "Mod+N",
@@ -190,6 +201,18 @@ export function useAppShortcuts(): void {
       if (idx === -1 || ordered.length === 0) return;
       const next = (idx + 1) % ordered.length;
       switchSession(ordered[next]);
+    },
+    { enabled: !dialogsAreOpen },
+  );
+
+  const openProjectDiff = useDiffReviewStore((state) => state.openProjectDiff);
+  useHotkey(
+    "Mod+R",
+    () => {
+      if (!activeSessionId) return;
+      const activeSession = sessions[activeSessionId];
+      if (!activeSession) return;
+      openProjectDiff(activeSession.startupConfig.cwd);
     },
     { enabled: !dialogsAreOpen },
   );

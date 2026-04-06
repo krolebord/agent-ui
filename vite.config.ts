@@ -33,6 +33,9 @@ export default defineConfig(({ command }) => {
     build: {
       chunkSizeWarningLimit: 1000,
     },
+    worker: {
+      format: "es",
+    },
     plugins: [
       react(),
       tailwindcss(),

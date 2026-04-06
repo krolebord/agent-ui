@@ -7,6 +7,7 @@ import {
 import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
+  FileDiff,
   FolderOpen,
   GitFork,
   Github,
@@ -23,6 +24,7 @@ import {
 import { toast } from "sonner";
 import { create } from "zustand";
 import { combine, persist } from "zustand/middleware";
+import { useDiffReviewStore } from "./diff-review-sheet";
 import {
   ClaudeCodeIcon,
   CodexIcon,
@@ -170,6 +172,8 @@ export function SessionHeader({ session }: { session: Session }) {
   );
   const PreferredAppIcon = preferredAppItem.icon;
 
+  const openDiffPane = useDiffReviewStore((state) => state.openProjectDiff);
+
   return (
     <header className="flex min-h-11 shrink-0 items-center gap-3 border-b border-border/70 px-2 py-1.5">
       {Icon ? <Icon className="size-4 shrink-0 text-muted-foreground" /> : null}
@@ -208,6 +212,21 @@ export function SessionHeader({ session }: { session: Session }) {
             </span>
           ) : null}
         </div>
+      ) : null}
+      {addedLines || deletedLines ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="shrink-0 text-xs"
+          onClick={() => {
+            if (!activeProject) return;
+            openDiffPane(activeProject.path);
+          }}
+        >
+          <FileDiff className="size-3.5 text-muted-foreground" />
+          <span>Review</span>
+        </Button>
       ) : null}
       <div className="flex shrink-0 items-center">
         <Button
