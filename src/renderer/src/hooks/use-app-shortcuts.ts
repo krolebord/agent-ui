@@ -1,6 +1,6 @@
 import type { Session } from "@main/sessions/state";
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
-import { useDiffReviewStore } from "@renderer/components/diff-review-sheet";
+import { useDiffReviewStore } from "@renderer/components/diff-review-pane";
 import { useNewSessionDialogStore } from "@renderer/components/new-session-dialog";
 import { useProjectDefaultsDialogStore } from "@renderer/components/project-defaults-dialog";
 import { useProjectWorktreeDialogStore } from "@renderer/components/project-worktree-dialog";

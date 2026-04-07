@@ -16,7 +16,7 @@ import { Toaster } from "@renderer/components/ui/sonner";
 import { WorktreeDeleteDialog } from "@renderer/components/worktree-delete-dialog";
 import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
 import { useEffect } from "react";
-import { ProjectDiffPane } from "./components/diff-review-sheet";
+import { ProjectDiffPane } from "./components/diff-review-pane";
 import { useAppState } from "./components/sync-state-provider";
 import { diffsWorkerFactory } from "./diff-worker";
 import {

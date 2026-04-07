@@ -25,7 +25,7 @@ import {
 import { toast } from "sonner";
 import { create } from "zustand";
 import { combine, persist } from "zustand/middleware";
-import { useDiffReviewStore } from "./diff-review-sheet";
+import { useDiffReviewStore } from "./diff-review-pane";
 import {
   ClaudeCodeIcon,
   CodexIcon,
