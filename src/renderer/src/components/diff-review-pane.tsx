@@ -1,15 +1,24 @@
 import type { FileDiffMetadata } from "@pierre/diffs/react";
 import { FileDiff } from "@pierre/diffs/react";
+import { useDiffReviewCommitDialogStore } from "@renderer/components/diff-review-commit-dialog";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useQuery } from "@tanstack/react-query";
-import { FileMinus, FilePlus, FileText, LoaderCircle, X } from "lucide-react";
+import {
+  FileMinus,
+  FilePlus,
+  FileText,
+  GitCommitHorizontal,
+  LoaderCircle,
+  X,
+} from "lucide-react";
 import { createContext, useContext, useMemo, useRef } from "react";
 import { create, createStore, type ExtractState } from "zustand";
 import { combine } from "zustand/middleware";
 import { useStore } from "zustand/react";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -51,6 +60,28 @@ function createProjectDiffStore(projectPath: string) {
               ? state.confirmedFiles.filter((f) => f !== filePath)
               : [...state.confirmedFiles, filePath],
           }));
+        },
+        toggleAllFilesConfirmation: (paths: string[]) => {
+          set((state) => {
+            if (paths.length === 0) return state;
+            const pathSet = new Set(paths);
+            const allIncluded = paths.every((p) =>
+              state.confirmedFiles.includes(p),
+            );
+            if (allIncluded) {
+              return {
+                confirmedFiles: state.confirmedFiles.filter(
+                  (f) => !pathSet.has(f),
+                ),
+              };
+            }
+            return {
+              confirmedFiles: [...new Set([...state.confirmedFiles, ...paths])],
+            };
+          });
+        },
+        clearConfirmations: () => {
+          set({ confirmedFiles: [] });
         },
         setSidebarSize: (size: number | string) => {
           set({ sidebarSize: size });
@@ -105,15 +136,37 @@ function fileTypeIcon(file: FileDiffMetadata) {
   return FileText;
 }
 
+function gitPathsForConfirmedFiles(
+  files: FileDiffMetadata[],
+  confirmedFiles: string[],
+): string[] {
+  const confirmed = new Set(confirmedFiles);
+  const out = new Set<string>();
+  for (const f of files) {
+    if (!confirmed.has(f.name)) continue;
+    if (f.prevName) {
+      out.add(f.prevName);
+    }
+    out.add(f.name);
+  }
+  return [...out];
+}
+
 function FileListItem({
   file,
   selected,
-  onClick,
 }: {
   file: FileDiffMetadata;
   selected: boolean;
-  onClick: () => void;
 }) {
+  const confirmed = useProjectDiffStore((s) =>
+    s.confirmedFiles.includes(file.name),
+  );
+  const selectFile = useProjectDiffStore((s) => s.selectFile);
+  const toggleFileConfirmation = useProjectDiffStore(
+    (s) => s.toggleFileConfirmation,
+  );
+
   const Icon = fileTypeIcon(file);
   const { additions, deletions } = useMemo(
     () => ({
@@ -131,14 +184,34 @@ function FileListItem({
     : null;
 
   return (
-    <button
-      type="button"
+    <div
+      role="option"
+      tabIndex={-1}
       className={cn(
-        "flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors",
+        "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors outline-none",
         selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
       )}
-      onClick={onClick}
+      onClick={() => selectFile(file.name)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          selectFile(file.name);
+        }
+      }}
+      aria-selected={selected}
     >
+      <Checkbox
+        checked={confirmed}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+        onCheckedChange={() => toggleFileConfirmation(file.name)}
+        className="shrink-0"
+        aria-label={
+          confirmed
+            ? "Included in commit — press Space to exclude"
+            : "Excluded from commit — press Space to include"
+        }
+      />
       <Icon
         className={cn(
           "size-3.5 shrink-0",
@@ -167,7 +240,7 @@ function FileListItem({
           </span>
         )}
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -185,6 +258,21 @@ function ProjectDiffPaneContent() {
   const selectedFilePath = useProjectDiffStore(
     (state) => state.selectedFilePath,
   );
+  const confirmedFiles = useProjectDiffStore((state) => state.confirmedFiles);
+  const selectFile = useProjectDiffStore((state) => state.selectFile);
+  const toggleFileConfirmation = useProjectDiffStore(
+    (state) => state.toggleFileConfirmation,
+  );
+  const toggleAllFilesConfirmation = useProjectDiffStore(
+    (state) => state.toggleAllFilesConfirmation,
+  );
+  const clearConfirmations = useProjectDiffStore(
+    (state) => state.clearConfirmations,
+  );
+  const openCommitDialog = useDiffReviewCommitDialogStore((s) => s.open);
+  const commitDialogOpen = useDiffReviewCommitDialogStore(
+    (s) => s.payload !== null,
+  );
 
   const { selectedFile, selectedFileIndex } = useMemo(() => {
     if (!files) return { selectedFile: null, selectedFileIndex: 0 };
@@ -197,45 +285,104 @@ function ProjectDiffPaneContent() {
       selectedFileIndex: selectedFileIndex,
     };
   }, [files, selectedFilePath]);
-  const selectFile = useProjectDiffStore((state) => state.selectFile);
 
+  const { allFilesConfirmed, someFilesConfirmed } = useMemo(() => {
+    if (!files?.length) {
+      return { allFilesConfirmed: false, someFilesConfirmed: false };
+    }
+    const included = files.filter((f) => confirmedFiles.includes(f.name));
+    return {
+      allFilesConfirmed: included.length === files.length,
+      someFilesConfirmed: included.length > 0 && included.length < files.length,
+    };
+  }, [files, confirmedFiles]);
   const sidebarSize = useProjectDiffStore((state) => state.sidebarSize);
   const setSidebarSize = useProjectDiffStore((state) => state.setSidebarSize);
 
-  useHotkey("Escape", () => closeDiffPane());
-  useHotkey("ArrowUp", () => {
-    if (!files || files.length === 0) return;
-    const newIndex = (selectedFileIndex - 1 + files.length) % files.length;
-    selectFile(files[newIndex].name);
+  const pathsToCommit = useMemo(
+    () => (files ? gitPathsForConfirmedFiles(files, confirmedFiles) : []),
+    [files, confirmedFiles],
+  );
+  const canCommit = pathsToCommit.length > 0;
+  const selectedFileCount = useMemo(
+    () => files?.filter((f) => confirmedFiles.includes(f.name)).length ?? 0,
+    [files, confirmedFiles],
+  );
+
+  useHotkey("Escape", () => closeDiffPane(), {
+    enabled: !commitDialogOpen,
   });
-  useHotkey("ArrowDown", () => {
-    if (!files || files.length === 0) return;
-    const newIndex = (selectedFileIndex + 1) % files.length;
-    selectFile(files[newIndex].name);
-  });
+  useHotkey(
+    "ArrowUp",
+    () => {
+      if (!files || files.length === 0) return;
+      const newIndex = (selectedFileIndex - 1 + files.length) % files.length;
+      selectFile(files[newIndex].name);
+    },
+    { enabled: !commitDialogOpen },
+  );
+  useHotkey(
+    "ArrowDown",
+    () => {
+      if (!files || files.length === 0) return;
+      const newIndex = (selectedFileIndex + 1) % files.length;
+      selectFile(files[newIndex].name);
+    },
+    { enabled: !commitDialogOpen },
+  );
+  useHotkey(
+    "Space",
+    () => {
+      if (!files?.length || !selectedFile) return;
+      toggleFileConfirmation(selectedFile.name);
+    },
+    {
+      enabled: Boolean(!commitDialogOpen && files?.length && selectedFile),
+    },
+  );
 
   if (!files) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       {/* Top bar */}
-      <header className="flex shrink-0 items-center gap-3 border-b border-border/70 pl-20 pr-4 py-2">
+      <header className="flex shrink-0 items-center gap-3 border-b border-border/70 pl-20 pr-2 py-2">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold">Uncommitted Changes</div>
           <div className="truncate text-xs text-muted-foreground">
             {projectPath}
           </div>
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="shrink-0"
-          onClick={closeDiffPane}
-        >
-          <X className="size-4" />
-          <span className="sr-only">Close</span>
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            className="shrink-0"
+            disabled={!canCommit}
+            onClick={() =>
+              openCommitDialog({
+                projectPath,
+                pathsToCommit,
+                selectedFileCount,
+                onCommitted: clearConfirmations,
+              })
+            }
+          >
+            <GitCommitHorizontal className="size-4" />
+            Commit
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            onClick={closeDiffPane}
+          >
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </Button>
+        </div>
       </header>
 
       {/* Body */}
@@ -256,12 +403,39 @@ function ProjectDiffPaneContent() {
           maxSize={600}
         >
           <aside className="flex h-full flex-col">
-            <div className="border-b border-border/70 px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              {files
-                ? `${files.length} changed file${files.length === 1 ? "" : "s"}`
-                : "Files"}
+            <div className="flex items-center gap-2 border-b border-border/70 px-3 py-2">
+              <Checkbox
+                id="all-files-checkbox"
+                checked={
+                  allFilesConfirmed
+                    ? true
+                    : someFilesConfirmed
+                      ? "indeterminate"
+                      : false
+                }
+                disabled={!files.length}
+                onCheckedChange={() =>
+                  toggleAllFilesConfirmation(files.map((f) => f.name))
+                }
+                className="shrink-0"
+                aria-label={
+                  allFilesConfirmed
+                    ? "Exclude all changed files from commit"
+                    : "Include all changed files in commit"
+                }
+              />
+              <label
+                htmlFor="all-files-checkbox"
+                className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+              >
+                {files.length} changed file{files.length === 1 ? "" : "s"}
+              </label>
             </div>
-            <div className="flex-1 overflow-y-auto py-1">
+            <div
+              className="flex-1 overflow-y-auto py-1"
+              role="listbox"
+              aria-label="Changed files"
+            >
               {isLoading ? (
                 <div className="flex h-full items-center justify-center">
                   <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
@@ -272,7 +446,6 @@ function ProjectDiffPaneContent() {
                     key={file.name}
                     file={file}
                     selected={!!selectedFile && selectedFile.name === file.name}
-                    onClick={() => selectFile(file.name)}
                   />
                 ))
               ) : (

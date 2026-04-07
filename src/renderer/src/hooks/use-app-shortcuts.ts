@@ -1,5 +1,6 @@
 import type { Session } from "@main/sessions/state";
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
+import { useDiffReviewCommitDialogStore } from "@renderer/components/diff-review-commit-dialog";
 import { useDiffReviewStore } from "@renderer/components/diff-review-pane";
 import { useNewSessionDialogStore } from "@renderer/components/new-session-dialog";
 import { useProjectDefaultsDialogStore } from "@renderer/components/project-defaults-dialog";
@@ -130,6 +131,9 @@ export function useAppShortcuts(): void {
   const isDiffReviewPaneOpen = useDiffReviewStore(
     (state) => state.openedProjectPath !== null,
   );
+  const isDiffReviewCommitDialogOpen = useDiffReviewCommitDialogStore(
+    (state) => state.payload !== null,
+  );
 
   const dialogsAreOpen =
     confirmDialogOpen ||
@@ -138,7 +142,8 @@ export function useAppShortcuts(): void {
     Boolean(openProjectDefaultsDialogCwd) ||
     Boolean(openProjectWorktreeDialogPath) ||
     Boolean(openWorktreeDeleteDialogPath) ||
-    isDiffReviewPaneOpen;
+    isDiffReviewPaneOpen ||
+    isDiffReviewCommitDialogOpen;
 
   useHotkey(
     "Mod+N",
@@ -206,15 +211,27 @@ export function useAppShortcuts(): void {
   );
 
   const openProjectDiff = useDiffReviewStore((state) => state.openProjectDiff);
+  const closeProjectDiff = useDiffReviewStore(
+    (state) => state.closeProjectDiff,
+  );
   useHotkey(
     "Mod+R",
     () => {
+      if (isDiffReviewPaneOpen) {
+        closeProjectDiff();
+        return;
+      }
+
       if (!activeSessionId) return;
       const activeSession = sessions[activeSessionId];
       if (!activeSession) return;
       openProjectDiff(activeSession.startupConfig.cwd);
     },
-    { enabled: !dialogsAreOpen },
+    {
+      enabled:
+        (!dialogsAreOpen || isDiffReviewPaneOpen) &&
+        !isDiffReviewCommitDialogOpen,
+    },
   );
 
   useHotkey(

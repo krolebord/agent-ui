@@ -521,6 +521,50 @@ export class ProjectGitService {
     }
   }
 
+  /**
+   * Commits working-tree changes for the given paths only. Other staged
+   * changes stay staged and are not included in this commit (git pathspec
+   * commit semantics).
+   */
+  async commitSelectedChanges(
+    projectPath: string,
+    input: {
+      paths: string[];
+      subject: string;
+      description?: string;
+    },
+  ): Promise<void> {
+    const git = simpleGit(projectPath);
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const paths = [
+      ...new Set(input.paths.map((p) => p.trim()).filter(Boolean)),
+    ];
+    if (paths.length === 0) {
+      throw new Error("No files selected to commit.");
+    }
+
+    const subject = input.subject.trim();
+    if (!subject) {
+      throw new Error("Commit message is required.");
+    }
+
+    const description = input.description?.trim();
+    const message = description ? [subject, description] : subject;
+
+    try {
+      await git.commit(message, paths);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Git commit failed.";
+      throw new Error(msg);
+    }
+
+    await this.refreshProject(projectPath);
+  }
+
   async getWorktreeCreationData(projectPath: string): Promise<{
     currentBranch: string;
     localBranches: string[];

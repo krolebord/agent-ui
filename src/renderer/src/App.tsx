@@ -1,5 +1,6 @@
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { ConfirmDialog } from "@renderer/components/confirm-dialog";
+import { DiffReviewCommitDialog } from "@renderer/components/diff-review-commit-dialog";
 import { NewSessionDialog } from "@renderer/components/new-session-dialog";
 import { ProjectDefaultsDialog } from "@renderer/components/project-defaults-dialog";
 import { ProjectDeletionToastListener } from "@renderer/components/project-deletion-toast-listener";
@@ -62,6 +63,7 @@ function App() {
       <WorktreeDeleteDialog />
       <ProjectDeletionToastListener />
       <SettingsDialog />
+      <DiffReviewCommitDialog />
       <WorkerPoolContextProvider
         poolOptions={{
           workerFactory: diffsWorkerFactory,

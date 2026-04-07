@@ -361,6 +361,24 @@ export const projectsRouter = {
       const files = parsePatchFiles(diff).flatMap((p) => p.files);
       return files;
     }),
+  commitSelectedChanges: procedure
+    .input(
+      z.object({
+        path: projectPathSchema,
+        filePaths: z.array(z.string().trim().min(1)).min(1),
+        subject: z.string().trim().min(1),
+        description: z.string().optional(),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const path = normalizeProjectPath(input.path);
+      assertProjectPathInteractionAllowed(path, context);
+      await context.projectGitService.commitSelectedChanges(path, {
+        paths: input.filePaths,
+        subject: input.subject,
+        description: input.description,
+      });
+    }),
   createWorktreeProject: procedure
     .input(
       z.object({
