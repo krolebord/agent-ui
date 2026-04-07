@@ -6,6 +6,8 @@ import { Terminal } from "@xterm/xterm";
 import { useEffect, useImperativeHandle, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
 
+const PTY_RESIZE_DEBOUNCE_MS = 75;
+
 export interface TerminalPaneHandle {
   write: (chunk: string) => void;
   clear: () => void;
@@ -36,6 +38,11 @@ export function TerminalPane({
   const fitRef = useRef<() => void>(() => {});
   const onInputRef = useRef(onInput);
   const onResizeRef = useRef(onResize);
+  const lastReportedSizeRef = useRef<{ cols: number; rows: number } | null>(
+    null,
+  );
+  const pendingResizeRef = useRef<{ cols: number; rows: number } | null>(null);
+  const resizeTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     onInputRef.current = onInput;
@@ -94,6 +101,38 @@ export function TerminalPane({
     terminal.open(container);
     terminalRef.current = terminal;
 
+    const flushResize = () => {
+      const pending = pendingResizeRef.current;
+      if (!pending) {
+        return;
+      }
+
+      pendingResizeRef.current = null;
+      const lastReported = lastReportedSizeRef.current;
+      if (
+        lastReported &&
+        lastReported.cols === pending.cols &&
+        lastReported.rows === pending.rows
+      ) {
+        return;
+      }
+
+      lastReportedSizeRef.current = pending;
+      onResizeRef.current(pending.cols, pending.rows);
+    };
+
+    const scheduleResize = (cols: number, rows: number) => {
+      pendingResizeRef.current = { cols, rows };
+      if (resizeTimeoutRef.current != null) {
+        window.clearTimeout(resizeTimeoutRef.current);
+      }
+
+      resizeTimeoutRef.current = window.setTimeout(() => {
+        resizeTimeoutRef.current = null;
+        flushResize();
+      }, PTY_RESIZE_DEBOUNCE_MS);
+    };
+
     terminal.attachCustomKeyEventHandler((event) => {
       if (
         event.type === "keydown" &&
@@ -130,7 +169,7 @@ export function TerminalPane({
       if (trackGlobalSize) {
         setTerminalSize(terminal.cols, terminal.rows);
       }
-      onResizeRef.current(terminal.cols, terminal.rows);
+      scheduleResize(terminal.cols, terminal.rows);
     };
     fitRef.current = fitAndNotify;
 
@@ -139,7 +178,10 @@ export function TerminalPane({
     });
 
     const onResizeDisposable = terminal.onResize(({ cols, rows }) => {
-      onResizeRef.current(cols, rows);
+      if (trackGlobalSize) {
+        setTerminalSize(cols, rows);
+      }
+      scheduleResize(cols, rows);
     });
 
     const resizeObserver = new ResizeObserver(() => {
@@ -159,6 +201,12 @@ export function TerminalPane({
       onResizeDisposable.dispose();
       resizeObserver.disconnect();
       window.removeEventListener("resize", onWindowResize);
+      if (resizeTimeoutRef.current != null) {
+        window.clearTimeout(resizeTimeoutRef.current);
+        resizeTimeoutRef.current = null;
+      }
+      pendingResizeRef.current = null;
+      lastReportedSizeRef.current = null;
       terminal.dispose();
       terminalRef.current = null;
       fitRef.current = () => {};

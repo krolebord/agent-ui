@@ -22,10 +22,13 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
   }
 
   const args: string[] = input.resumeSessionId
-    ? ["resume", input.resumeSessionId, "--no-alt-screen"]
+    ? ["resume", input.resumeSessionId]
     : input.forkSessionId
-      ? ["fork", input.forkSessionId, "--no-alt-screen"]
-      : ["--no-alt-screen"];
+      ? ["fork", input.forkSessionId]
+      : [];
+
+  args.push("--no-alt-screen");
+  args.push("--disable tui_app_server");
 
   if (input.permissionMode === "full-auto") {
     args.push("--full-auto");
