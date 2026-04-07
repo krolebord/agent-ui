@@ -455,6 +455,54 @@ describe("ProjectGitService", () => {
     expect(rawMock).not.toHaveBeenCalledWith("/repo-one", ["add", "-A"], {});
   });
 
+  it("caches the git index path across temporary-index operations", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    rawMock.mockImplementation(
+      async (
+        projectPath: string,
+        args: string[],
+        env?: Record<string, string>,
+      ) => {
+        if (projectPath !== "/repo-cache") {
+          return "";
+        }
+        if (args[0] === "rev-parse" && args[1] === "--verify") {
+          return "0123456789abcdef\n";
+        }
+        if (args[0] === "rev-parse" && args[1] === "--git-path") {
+          return ".git/index\n";
+        }
+        if (
+          args[0] === "diff" &&
+          args[1] === "--cached" &&
+          env?.GIT_INDEX_FILE === "/tmp/claude-ui-git-index-123/index"
+        ) {
+          return "diff --git a/file.txt b/file.txt\n";
+        }
+        return "";
+      },
+    );
+
+    const service = new ProjectGitService(defineProjectState());
+
+    expect(await service.getUncommittedDiff("/repo-cache")).toBe(
+      "diff --git a/file.txt b/file.txt",
+    );
+    expect(await service.getUncommittedDiff("/repo-cache")).toBe(
+      "diff --git a/file.txt b/file.txt",
+    );
+
+    const gitIndexLookups = rawMock.mock.calls.filter(
+      ([projectPath, args]) =>
+        projectPath === "/repo-cache" &&
+        Array.isArray(args) &&
+        args[0] === "rev-parse" &&
+        args[1] === "--git-path",
+    );
+
+    expect(gitIndexLookups).toHaveLength(1);
+  });
+
   it("does not update state when git metadata is unchanged", async () => {
     const projectsState = defineProjectState();
     projectsState.updateState((projects) => {

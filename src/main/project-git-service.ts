@@ -17,6 +17,7 @@ import {
 import { parseSetupCommands } from "./sessions/worktree-setup.session";
 
 const EMPTY_GIT_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const gitIndexPathCache = new Map<string, string>();
 
 type ProjectGitMetadata = Pick<
   ClaudeProject,
@@ -215,38 +216,76 @@ async function withTemporaryIndex<T>(
   const tempIndexPath = path.join(tempDir, "index");
 
   try {
-    const now2 = performance.now();
-    const gitIndexPath = (
-      await git.raw(["rev-parse", "--git-path", "index"])
-    ).trim();
-    const duration2 = performance.now() - now2;
-    log.info("rev-parse --git-path index duration", { duration: duration2 });
-    const resolvedGitIndexPath = path.isAbsolute(gitIndexPath)
-      ? gitIndexPath
-      : path.resolve(projectPath, gitIndexPath);
-
-    try {
-      await copyFile(resolvedGitIndexPath, tempIndexPath);
-    } catch (error) {
-      const fsError = error as NodeJS.ErrnoException;
-      if (fsError.code !== "ENOENT") {
-        throw error;
-      }
-
-      await writeFile(tempIndexPath, "");
-    }
+    await copyGitIndexToTemporaryIndex(git, projectPath, tempIndexPath);
 
     const tempGit = simpleGit(projectPath).env("GIT_INDEX_FILE", tempIndexPath);
-    const now3 = performance.now();
     const result = await operation(tempGit);
-    const duration3 = performance.now() - now3;
-    log.info("operation duration", { duration: duration3 });
     return result;
   } finally {
     await rm(tempDir, { recursive: true, force: true });
 
     const duration = performance.now() - now;
     log.info("withTemporaryIndex duration", { duration });
+  }
+}
+
+async function resolveGitIndexPath(
+  git: ReturnType<typeof simpleGit>,
+  projectPath: string,
+  options?: {
+    bypassCache?: boolean;
+  },
+): Promise<string> {
+  const bypassCache = options?.bypassCache ?? false;
+  if (!bypassCache) {
+    const cachedPath = gitIndexPathCache.get(projectPath);
+    if (cachedPath) {
+      return cachedPath;
+    }
+  }
+
+  const gitIndexPath = (
+    await git.raw(["rev-parse", "--git-path", "index"])
+  ).trim();
+
+  const resolvedGitIndexPath = path.isAbsolute(gitIndexPath)
+    ? gitIndexPath
+    : path.resolve(projectPath, gitIndexPath);
+  gitIndexPathCache.set(projectPath, resolvedGitIndexPath);
+  return resolvedGitIndexPath;
+}
+
+async function copyGitIndexToTemporaryIndex(
+  git: ReturnType<typeof simpleGit>,
+  projectPath: string,
+  tempIndexPath: string,
+): Promise<void> {
+  let resolvedGitIndexPath = await resolveGitIndexPath(git, projectPath);
+
+  try {
+    await copyFile(resolvedGitIndexPath, tempIndexPath);
+    return;
+  } catch (error) {
+    const fsError = error as NodeJS.ErrnoException;
+    if (fsError.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  gitIndexPathCache.delete(projectPath);
+  resolvedGitIndexPath = await resolveGitIndexPath(git, projectPath, {
+    bypassCache: true,
+  });
+
+  try {
+    await copyFile(resolvedGitIndexPath, tempIndexPath);
+  } catch (error) {
+    const fsError = error as NodeJS.ErrnoException;
+    if (fsError.code !== "ENOENT") {
+      throw error;
+    }
+
+    await writeFile(tempIndexPath, "");
   }
 }
 

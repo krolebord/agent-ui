@@ -4,7 +4,7 @@ import {
   type OpenInAppTarget,
   openInAppTargetLabels,
 } from "@shared/open-in-app";
-import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import {
   ChevronDown,
   FileDiff,
@@ -18,6 +18,7 @@ import {
   type ComponentType,
   type SVGProps,
   useEffect,
+  useEffectEvent,
   useMemo,
   useState,
 } from "react";
@@ -129,22 +130,25 @@ export function SessionHeader({ session }: { session: Session }) {
 
   const projectLocked = activeProject?.interactionDisabled === true;
 
-  const { refetch } = useQuery(
-    orpc.projects.refreshProject.queryOptions({
-      input: activeProject
-        ? {
-            path: activeProject.path,
-          }
-        : skipToken,
-      enabled: !!activeProject && !projectLocked,
-    }),
+  const refreshGitStatsMutation = useMutation(
+    orpc.projects.refreshProject.mutationOptions(),
   );
 
+  const refreshGitStats = useEffectEvent(() => {
+    if (!activeProject || projectLocked) return;
+    refreshGitStatsMutation.mutate({
+      path: activeProject.path,
+    });
+  });
+
+  useEffect(() => {
+    refreshGitStats();
+  }, []);
   useEffect(() => {
     if (session.status === "awaiting_user_response") {
-      void refetch();
+      void refreshGitStats();
     }
-  }, [refetch, session.status]);
+  }, [session.status]);
 
   const openFolderInAppMutation = useMutation({
     mutationFn: async (app: OpenInAppTarget) => {
