@@ -1,4 +1,5 @@
-import { readdir } from "node:fs/promises";
+import { copyFile, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import type {
   ClaudeProject,
@@ -204,9 +205,58 @@ async function resolveUpstreamDiffStats(
   }
 }
 
+async function withTemporaryIndex<T>(
+  git: ReturnType<typeof simpleGit>,
+  projectPath: string,
+  operation: (tempGit: ReturnType<typeof simpleGit>) => Promise<T>,
+): Promise<T> {
+  const now = performance.now();
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "claude-ui-git-index-"));
+  const tempIndexPath = path.join(tempDir, "index");
+
+  try {
+    const now2 = performance.now();
+    const gitIndexPath = (
+      await git.raw(["rev-parse", "--git-path", "index"])
+    ).trim();
+    const duration2 = performance.now() - now2;
+    log.info("rev-parse --git-path index duration", { duration: duration2 });
+    const resolvedGitIndexPath = path.isAbsolute(gitIndexPath)
+      ? gitIndexPath
+      : path.resolve(projectPath, gitIndexPath);
+
+    try {
+      await copyFile(resolvedGitIndexPath, tempIndexPath);
+    } catch (error) {
+      const fsError = error as NodeJS.ErrnoException;
+      if (fsError.code !== "ENOENT") {
+        throw error;
+      }
+
+      await writeFile(tempIndexPath, "");
+    }
+
+    const tempGit = simpleGit(projectPath).env("GIT_INDEX_FILE", tempIndexPath);
+    const now3 = performance.now();
+    const result = await operation(tempGit);
+    const duration3 = performance.now() - now3;
+    log.info("operation duration", { duration: duration3 });
+    return result;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+
+    const duration = performance.now() - now;
+    log.info("withTemporaryIndex duration", { duration });
+  }
+}
+
 async function readProjectGitData(
   projectPath: string,
+  options?: {
+    includeLocalBranches?: boolean;
+  },
 ): Promise<ProjectGitData> {
+  const includeLocalBranches = options?.includeLocalBranches ?? false;
   const git = simpleGit(projectPath);
   const isRepo = await git.checkIsRepo();
   if (!isRepo) {
@@ -221,14 +271,20 @@ async function readProjectGitData(
   const summary = await git.branchLocal();
   const currentBranch = summary.current ?? undefined;
   const diffBaseRef = await resolveDiffBaseRef(git);
-  await git.raw(["add", "-A"]);
-  const diffSummary = await git.raw([
-    "diff",
-    "--cached",
-    "--numstat",
-    "--no-renames",
-    diffBaseRef,
-  ]);
+  const diffSummary = await withTemporaryIndex(
+    git,
+    projectPath,
+    async (tempGit) => {
+      await tempGit.raw(["add", "-A"]);
+      return await tempGit.raw([
+        "diff",
+        "--cached",
+        "--numstat",
+        "--no-renames",
+        diffBaseRef,
+      ]);
+    },
+  );
   const diffStats = parseGitDiffStats(diffSummary);
 
   return {
@@ -237,7 +293,9 @@ async function readProjectGitData(
     currentBranch,
     diffStats,
     upstreamDiffStats: await resolveUpstreamDiffStats(git, currentBranch),
-    localBranches: await getLocalBranchNames(git, summary),
+    localBranches: includeLocalBranches
+      ? await getLocalBranchNames(git, summary)
+      : [],
   };
 }
 
@@ -409,8 +467,14 @@ export class ProjectGitService {
       const isRepo = await git.checkIsRepo();
       if (!isRepo) return null;
       const diffBaseRef = await resolveDiffBaseRef(git);
-      await git.raw(["add", "-A"]);
-      const diff = await git.raw(["diff", "--cached", diffBaseRef]);
+      const diff = await withTemporaryIndex(
+        git,
+        projectPath,
+        async (tempGit) => {
+          await tempGit.raw(["add", "-A"]);
+          return await tempGit.raw(["diff", "--cached", diffBaseRef]);
+        },
+      );
       const trimmed = diff.trim();
       return trimmed || null;
     } catch {
@@ -434,7 +498,9 @@ export class ProjectGitService {
       );
     }
 
-    const projectGitData = await readProjectGitData(projectPath);
+    const projectGitData = await readProjectGitData(projectPath, {
+      includeLocalBranches: true,
+    });
     if (!projectGitData.isRepo) {
       throw new Error("Project is not a Git repository.");
     }
@@ -491,7 +557,9 @@ export class ProjectGitService {
       throw new Error("A tracked project already exists at that path.");
     }
 
-    const projectGitData = await readProjectGitData(sourcePath);
+    const projectGitData = await readProjectGitData(sourcePath, {
+      includeLocalBranches: true,
+    });
     if (!projectGitData.isRepo) {
       throw new Error("Project is not a Git repository.");
     }

@@ -4,7 +4,11 @@ const simpleGitFactoryMock = vi.hoisted(() => vi.fn());
 const checkIsRepoMock = vi.hoisted(() => vi.fn());
 const branchLocalMock = vi.hoisted(() => vi.fn());
 const rawMock = vi.hoisted(() => vi.fn());
+const copyFileMock = vi.hoisted(() => vi.fn());
+const mkdtempMock = vi.hoisted(() => vi.fn());
 const readdirMock = vi.hoisted(() => vi.fn());
+const rmMock = vi.hoisted(() => vi.fn());
+const writeFileMock = vi.hoisted(() => vi.fn());
 const writeProjectSettingsFileMock = vi.hoisted(() => vi.fn());
 
 vi.mock("simple-git", () => ({
@@ -12,7 +16,11 @@ vi.mock("simple-git", () => ({
 }));
 
 vi.mock("node:fs/promises", () => ({
+  copyFile: copyFileMock,
+  mkdtemp: mkdtempMock,
   readdir: readdirMock,
+  rm: rmMock,
+  writeFile: writeFileMock,
 }));
 
 vi.mock("../../src/main/project-settings-file", () => ({
@@ -41,23 +49,46 @@ function createDeferred<T>() {
 describe("ProjectGitService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    simpleGitFactoryMock.mockImplementation((projectPath: string) => ({
-      checkIsRepo: () => checkIsRepoMock(projectPath),
-      branchLocal: () => branchLocalMock(projectPath),
-      raw: (args: string[]) => rawMock(projectPath, args),
-    }));
+    simpleGitFactoryMock.mockImplementation((projectPath: string) => {
+      const envVars: Record<string, string> = {};
+      const git = {
+        checkIsRepo: () => checkIsRepoMock(projectPath),
+        branchLocal: () => branchLocalMock(projectPath),
+        raw: (args: string[]) => {
+          const envSnapshot = { ...envVars };
+          if (Object.keys(envSnapshot).length === 0) {
+            return rawMock(projectPath, args);
+          }
+
+          return rawMock(projectPath, args, envSnapshot);
+        },
+        env: (key: string, value: string) => {
+          envVars[key] = value;
+          return git;
+        },
+      };
+
+      return git;
+    });
     rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
       if (args[0] === "rev-parse" && args[1] === "--verify") {
         return "0123456789abcdef\n";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--git-path") {
+        return ".git/index\n";
       }
       if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
         throw new Error("no upstream configured");
       }
       return "";
     });
+    copyFileMock.mockResolvedValue(undefined);
+    mkdtempMock.mockResolvedValue("/tmp/claude-ui-git-index-123");
     readdirMock.mockRejectedValue(
       Object.assign(new Error("missing"), { code: "ENOENT" }),
     );
+    rmMock.mockResolvedValue(undefined);
+    writeFileMock.mockResolvedValue(undefined);
   });
 
   it("hydrates git branches for all tracked projects", async () => {
@@ -322,7 +353,7 @@ describe("ProjectGitService", () => {
     ]);
   });
 
-  it("counts untracked files in diff stats", async () => {
+  it("counts untracked files in diff stats without mutating the real index", async () => {
     const projectsState = defineProjectState();
     projectsState.updateState((projects) => {
       projects.push({
@@ -334,18 +365,32 @@ describe("ProjectGitService", () => {
 
     checkIsRepoMock.mockResolvedValue(true);
     branchLocalMock.mockResolvedValue({ current: "main" });
-    rawMock.mockImplementation(async (projectPath: string, args: string[]) => {
-      if (projectPath !== "/repo-one") {
+    rawMock.mockImplementation(
+      async (
+        projectPath: string,
+        args: string[],
+        env?: Record<string, string>,
+      ) => {
+        if (projectPath !== "/repo-one") {
+          return "";
+        }
+        if (args[0] === "rev-parse" && args[1] === "--verify") {
+          return "0123456789abcdef\n";
+        }
+        if (args[0] === "rev-parse" && args[1] === "--git-path") {
+          return ".git/index\n";
+        }
+        if (
+          args[0] === "diff" &&
+          args[1] === "--cached" &&
+          args[2] === "--numstat" &&
+          env?.GIT_INDEX_FILE === "/tmp/claude-ui-git-index-123/index"
+        ) {
+          return "1\t0\tnew-file.txt\n1\t0\tsrc/new-module.ts\n";
+        }
         return "";
-      }
-      if (args[0] === "rev-parse") {
-        return "0123456789abcdef\n";
-      }
-      if (args[0] === "status" && args[1] === "--porcelain") {
-        return "?? new-file.txt\n?? src/new-module.ts\n";
-      }
-      return "";
-    });
+      },
+    );
 
     const service = new ProjectGitService(projectsState);
     await service.refreshProject("/repo-one");
@@ -358,6 +403,56 @@ describe("ProjectGitService", () => {
         gitDiffStats: { addedLines: 2, deletedLines: 0 },
       },
     ]);
+    expect(copyFileMock).toHaveBeenCalledWith(
+      "/repo-one/.git/index",
+      "/tmp/claude-ui-git-index-123/index",
+    );
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", ["add", "-A"], {
+      GIT_INDEX_FILE: "/tmp/claude-ui-git-index-123/index",
+    });
+    expect(rawMock).not.toHaveBeenCalledWith("/repo-one", ["add", "-A"], {});
+    expect(rmMock).toHaveBeenCalledWith("/tmp/claude-ui-git-index-123", {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it("returns the uncommitted diff using a temporary index", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    rawMock.mockImplementation(
+      async (
+        projectPath: string,
+        args: string[],
+        env?: Record<string, string>,
+      ) => {
+        if (projectPath !== "/repo-one") {
+          return "";
+        }
+        if (args[0] === "rev-parse" && args[1] === "--verify") {
+          return "0123456789abcdef\n";
+        }
+        if (args[0] === "rev-parse" && args[1] === "--git-path") {
+          return ".git/index\n";
+        }
+        if (
+          args[0] === "diff" &&
+          args[1] === "--cached" &&
+          env?.GIT_INDEX_FILE === "/tmp/claude-ui-git-index-123/index"
+        ) {
+          return "diff --git a/file.txt b/file.txt\n";
+        }
+        return "";
+      },
+    );
+
+    const service = new ProjectGitService(defineProjectState());
+    const diff = await service.getUncommittedDiff("/repo-one");
+
+    expect(diff).toBe("diff --git a/file.txt b/file.txt");
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", ["add", "-A"], {
+      GIT_INDEX_FILE: "/tmp/claude-ui-git-index-123/index",
+    });
+    expect(rawMock).not.toHaveBeenCalledWith("/repo-one", ["add", "-A"], {});
   });
 
   it("does not update state when git metadata is unchanged", async () => {
@@ -391,22 +486,33 @@ describe("ProjectGitService", () => {
 
     checkIsRepoMock.mockResolvedValue(true);
     branchLocalMock.mockResolvedValue({ current: "main" });
-    rawMock.mockImplementation(async (projectPath: string, args: string[]) => {
-      if (projectPath !== "/repo-one") {
+    rawMock.mockImplementation(
+      async (
+        projectPath: string,
+        args: string[],
+        env?: Record<string, string>,
+      ) => {
+        if (projectPath !== "/repo-one") {
+          return "";
+        }
+        if (args[0] === "rev-parse" && args[1] === "--verify") {
+          throw new Error("Needed a single revision");
+        }
+        if (args[0] === "rev-parse" && args[1] === "--git-path") {
+          return ".git/index\n";
+        }
+        if (
+          args[0] === "diff" &&
+          args[1] === "--cached" &&
+          args[2] === "--numstat" &&
+          args[4] === "4b825dc642cb6eb9a060e54bf8d69288fbee4904" &&
+          env?.GIT_INDEX_FILE === "/tmp/claude-ui-git-index-123/index"
+        ) {
+          return "3\t1\tsrc/index.ts\n";
+        }
         return "";
-      }
-      if (args[0] === "rev-parse") {
-        throw new Error("Needed a single revision");
-      }
-      if (
-        args[0] === "diff" &&
-        args[1] === "--numstat" &&
-        args[3] === "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-      ) {
-        return "3\t1\tsrc/index.ts\n";
-      }
-      return "";
-    });
+      },
+    );
 
     const service = new ProjectGitService(projectsState);
     await service.refreshProject("/repo-one");
