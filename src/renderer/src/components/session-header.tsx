@@ -142,8 +142,9 @@ export function SessionHeader({ session }: { session: Session }) {
   });
 
   useEffect(() => {
+    session.sessionId;
     refreshGitStats();
-  }, []);
+  }, [session.sessionId]);
   useEffect(() => {
     if (session.status === "awaiting_user_response") {
       void refreshGitStats();
