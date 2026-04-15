@@ -28,7 +28,7 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
       : [];
 
   args.push("--no-alt-screen");
-  args.push("--disable tui_app_server");
+  args.push("--disable apps");
 
   if (input.permissionMode === "full-auto") {
     args.push("--full-auto");

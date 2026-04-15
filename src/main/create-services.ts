@@ -28,7 +28,6 @@ import { SessionTitleManager } from "./session-title-manager";
 import { CodexSessionsManager } from "./sessions/codex.session";
 import { CursorAgentSessionsManager } from "./sessions/cursor-agent.session";
 import { LocalTerminalSessionsManager } from "./sessions/local-terminal.session";
-import { RalphLoopSessionsManager } from "./sessions/ralph-loop.session";
 import {
   defineSessionServiceState,
   defineSessionStatePersistence,
@@ -202,11 +201,6 @@ export async function createServices(options: CreateServicesOptions) {
     titleManager: codexTitleManager,
     sessionLogFileManager: codexSessionLogFileManager,
   });
-  const ralphLoopSessionsManager = new RalphLoopSessionsManager({
-    pluginDir: managedPluginDir,
-    state: sessionsState,
-    stateFileManager,
-  });
   const cursorAgentSessionsManager = new CursorAgentSessionsManager({
     state: sessionsState,
     cursorConfigDir,
@@ -249,9 +243,6 @@ export async function createServices(options: CreateServicesOptions) {
     async () => await codexSessionsManager.dispose(),
   );
   shutdownDisposable.addDisposable(
-    async () => await ralphLoopSessionsManager.dispose(),
-  );
-  shutdownDisposable.addDisposable(
     async () => await cursorAgentSessionsManager.dispose(),
   );
   shutdownDisposable.addDisposable(
@@ -277,7 +268,6 @@ export async function createServices(options: CreateServicesOptions) {
       state: sessionsState,
       localTerminal: localTerminalSessionsManager,
       codex: codexSessionsManager,
-      ralphLoop: ralphLoopSessionsManager,
       cursorAgent: cursorAgentSessionsManager,
       worktreeSetup: worktreeSetupSessionsManager,
     },

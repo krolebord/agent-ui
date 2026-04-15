@@ -268,11 +268,6 @@ export function useAppShortcuts(): void {
                 sessionId: activeSessionId,
               });
               break;
-            case "ralph-loop":
-              await orpc.sessions.ralphLoop.deleteSession.call({
-                sessionId: activeSessionId,
-              });
-              break;
             case "codex-local-terminal":
               await orpc.sessions.codex.deleteSession.call({
                 sessionId: activeSessionId,

@@ -9,7 +9,6 @@ import { claudeSessionsRouter } from "./session-service";
 import { codexSessionsRouter } from "./sessions/codex.session";
 import { cursorAgentSessionsRouter } from "./sessions/cursor-agent.session";
 import { localTerminalRouter } from "./sessions/local-terminal.session";
-import { ralphLoopRouter } from "./sessions/ralph-loop.session";
 import { worktreeSetupSessionsRouter } from "./sessions/worktree-setup.session";
 import { stateSyncRouter } from "./state-orchestrator";
 
@@ -50,7 +49,6 @@ const sessionsRouter = {
     }),
   localClaude: claudeSessionsRouter,
   localTerminal: localTerminalRouter,
-  ralphLoop: ralphLoopRouter,
   codex: codexSessionsRouter,
   cursorAgent: cursorAgentSessionsRouter,
   worktreeSetup: worktreeSetupSessionsRouter,

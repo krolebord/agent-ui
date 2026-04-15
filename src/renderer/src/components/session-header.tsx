@@ -11,7 +11,6 @@ import {
   FolderOpen,
   GitFork,
   Github,
-  Repeat,
   TerminalSquare,
 } from "lucide-react";
 import {
@@ -50,7 +49,6 @@ const sessionTypeConfig: Record<
 > = {
   "claude-local-terminal": { icon: ClaudeCodeIcon },
   "local-terminal": { icon: TerminalSquare },
-  "ralph-loop": { icon: Repeat },
   "codex-local-terminal": { icon: CodexIcon },
   "cursor-agent": { icon: CursorAgentIcon },
   "worktree-setup": { icon: GitFork },

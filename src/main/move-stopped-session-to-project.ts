@@ -58,9 +58,6 @@ export function moveStoppedSessionToProject(
       case "cursor-agent":
         next.startupConfig.cwd = targetProjectPath;
         return;
-      case "ralph-loop":
-        next.startupConfig.cwd = targetProjectPath;
-        return;
       default: {
         const _unhandled: never = next;
         void _unhandled;

@@ -32,7 +32,6 @@ import {
   type LucideIcon,
   MessageCircleQuestionMark,
   Pencil,
-  Repeat,
   ShieldAlert,
   Square,
   TerminalSquare,
@@ -111,7 +110,6 @@ export const sessionTypeIcon: Record<
 > = {
   "claude-local-terminal": { icon: ClaudeCodeIcon, label: "Claude Code" },
   "local-terminal": { icon: TerminalSquare, label: "Terminal" },
-  "ralph-loop": { icon: Repeat, label: "Ralph Loop" },
   "codex-local-terminal": { icon: CodexIcon, label: "Codex" },
   "cursor-agent": { icon: CursorAgentIcon, label: "Cursor Agent" },
   "worktree-setup": { icon: GitFork, label: "Worktree setup" },

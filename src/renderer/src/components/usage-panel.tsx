@@ -14,7 +14,7 @@ const BUCKET_LABELS: { key: UsageBucketKey; label: string }[] = [
   { key: "seven_day_sonnet", label: "Sonnet" },
 ];
 
-type UsageSource = "claude" | "ralphLoop" | "codex" | "cursorAgent";
+type UsageSource = "claude" | "codex" | "cursorAgent";
 
 type ClaudeUsageData = {
   five_hour: { utilization: number; resets_at: string | null } | null;
@@ -82,13 +82,11 @@ export function UsagePanel() {
   const usageSource: UsageSource | null =
     activeSession?.type === "claude-local-terminal"
       ? "claude"
-      : activeSession?.type === "ralph-loop"
-        ? "ralphLoop"
-        : activeSession?.type === "codex-local-terminal"
-          ? "codex"
-          : activeSession?.type === "cursor-agent"
-            ? "cursorAgent"
-            : null;
+      : activeSession?.type === "codex-local-terminal"
+        ? "codex"
+        : activeSession?.type === "cursor-agent"
+          ? "cursorAgent"
+          : null;
 
   const claudeQuery = useQuery(
     orpc.sessions.localClaude.getUsage.queryOptions({
@@ -96,15 +94,6 @@ export function UsagePanel() {
       refetchInterval: 5 * 60_000,
       staleTime: 5 * 60_000,
       enabled: usageSource === "claude",
-    }),
-  );
-
-  const ralphLoopQuery = useQuery(
-    orpc.sessions.ralphLoop.getUsage.queryOptions({
-      retry: false,
-      refetchInterval: 5 * 60_000,
-      staleTime: 5 * 60_000,
-      enabled: usageSource === "ralphLoop",
     }),
   );
 
@@ -130,7 +119,7 @@ export function UsagePanel() {
     return (
       <div className="border-t border-border/70 p-2">
         <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-center text-xs text-zinc-500">
-          Usage is available for Claude, Ralph Loop, Codex, and Cursor sessions.
+          Usage is available for Claude, Codex, and Cursor sessions.
         </div>
       </div>
     );
@@ -381,8 +370,7 @@ export function UsagePanel() {
     );
   }
 
-  const activeClaudeQuery =
-    usageSource === "claude" ? claudeQuery : ralphLoopQuery;
+  const activeClaudeQuery = claudeQuery;
 
   const handleRefetch = async () => {
     const result = await activeClaudeQuery.refetch();

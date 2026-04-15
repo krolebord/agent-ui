@@ -62,10 +62,6 @@ const projectDragSensors = [
 ];
 
 function isSessionActive(session: Session): boolean {
-  if (session.type === "ralph-loop") {
-    return session.loopState.autonomousEnabled || session.status !== "stopped";
-  }
-
   if (session.type === "worktree-setup") {
     return (
       session.status === "running" ||
@@ -86,11 +82,6 @@ async function stopSession(session: Session): Promise<void> {
       return;
     case "local-terminal":
       await orpc.sessions.localTerminal.stopLiveSession.call({
-        sessionId: session.sessionId,
-      });
-      return;
-    case "ralph-loop":
-      await orpc.sessions.ralphLoop.stopLoop.call({
         sessionId: session.sessionId,
       });
       return;
@@ -574,13 +565,6 @@ function GroupSessionsList({
                   sessionId={session.sessionId}
                 />
               );
-            case "ralph-loop":
-              return (
-                <RalphLoopSessionSidebarItem
-                  key={session.sessionId}
-                  sessionId={session.sessionId}
-                />
-              );
             case "worktree-setup":
               return (
                 <WorktreeSetupSessionSidebarItem
@@ -862,83 +846,6 @@ function WorktreeSetupSessionSidebarItem({ sessionId }: { sessionId: string }) {
             onClick={() => cancelMutation.mutate(sessionId)}
           />
         ) : null
-      }
-      onDelete={() => deleteMutation.mutate(sessionId)}
-      deleteDisabled={deleteMutation.isPending}
-    />
-  );
-}
-
-function RalphLoopSessionSidebarItem({ sessionId }: { sessionId: string }) {
-  const session = useAppState((x) => x.sessions[sessionId]);
-
-  const resumeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { cols, rows } = getTerminalSize();
-      await orpc.sessions.ralphLoop.resumeSession.call({
-        sessionId: id,
-        cols,
-        rows,
-      });
-    },
-  });
-
-  const stopMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.ralphLoop.stopLoop.call({ sessionId: id });
-    },
-  });
-
-  const runSingleMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.ralphLoop.runSingleIteration.call({ sessionId: id });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.ralphLoop.deleteSession.call({ sessionId: id });
-    },
-    onSuccess: () => navigateAwayIfActive(sessionId),
-  });
-
-  if (!session || session.type !== "ralph-loop") {
-    return null;
-  }
-
-  const resumeDisabled =
-    resumeMutation.isPending ||
-    session.loopState.completion === "done" ||
-    session.loopState.completion === "max_iterations";
-
-  return (
-    <BaseSessionSidebarItem
-      sessionId={sessionId}
-      primaryButton={
-        session.loopState.autonomousEnabled ? (
-          <SidebarIconButton
-            icon={SquareIcon}
-            label="Stop loop"
-            disabled={stopMutation.isPending}
-            onClick={() => stopMutation.mutate(sessionId)}
-          />
-        ) : (
-          <SidebarIconButton
-            icon={PlayIcon}
-            label="Resume loop"
-            disabled={resumeDisabled}
-            onClick={() => resumeMutation.mutate(sessionId)}
-          />
-        )
-      }
-      extraMenuItems={
-        <ContextMenuItem
-          onClick={() => runSingleMutation.mutate(sessionId)}
-          disabled={runSingleMutation.isPending}
-        >
-          <PlayIcon className="size-3.5" />
-          Run single iteration
-        </ContextMenuItem>
       }
       onDelete={() => deleteMutation.mutate(sessionId)}
       deleteDisabled={deleteMutation.isPending}

@@ -174,9 +174,6 @@ async function deleteProjectSessionsForPath(
       case "local-terminal":
         await context.sessions.localTerminal.deleteSession(sessionId);
         break;
-      case "ralph-loop":
-        await context.sessions.ralphLoop.deleteSession(sessionId);
-        break;
       case "codex-local-terminal":
         await context.sessions.codex.deleteSession(sessionId);
         break;

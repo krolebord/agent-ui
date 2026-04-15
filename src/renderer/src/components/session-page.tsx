@@ -5,8 +5,6 @@ import {
   TerminalPane,
   type TerminalPaneHandle,
 } from "@renderer/components/terminal-pane";
-import { Badge } from "@renderer/components/ui/badge";
-import { Button } from "@renderer/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -20,7 +18,6 @@ import {
 import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
 import { orpc } from "@renderer/orpc-client";
 import type { TerminalEvent } from "@shared/terminal-types";
-import { useMutation } from "@tanstack/react-query";
 import {
   AlertCircle,
   ChevronRight,
@@ -28,13 +25,7 @@ import {
   CircleX,
   LoaderCircle,
 } from "lucide-react";
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useAppState } from "./sync-state-provider";
 import { WelcomePage } from "./welcome-page";
@@ -109,8 +100,6 @@ export function SessionPage() {
           resizeTerminal={orpc.sessions.cursorAgent.resizeSessionTerminal.call}
         />
       );
-    case "ralph-loop":
-      return <RalphLoopSessionPage session={session} />;
     case "worktree-setup":
       return <WorktreeSetupSessionPage session={session} />;
     default:
@@ -184,136 +173,6 @@ function WorktreeSetupStepRow({
       </CollapsibleContent>
     </Collapsible>
   );
-}
-
-function RalphLoopSessionPage({
-  session,
-}: {
-  session: Extract<Session, { type: "ralph-loop" }>;
-}) {
-  const stopLoop = useMutation(
-    orpc.sessions.ralphLoop.stopLoop.mutationOptions(),
-  );
-  const resumeLoop = useMutation(
-    orpc.sessions.ralphLoop.resumeSession.mutationOptions(),
-  );
-  const runSingleIteration = useMutation(
-    orpc.sessions.ralphLoop.runSingleIteration.mutationOptions(),
-  );
-
-  const isRunning =
-    session.status === "starting" ||
-    session.status === "running" ||
-    session.status === "stopping";
-  const isTerminalCompletion =
-    session.loopState.completion === "done" ||
-    session.loopState.completion === "max_iterations";
-
-  const loopReadOnly = session.loopState.autonomousEnabled;
-
-  return (
-    <TerminalPage
-      session={session}
-      bottomPane={<ProjectTerminalPane cwd={session.startupConfig.cwd} />}
-      subscribe={(sessionId) =>
-        orpc.sessions.ralphLoop.subscribeToSessionTerminal.call({
-          sessionId,
-        })
-      }
-      writeToTerminal={orpc.sessions.ralphLoop.writeToSessionTerminal.call}
-      resizeTerminal={orpc.sessions.ralphLoop.resizeSessionTerminal.call}
-      readOnly={loopReadOnly}
-      controls={
-        <header className="flex h-9 flex-wrap items-center gap-2 border-b border-border/70 px-2">
-          <Badge variant="secondary">
-            Iteration {session.loopState.currentIteration}/
-            {session.startupConfig.maxIterations}
-          </Badge>
-          <Badge variant="outline">
-            Failures {session.loopState.consecutiveFailures}/
-            {session.startupConfig.maxConsecutiveFailures}
-          </Badge>
-          <ElapsedTimeBadge
-            createdAt={session.createdAt}
-            completedAt={session.loopState.completedAt}
-          />
-          <Badge variant="outline">{session.loopState.completion}</Badge>
-
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={
-                stopLoop.isPending ||
-                resumeLoop.isPending ||
-                (session.loopState.autonomousEnabled
-                  ? false
-                  : isRunning || isTerminalCompletion)
-              }
-              onClick={() => {
-                if (session.loopState.autonomousEnabled) {
-                  stopLoop.mutate({ sessionId: session.sessionId });
-                  return;
-                }
-                resumeLoop.mutate({ sessionId: session.sessionId });
-              }}
-            >
-              {session.loopState.autonomousEnabled
-                ? stopLoop.isPending
-                  ? "Stopping..."
-                  : "Stop Loop"
-                : resumeLoop.isPending
-                  ? "Resuming..."
-                  : "Resume Loop"}
-            </Button>
-            <Button
-              size="sm"
-              disabled={runSingleIteration.isPending || isRunning}
-              onClick={() => {
-                runSingleIteration.mutate({ sessionId: session.sessionId });
-              }}
-            >
-              {runSingleIteration.isPending
-                ? "Running..."
-                : "Run Single Iteration"}
-            </Button>
-          </div>
-        </header>
-      }
-    />
-  );
-}
-
-function ElapsedTimeBadge({
-  createdAt,
-  completedAt,
-}: {
-  createdAt: number;
-  completedAt?: number;
-}) {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (completedAt != null) {
-      return;
-    }
-    setNow(Date.now());
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [completedAt]);
-
-  const elapsedMs = (completedAt ?? now) - createdAt;
-  return <Badge variant="outline">Run time {formatElapsed(elapsedMs)}</Badge>;
-}
-
-function formatElapsed(ms: number): string {
-  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
 }
 
 function TerminalPage({

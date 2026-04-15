@@ -5,13 +5,11 @@ import { claudeLocalTerminalSessionSchema } from "../session-service";
 import { codexLocalTerminalSessionSchema } from "./codex.session";
 import { cursorAgentSessionSchema } from "./cursor-agent.session";
 import { localTerminalSessionSchema } from "./local-terminal.session";
-import { ralphLoopSessionSchema } from "./ralph-loop.session";
 import { worktreeSetupSessionSchema } from "./worktree-setup.session";
 
 const sessionSchema = z.discriminatedUnion("type", [
   claudeLocalTerminalSessionSchema,
   localTerminalSessionSchema,
-  ralphLoopSessionSchema,
   codexLocalTerminalSessionSchema,
   cursorAgentSessionSchema,
   worktreeSetupSessionSchema,

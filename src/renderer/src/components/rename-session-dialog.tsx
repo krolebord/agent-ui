@@ -66,12 +66,6 @@ export function RenameSessionDialog() {
             title: target.title,
           });
           return;
-        case "ralph-loop":
-          await orpc.sessions.ralphLoop.renameSession.call({
-            sessionId: target.sessionId,
-            title: target.title,
-          });
-          return;
         case "worktree-setup":
           await orpc.sessions.worktreeSetup.renameSession.call({
             sessionId: target.sessionId,
