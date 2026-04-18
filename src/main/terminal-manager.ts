@@ -4,7 +4,6 @@ import { createDisposable } from "@shared/utils";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import headlessXterm from "@xterm/headless";
 import { z } from "zod";
-import { withDebouncedRunner } from "./debounce-runner";
 import { procedure } from "./orpc";
 import { assertProjectPathInteractionAllowed } from "./project-service";
 import {
@@ -16,7 +15,7 @@ const { Terminal: HeadlessTerminal } = headlessXterm;
 
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
-const SNAPSHOT_DEBOUNCE_MS = 100;
+const SNAPSHOT_SCROLLBACK = 200;
 
 const terminalAccessSchema = z.object({
   interactionCwd: z.string().optional(),
@@ -46,8 +45,8 @@ export interface ManagedTerminalRuntime {
   resize: (cols: number, rows: number) => void;
   clear: () => void;
   stop: () => Promise<void>;
+  getSnapshot: () => string;
   readonly status: TerminalSessionStatus;
-  readonly snapshot: string;
 }
 
 interface LiveManagedTerminal {
@@ -187,22 +186,16 @@ export class TerminalManager {
       cols,
       rows,
       allowProposedApi: true,
-      scrollback: 1000,
+      scrollback: SNAPSHOT_SCROLLBACK,
     });
     const serializeAddon = new SerializeAddon();
     headless.loadAddon(serializeAddon as never);
 
-    let snapshot = "";
     let sessionStatus: TerminalSessionStatus = "stopped";
-
-    const syncSnapshot = withDebouncedRunner(() => {
-      snapshot = serializeAddon.serialize();
-    }, SNAPSHOT_DEBOUNCE_MS);
 
     const disposable = createDisposable({
       onError: () => {},
     });
-    disposable.addDisposable(() => syncSnapshot.dispose());
 
     const terminal = createTerminalSession({
       onData: ({ chunk }) => {
@@ -217,7 +210,6 @@ export class TerminalManager {
           type: "data",
           data: renderedChunk,
         });
-        syncSnapshot.schedule();
       },
       onStatusChange: (status) => {
         sessionStatus = status;
@@ -238,7 +230,6 @@ export class TerminalManager {
         const size = getSafeTerminalSize(nextCols, nextRows);
         terminal.resize(size.cols, size.rows);
         headless.resize(size.cols, size.rows);
-        syncSnapshot.schedule();
       },
       clear: () => {
         terminal.clear();
@@ -246,11 +237,13 @@ export class TerminalManager {
       stop: async () => {
         await disposable.dispose();
       },
+      getSnapshot: () => {
+        return serializeAddon.serialize({
+          scrollback: SNAPSHOT_SCROLLBACK,
+        });
+      },
       get status() {
         return sessionStatus;
-      },
-      get snapshot() {
-        return snapshot;
       },
     };
 
@@ -294,10 +287,11 @@ export class TerminalManager {
 
   subscribeToTerminalEvents(terminalId: string, signal?: AbortSignal) {
     const liveTerminal = this.liveTerminals.get(terminalId);
+    const stream = this.eventPublisher.subscribe(terminalId, { signal });
     return {
       isLive: !!liveTerminal,
-      snapshot: liveTerminal?.runtime.snapshot ?? "",
-      stream: this.eventPublisher.subscribe(terminalId, { signal }),
+      snapshot: liveTerminal?.runtime.getSnapshot() ?? "",
+      stream,
     };
   }
 
