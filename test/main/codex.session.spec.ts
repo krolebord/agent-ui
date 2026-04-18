@@ -440,6 +440,7 @@ describe("CodexSessionsManager", () => {
       "resume",
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
       "--no-alt-screen",
+      "--disable apps",
       "--model",
       "gpt-5.3-codex",
       "--disable",
@@ -675,7 +676,6 @@ describe("CodexSessionsManager", () => {
         initialPrompt: "summarize status",
         configOverrides: 'model_provider = "openai"',
       },
-      bufferedOutput: "",
     });
 
     const startCall = terminalSessionSpies.start.mock.calls.at(-1)?.[0] as
@@ -690,6 +690,7 @@ describe("CodexSessionsManager", () => {
       "fork",
       "codex-session-1",
       "--no-alt-screen",
+      "--disable apps",
       "--dangerously-bypass-approvals-and-sandbox",
       "--model",
       "gpt-5.3-codex",

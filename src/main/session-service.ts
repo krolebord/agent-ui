@@ -1,5 +1,5 @@
-import { EventPublisher } from "@orpc/client";
 import type { TerminalEvent } from "@shared/terminal-types";
+import { createDisposable } from "@shared/utils";
 import { z } from "zod";
 import {
   type ClaudeEffort,
@@ -9,7 +9,7 @@ import {
   claudeModelSchema,
   claudePermissionModeSchema,
 } from "../shared/claude-types";
-import type { ClaudeActivityMonitor } from "./claude-activity-monitor";
+import { ClaudeActivityMonitor } from "./claude-activity-monitor";
 import {
   type BuildClaudeArgsInput,
   buildClaudeArgs,
@@ -24,13 +24,14 @@ import type { SessionTitleManager } from "./session-title-manager";
 import {
   commonSessionSchema,
   generateUniqueSessionId,
+  type SessionStatus,
 } from "./sessions/common";
-import { createClaudeProcess } from "./sessions/start-claude-process";
 import type { SessionServiceState } from "./sessions/state";
-import type { TerminalSession } from "./terminal-session";
+import { TerminalManager } from "./terminal-manager";
+import type { TerminalSessionStatus } from "./terminal-session";
 
 interface SessionRecord {
-  terminal: TerminalSession;
+  terminalId: string;
   activityMonitor: ClaudeActivityMonitor;
   stateFilePath: string;
   dispose: () => Promise<void>;
@@ -38,6 +39,7 @@ interface SessionRecord {
 interface SessionServiceOptions {
   pluginDir: string | null;
   pluginWarning: string | null;
+  terminalManager?: TerminalManager;
   titleManager: SessionTitleManager;
   stateFileManager: SessionStateFileManager;
   state: SessionServiceState;
@@ -148,16 +150,16 @@ export const claudeSessionsRouter = {
   subscribeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string() }))
     .handler(async function* ({ input, context, signal }) {
-      const { bufferedOutput, stream, isLive } =
-        context.sessionsService.subscribeToTerminalEvents(
+      const { snapshot, stream, isLive } =
+        context.terminalManager.subscribeToTerminalEvents(
           input.sessionId,
           signal,
         );
 
       if (isLive) {
         yield { type: "clear" } as TerminalEvent;
-        if (bufferedOutput) {
-          yield { type: "data", data: bufferedOutput } as TerminalEvent;
+        if (snapshot) {
+          yield { type: "data", data: snapshot } as TerminalEvent;
         }
       }
       for await (const event of stream) {
@@ -167,22 +169,18 @@ export const claudeSessionsRouter = {
   writeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string(), data: z.string() }))
     .handler(async ({ input, context }) => {
-      const session = context.sessionsService.getLiveSession(input.sessionId);
-      if (!session) {
-        return;
-      }
-      session.terminal.write(input.data);
+      context.terminalManager.writeToTerminal(input.sessionId, input.data);
     }),
   resizeSessionTerminal: procedure
     .input(
       z.object({ sessionId: z.string(), cols: z.number(), rows: z.number() }),
     )
     .handler(async ({ input, context }) => {
-      const session = context.sessionsService.getLiveSession(input.sessionId);
-      if (!session) {
-        return;
-      }
-      session.terminal.resize(input.cols, input.rows);
+      context.terminalManager.resizeTerminal(
+        input.sessionId,
+        input.cols,
+        input.rows,
+      );
     }),
 };
 
@@ -194,21 +192,38 @@ function getDefaultSessionTitle(sessionId: string): string {
   return `Session ${sessionId.substring(0, 8)}`;
 }
 
+function getClaudeSessionStatus(
+  terminalStatus: TerminalSessionStatus,
+  activityMonitor: ClaudeActivityMonitor,
+  opts?: { stoppedMeansIdle?: boolean },
+): SessionStatus {
+  const activityStatus = activityMonitor.getState();
+
+  if (terminalStatus === "starting") return "starting";
+  if (terminalStatus === "stopping") return "stopping";
+  if (terminalStatus === "error") return "error";
+  if (terminalStatus === "stopped")
+    return opts?.stoppedMeansIdle ? "idle" : "stopped";
+
+  if (activityStatus === "awaiting_approval") return "awaiting_approval";
+  if (activityStatus === "awaiting_user_response")
+    return "awaiting_user_response";
+  if (activityStatus === "working") return "running";
+
+  return "idle";
+}
+
 export type { TerminalEvent } from "@shared/terminal-types";
 
 export class SessionsServiceNew {
   private readonly sessionsState: SessionServiceState;
   private readonly liveSessions = new Map<string, SessionRecord>();
-  private readonly eventPublisher = new EventPublisher<
-    Record<string, TerminalEvent>
-  >({
-    maxBufferedEvents: 0,
-  });
 
   private readonly pluginDir: string | null;
   private readonly pluginWarning: string | null;
   private readonly titleManager: SessionTitleManager;
   private readonly stateFileManager: SessionStateFileManager;
+  readonly terminalManager: TerminalManager;
 
   constructor(options: SessionServiceOptions) {
     this.pluginDir = options.pluginDir;
@@ -216,6 +231,15 @@ export class SessionsServiceNew {
     this.titleManager = options.titleManager;
     this.stateFileManager = options.stateFileManager;
     this.sessionsState = options.state;
+    this.terminalManager = options.terminalManager ?? new TerminalManager();
+
+    for (const [sessionId, session] of Object.entries(
+      this.sessionsState.state,
+    )) {
+      if (session.type === "claude-local-terminal") {
+        this.terminalManager.registerTerminal(sessionId);
+      }
+    }
   }
 
   private createSessionSnapshot(input: {
@@ -270,6 +294,7 @@ export class SessionsServiceNew {
         cwd: startupOptions.cwd,
       },
     });
+    this.terminalManager.registerTerminal(sessionId);
     state.updateState((state) => {
       state[sessionId] = newSession;
     });
@@ -361,6 +386,7 @@ export class SessionsServiceNew {
       },
     });
 
+    this.terminalManager.registerTerminal(sessionId);
     state.updateState((state) => {
       state[sessionId] = forkedSession;
     });
@@ -399,11 +425,23 @@ export class SessionsServiceNew {
     initialPrompt?: string;
     start: ClaudeStartOptions;
   }) {
-    const disposables: Array<() => Promise<unknown> | unknown> = [];
-
     const state = this.sessionsState;
+    const existingLiveSession = this.liveSessions.get(opts.sessionId);
+    if (existingLiveSession) {
+      return existingLiveSession;
+    }
+
+    const disposable = createDisposable({
+      onError: (error) => {
+        log.error(`Error disposing of live session ${opts.sessionId}`, {
+          error,
+        });
+      },
+    });
     const stateFilePath = await this.stateFileManager.create(opts.sessionId);
-    disposables.push(() => this.stateFileManager.cleanup(stateFilePath));
+    disposable.addDisposable(() =>
+      this.stateFileManager.cleanup(stateFilePath),
+    );
 
     let deferredPrompt: string | null = null;
     let deferredPromptChecksLeft = 50;
@@ -416,114 +454,118 @@ export class SessionsServiceNew {
       }
     }
 
-    const handle = createClaudeProcess(
-      {
-        stateFilePath,
+    const activityMonitor = new ClaudeActivityMonitor({
+      onStatusChange: () => {
+        const runtime = this.terminalManager.getRuntime(opts.sessionId);
+        if (!runtime) {
+          return;
+        }
+
+        state.updateState((state) => {
+          state[opts.sessionId].status = getClaudeSessionStatus(
+            runtime.status,
+            activityMonitor,
+          );
+          state[opts.sessionId].lastActivityAt = Date.now();
+        });
+      },
+      onHookEvent: (event) => {
+        if (event.hook_event_name !== "UserPromptSubmit") {
+          return;
+        }
+
+        const session = state.state[opts.sessionId];
+        if (
+          !session ||
+          session.title !== getDefaultSessionTitle(opts.sessionId)
+        ) {
+          return;
+        }
+
+        const prompt = event.prompt?.trim();
+        if (!prompt) {
+          return;
+        }
+
+        this.triggerTitleGeneration(opts.sessionId, prompt);
+      },
+    });
+    disposable.addDisposable(() => activityMonitor.stopMonitoring());
+    activityMonitor.startMonitoring(stateFilePath);
+
+    const claudeArgs = buildClaudeArgs({
+      start: opts.start,
+      permissionMode: opts.permissionMode,
+      pluginDir: this.pluginDir,
+      model: opts.model,
+      effort: opts.effort,
+      haikuModelOverride: opts.haikuModelOverride,
+      subagentModelOverride: opts.subagentModelOverride,
+      systemPrompt: opts.systemPrompt,
+      stateFilePath,
+      initialPrompt: effectiveInitialPrompt,
+    });
+
+    const runtime = this.terminalManager.startTerminal({
+      terminalId: opts.sessionId,
+      launch: {
         cwd: opts.cwd,
         cols: opts.cols,
         rows: opts.rows,
-        claudeArgs: buildClaudeArgs({
-          start: opts.start,
-          permissionMode: opts.permissionMode,
-          pluginDir: this.pluginDir,
-          model: opts.model,
-          effort: opts.effort,
-          haikuModelOverride: opts.haikuModelOverride,
-          subagentModelOverride: opts.subagentModelOverride,
-          systemPrompt: opts.systemPrompt,
-          stateFilePath,
-          initialPrompt: effectiveInitialPrompt,
-        }),
+        runWithShell: true,
+        file: "claude",
+        args: claudeArgs.args,
+        env: claudeArgs.env,
       },
-      {
-        onSessionStatusChange: (status) => {
-          state.updateState((state) => {
-            state[opts.sessionId].status = status;
-            state[opts.sessionId].lastActivityAt = Date.now();
-          });
-        },
-        onBufferedOutputSync: (bufferedOutput) => {
-          state.updateState((state) => {
-            state[opts.sessionId].bufferedOutput = bufferedOutput;
-          });
-        },
-        onTerminalData: (chunk) => {
-          this.eventPublisher.publish(opts.sessionId, {
-            type: "data",
-            data: chunk,
-          });
-
-          if (deferredPrompt && deferredPromptChecksLeft > 0) {
-            deferredPromptChecksLeft--;
-            if (chunk.includes("Enabled")) {
-              const prompt = deferredPrompt;
-              deferredPrompt = null;
-              setTimeout(() => {
-                handle.terminal.write(prompt);
-                handle.terminal.write("\r");
-              }, 500);
-            }
-          }
-        },
-        onTerminalExit: (payload) => {
-          void this.stopLiveSession(opts.sessionId);
-          state.updateState((state) => {
-            state[opts.sessionId].status = payload.errorMessage
-              ? "error"
-              : "stopped";
-            state[opts.sessionId].errorMessage = payload.errorMessage;
-          });
-          handle.syncBufferedOutput.flush();
-        },
-        onHookEvent: (event) => {
-          if (event.hook_event_name !== "UserPromptSubmit") {
-            return;
-          }
-
-          const session = state.state[opts.sessionId];
-          if (
-            !session ||
-            session.title !== getDefaultSessionTitle(opts.sessionId)
-          ) {
-            return;
-          }
-
-          const prompt = event.prompt?.trim();
-          if (!prompt) {
-            return;
-          }
-
-          this.triggerTitleGeneration(opts.sessionId, prompt);
-        },
-      },
-    );
-
-    disposables.push(() => handle.syncBufferedOutput.dispose());
-    disposables.push(() => handle.activityMonitor.stopMonitoring());
-    disposables.push(() => handle.terminal.stop());
-
-    const liveSession: SessionRecord = {
-      terminal: handle.terminal,
-      activityMonitor: handle.activityMonitor,
-      stateFilePath,
-      dispose: async () => {
-        for (const disposable of disposables) {
-          try {
-            await disposable();
-          } catch (error) {
-            log.error(`Error disposing of live session ${opts.sessionId}`, {
-              error,
-            });
+      onData: (chunk) => {
+        if (deferredPrompt && deferredPromptChecksLeft > 0) {
+          deferredPromptChecksLeft--;
+          if (chunk.includes("Enabled")) {
+            const prompt = deferredPrompt;
+            deferredPrompt = null;
+            setTimeout(() => {
+              this.terminalManager.writeToTerminal(opts.sessionId, prompt);
+              this.terminalManager.writeToTerminal(opts.sessionId, "\r");
+            }, 500);
           }
         }
       },
+      onStatusChange: (status) => {
+        state.updateState((state) => {
+          state[opts.sessionId].status = getClaudeSessionStatus(
+            status,
+            activityMonitor,
+          );
+          state[opts.sessionId].lastActivityAt = Date.now();
+        });
+      },
+      onExit: (payload) => {
+        void this.stopLiveSession(opts.sessionId);
+        state.updateState((state) => {
+          state[opts.sessionId].status = payload.errorMessage
+            ? "error"
+            : "stopped";
+          state[opts.sessionId].errorMessage = payload.errorMessage;
+        });
+      },
+    });
+    disposable.addDisposable(() => runtime.stop());
+
+    const liveSession: SessionRecord = {
+      terminalId: opts.sessionId,
+      activityMonitor,
+      stateFilePath,
+      dispose: disposable.dispose,
     };
 
     this.liveSessions.set(opts.sessionId, liveSession);
-    disposables.push(() => this.liveSessions.delete(opts.sessionId));
-    disposables.push(() => this.titleManager.forget(opts.sessionId));
+    disposable.addDisposable(() => this.liveSessions.delete(opts.sessionId));
+    disposable.addDisposable(() => this.titleManager.forget(opts.sessionId));
 
-    handle.start();
+    if (!this.terminalManager.getRuntime(opts.sessionId)) {
+      await disposable.dispose();
+      return null;
+    }
 
     return liveSession;
   }
@@ -575,6 +617,7 @@ export class SessionsServiceNew {
 
   async deleteSession(sessionId: string) {
     await this.stopLiveSession(sessionId);
+    await this.terminalManager.unregisterTerminal(sessionId);
 
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
@@ -603,11 +646,6 @@ export class SessionsServiceNew {
   }
 
   subscribeToTerminalEvents(sessionId: string, signal?: AbortSignal) {
-    const liveSession = this.liveSessions.get(sessionId);
-    return {
-      isLive: !!liveSession,
-      bufferedOutput: liveSession?.terminal.bufferedOutput ?? "",
-      stream: this.eventPublisher.subscribe(sessionId, { signal }),
-    };
+    return this.terminalManager.subscribeToTerminalEvents(sessionId, signal);
   }
 }

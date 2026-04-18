@@ -36,6 +36,7 @@ import {
 import { WorktreeSetupSessionsManager } from "./sessions/worktree-setup.session";
 import { ensureShellIntegrationScripts } from "./shell-integration/scripts";
 import { StateOrchestrator } from "./state-orchestrator";
+import { TerminalManager } from "./terminal-manager";
 
 const STORAGE_SCHEMA_VERSION = 3;
 
@@ -184,25 +185,31 @@ export async function createServices(options: CreateServicesOptions) {
   const sessionsService = new SessionsServiceNew({
     pluginDir: managedPluginDir,
     pluginWarning,
+    terminalManager: new TerminalManager(),
     titleManager,
     stateFileManager,
     state: sessionsState,
   });
+  const terminalManager = sessionsService.terminalManager;
 
   const localTerminalSessionsManager = new LocalTerminalSessionsManager(
     sessionsState,
+    terminalManager,
   );
   const projectTerminalsManager = new ProjectTerminalsManager(
     projectTerminalsState,
     shellIntegrationEnv,
+    terminalManager,
   );
   const codexSessionsManager = new CodexSessionsManager({
     state: sessionsState,
+    terminalManager,
     titleManager: codexTitleManager,
     sessionLogFileManager: codexSessionLogFileManager,
   });
   const cursorAgentSessionsManager = new CursorAgentSessionsManager({
     state: sessionsState,
+    terminalManager,
     cursorConfigDir,
     sessionLogFileManager: cursorSessionLogFileManager,
     cursorHooksWarning,
@@ -232,6 +239,7 @@ export async function createServices(options: CreateServicesOptions) {
   });
 
   shutdownDisposable.addDisposable(async () => await sessionsService.dispose());
+  shutdownDisposable.addDisposable(async () => await terminalManager.dispose());
   shutdownDisposable.addDisposable(
     async () => await localTerminalSessionsManager.dispose(),
   );
@@ -259,6 +267,7 @@ export async function createServices(options: CreateServicesOptions) {
     projectGitService,
     getMainWindow,
     sessionsService,
+    terminalManager,
     projectTerminalsManager,
     stateService,
     shutdown: shutdownDisposable.dispose,

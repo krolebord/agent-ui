@@ -1,9 +1,7 @@
-import { EventPublisher } from "@orpc/server";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
 import { z } from "zod";
 import { defineServiceState } from "../shared/service-state";
-import { withDebouncedRunner } from "./debounce-runner";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
 import { assertProjectPathInteractionAllowed } from "./project-service";
@@ -11,14 +9,11 @@ import {
   generateUniqueSessionId,
   sessionStatusSchema,
 } from "./sessions/common";
+import { ShellIntegrationMonitor } from "./shell-integration/osc-parser";
 import {
-  ShellIntegrationMonitor,
-  stripOsc133,
-} from "./shell-integration/osc-parser";
-import {
-  createTerminalSession,
-  type TerminalSession,
-} from "./terminal-session";
+  type ManagedTerminalRuntime,
+  TerminalManager,
+} from "./terminal-manager";
 
 export const projectTerminalInstanceSchema = z.object({
   terminalId: z.string(),
@@ -127,7 +122,7 @@ export const defineProjectTerminalsPersistence = (
 interface LiveProjectTerminal {
   cwd: string;
   terminalId: string;
-  terminal: TerminalSession;
+  terminal: ManagedTerminalRuntime;
   shellMonitor: ShellIntegrationMonitor;
   dispose: () => Promise<void>;
 }
@@ -204,7 +199,7 @@ export const projectTerminalsRouter = {
       );
       assertProjectPathInteractionAllowed(cwd, context);
 
-      const { bufferedOutput, stream, isLive } =
+      const { snapshot, stream, isLive } =
         context.projectTerminalsManager.subscribeToTerminalEvents(
           input.terminalId,
           signal,
@@ -212,8 +207,8 @@ export const projectTerminalsRouter = {
 
       if (isLive) {
         yield { type: "clear" } as TerminalEvent;
-        if (bufferedOutput) {
-          yield { type: "data", data: bufferedOutput } as TerminalEvent;
+        if (snapshot) {
+          yield { type: "data", data: snapshot } as TerminalEvent;
         }
       }
 
@@ -249,16 +244,20 @@ export const projectTerminalsRouter = {
 
 export class ProjectTerminalsManager {
   readonly liveTerminals = new Map<string, LiveProjectTerminal>();
-  private readonly eventPublisher = new EventPublisher<
-    Record<string, TerminalEvent>
-  >({
-    maxBufferedEvents: 0,
-  });
 
   constructor(
     private readonly state: ProjectTerminalsState,
     private readonly shellIntegrationEnv: Record<string, string> = {},
-  ) {}
+    private readonly terminalManager: TerminalManager = new TerminalManager(),
+  ) {
+    for (const workspace of Object.values(this.state.state)) {
+      for (const terminalId of Object.keys(workspace.terminals)) {
+        this.terminalManager.registerTerminal(terminalId, {
+          interactionCwd: workspace.cwd,
+        });
+      }
+    }
+  }
 
   ensureWorkspace({
     cwd,
@@ -298,6 +297,9 @@ export class ProjectTerminalsManager {
   }) {
     const terminalId = generateUniqueSessionId();
     const now = Date.now();
+    this.terminalManager.registerTerminal(terminalId, {
+      interactionCwd: cwd,
+    });
 
     this.state.updateState((state) => {
       const workspace = state[cwd] ?? {
@@ -316,7 +318,6 @@ export class ProjectTerminalsManager {
         createdAt: now,
         lastActivityAt: now,
         status: "stopped",
-        bufferedOutput: "",
       };
       workspace.order.push(terminalId);
       workspace.selectedTerminalId = terminalId;
@@ -354,6 +355,7 @@ export class ProjectTerminalsManager {
     terminalId: string;
   }) {
     await this.stopLiveTerminal(terminalId);
+    await this.terminalManager.unregisterTerminal(terminalId);
 
     this.state.updateState((state) => {
       const workspace = state[cwd];
@@ -390,6 +392,7 @@ export class ProjectTerminalsManager {
     await Promise.all(
       Object.keys(workspace.terminals).map(async (terminalId) => {
         await this.stopLiveTerminal(terminalId);
+        await this.terminalManager.unregisterTerminal(terminalId);
       }),
     );
 
@@ -399,7 +402,7 @@ export class ProjectTerminalsManager {
   }
 
   writeToTerminal({ terminalId, data }: { terminalId: string; data: string }) {
-    this.liveTerminals.get(terminalId)?.terminal.write(data);
+    this.terminalManager.writeToTerminal(terminalId, data);
   }
 
   resizeTerminal({
@@ -411,20 +414,11 @@ export class ProjectTerminalsManager {
     cols: number;
     rows: number;
   }) {
-    this.liveTerminals.get(terminalId)?.terminal.resize(cols, rows);
+    this.terminalManager.resizeTerminal(terminalId, cols, rows);
   }
 
   subscribeToTerminalEvents(terminalId: string, signal?: AbortSignal) {
-    const liveTerminal = this.liveTerminals.get(terminalId);
-    const rawBuffered =
-      liveTerminal?.terminal.bufferedOutput ??
-      this.findTerminalState(terminalId)?.bufferedOutput ??
-      "";
-    return {
-      isLive: !!liveTerminal,
-      bufferedOutput: stripOsc133(rawBuffered),
-      stream: this.eventPublisher.subscribe(terminalId, { signal }),
-    };
+    return this.terminalManager.subscribeToTerminalEvents(terminalId, signal);
   }
 
   async dispose(): Promise<void> {
@@ -471,28 +465,23 @@ export class ProjectTerminalsManager {
       },
     });
 
-    const syncBufferedOutput = withDebouncedRunner(() => {
-      const liveTerminal = this.liveTerminals.get(terminalId);
-      const bufferedOutput = stripOsc133(
-        liveTerminal?.terminal.bufferedOutput ?? "",
-      );
-      this.updateTerminalState(cwd, terminalId, (terminal) => {
-        terminal.bufferedOutput = bufferedOutput;
-        terminal.lastActivityAt = Date.now();
-      });
-    }, 500);
-    disposable.addDisposable(() => syncBufferedOutput.dispose());
-
-    const terminal = createTerminalSession({
-      onData: ({ chunk }) => {
-        const cleanChunk = shellMonitor.processChunk(chunk);
-        if (cleanChunk) {
-          this.eventPublisher.publish(terminalId, {
-            type: "data",
-            data: cleanChunk,
-          });
-        }
-        syncBufferedOutput.schedule();
+    const terminal = this.terminalManager.startTerminal({
+      terminalId,
+      access: {
+        interactionCwd: cwd,
+      },
+      launch: {
+        runWithShell: true,
+        cwd,
+        cols,
+        rows,
+        env: this.shellIntegrationEnv,
+      },
+      transformOutputChunk: (chunk) => shellMonitor.processChunk(chunk),
+      onData: () => {
+        this.updateTerminalState(cwd, terminalId, (terminal) => {
+          terminal.lastActivityAt = Date.now();
+        });
       },
       onStatusChange: (status) => {
         this.updateTerminalState(cwd, terminalId, (terminal) => {
@@ -506,9 +495,6 @@ export class ProjectTerminalsManager {
             terminal.errorMessage = undefined;
           }
         });
-        if (status === "stopped") {
-          syncBufferedOutput.flush();
-        }
       },
       onExit: (payload) => {
         this.liveTerminals.delete(terminalId);
@@ -516,18 +502,10 @@ export class ProjectTerminalsManager {
           terminal.status = payload.errorMessage ? "error" : "stopped";
           terminal.errorMessage = payload.errorMessage;
         });
-        syncBufferedOutput.flush();
       },
     });
 
     disposable.addDisposable(() => terminal.stop());
-    terminal.start({
-      runWithShell: true,
-      cwd,
-      cols,
-      rows,
-      env: this.shellIntegrationEnv,
-    });
 
     this.liveTerminals.set(terminalId, {
       cwd,
@@ -537,6 +515,10 @@ export class ProjectTerminalsManager {
       dispose: disposable.dispose,
     });
     disposable.addDisposable(() => this.liveTerminals.delete(terminalId));
+
+    if (!this.terminalManager.getRuntime(terminalId)) {
+      void disposable.dispose();
+    }
   }
 
   private async stopLiveTerminal(terminalId: string) {

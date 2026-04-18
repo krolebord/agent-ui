@@ -9,6 +9,7 @@ describe("buildCodexArgs", () => {
 
     expect(args).toEqual([
       "--no-alt-screen",
+      "--disable apps",
       "--model",
       "gpt-5.3-codex",
       "-c",
@@ -59,6 +60,7 @@ describe("buildCodexArgs", () => {
       "resume",
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
       "--no-alt-screen",
+      "--disable apps",
       "--model",
       "gpt-5.3-codex",
       "-c",
@@ -77,6 +79,7 @@ describe("buildCodexArgs", () => {
       "fork",
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
       "--no-alt-screen",
+      "--disable apps",
       "--model",
       "gpt-5.3-codex",
       "-c",

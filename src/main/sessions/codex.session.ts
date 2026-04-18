@@ -1,4 +1,4 @@
-import { call, EventPublisher } from "@orpc/server";
+import { call } from "@orpc/server";
 import type { ClaudeActivityState } from "@shared/claude-types";
 import {
   type CodexFastMode,
@@ -14,14 +14,11 @@ import { CodexActivityMonitor } from "../codex-activity-monitor";
 import { buildCodexArgs } from "../codex-cli";
 import type { CodexSessionLogFileManager } from "../codex-session-log-file-manager";
 import { getCodexUsage } from "../codex-usage";
-import { withDebouncedRunner } from "../debounce-runner";
 import log from "../logger";
 import { procedure } from "../orpc";
 import { SessionTitleManager } from "../session-title-manager";
-import {
-  createTerminalSession,
-  type TerminalSession,
-} from "../terminal-session";
+import { TerminalManager } from "../terminal-manager";
+import type { TerminalSessionStatus } from "../terminal-session";
 import {
   commonSessionSchema,
   generateUniqueSessionId,
@@ -152,16 +149,16 @@ export const codexSessionsRouter = {
   subscribeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string() }))
     .handler(async function* ({ input, context, signal }) {
-      const { bufferedOutput, stream, isLive } =
-        context.sessions.codex.subscribeToTerminalEvents(
+      const { snapshot, stream, isLive } =
+        context.terminalManager.subscribeToTerminalEvents(
           input.sessionId,
           signal,
         );
 
       if (isLive) {
         yield { type: "clear" } as TerminalEvent;
-        if (bufferedOutput) {
-          yield { type: "data", data: bufferedOutput } as TerminalEvent;
+        if (snapshot) {
+          yield { type: "data", data: snapshot } as TerminalEvent;
         }
       }
       for await (const event of stream) {
@@ -171,43 +168,38 @@ export const codexSessionsRouter = {
   writeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string(), data: z.string() }))
     .handler(async ({ input, context }) => {
-      const session = context.sessions.codex.liveSessions.get(input.sessionId);
-      if (!session) {
-        return;
-      }
-      session.terminal.write(input.data);
+      context.terminalManager.writeToTerminal(input.sessionId, input.data);
     }),
   resizeSessionTerminal: procedure
     .input(
       z.object({ sessionId: z.string(), cols: z.number(), rows: z.number() }),
     )
     .handler(async ({ input, context }) => {
-      const session = context.sessions.codex.liveSessions.get(input.sessionId);
-      if (!session) {
-        return;
-      }
-      session.terminal.resize(input.cols, input.rows);
+      context.terminalManager.resizeTerminal(
+        input.sessionId,
+        input.cols,
+        input.rows,
+      );
     }),
 };
 
 interface CodexSessionRecord {
-  terminal: TerminalSession;
+  terminalId: string;
   activityMonitor: CodexActivityMonitor | null;
   dispose: () => Promise<void>;
 }
 
 interface CodexSessionsManagerOptions {
   state: SessionServiceState;
+  terminalManager?: TerminalManager;
   titleManager?: SessionTitleManager;
   sessionLogFileManager?: CodexSessionLogFileManager;
 }
 
 function getCodexSessionStatus(
-  terminal: TerminalSession,
+  terminalStatus: TerminalSessionStatus,
   activityState: ClaudeActivityState | null,
 ): SessionStatus {
-  const terminalStatus = terminal.status;
-
   if (terminalStatus === "starting") return "starting";
   if (terminalStatus === "stopping") return "stopping";
   if (terminalStatus === "error") return "error";
@@ -230,26 +222,38 @@ function normalizeCodexTitlePrompt(prompt: string): string {
 
 export class CodexSessionsManager {
   readonly liveSessions = new Map<string, CodexSessionRecord>();
-  private readonly eventPublisher = new EventPublisher<
-    Record<string, TerminalEvent>
-  >({
-    maxBufferedEvents: 0,
-  });
   private readonly sessionsState: SessionServiceState;
+  private readonly terminalManager: TerminalManager;
   private readonly titleManager: SessionTitleManager;
   private readonly sessionLogFileManager: CodexSessionLogFileManager | null;
 
   constructor(options: CodexSessionsManagerOptions | SessionServiceState) {
     if ("updateState" in options) {
       this.sessionsState = options;
+      this.terminalManager = new TerminalManager();
       this.titleManager = new SessionTitleManager();
       this.sessionLogFileManager = null;
+      for (const [sessionId, session] of Object.entries(
+        this.sessionsState.state,
+      )) {
+        if (session.type === "codex-local-terminal") {
+          this.terminalManager.registerTerminal(sessionId);
+        }
+      }
       return;
     }
 
     this.sessionsState = options.state;
+    this.terminalManager = options.terminalManager ?? new TerminalManager();
     this.titleManager = options.titleManager ?? new SessionTitleManager();
     this.sessionLogFileManager = options.sessionLogFileManager ?? null;
+    for (const [sessionId, session] of Object.entries(
+      this.sessionsState.state,
+    )) {
+      if (session.type === "codex-local-terminal") {
+        this.terminalManager.registerTerminal(sessionId);
+      }
+    }
   }
 
   createSession(input: z.infer<typeof startCodexSessionSchema>): string {
@@ -274,9 +278,9 @@ export class CodexSessionsManager {
         initialPrompt,
         configOverrides: input.configOverrides,
       },
-      bufferedOutput: "",
     };
 
+    this.terminalManager.registerTerminal(sessionId);
     this.sessionsState.updateState((state) => {
       state[sessionId] = newSession;
     });
@@ -376,14 +380,6 @@ export class CodexSessionsManager {
       },
     });
 
-    const syncBufferedOutput = withDebouncedRunner(() => {
-      state.updateState((state) => {
-        state[sessionId].bufferedOutput =
-          session?.terminal.bufferedOutput ?? "";
-      });
-    }, 500);
-    disposable.addDisposable(() => syncBufferedOutput.dispose());
-
     const setSessionStatus = (nextStatus: SessionStatus) => {
       state.updateState((state) => {
         const target = state[sessionId];
@@ -424,13 +420,13 @@ export class CodexSessionsManager {
       ? new CodexActivityMonitor({
           onStatusChange: (nextActivityStatus) => {
             activityState = nextActivityStatus;
-            setSessionStatus(getCodexSessionStatus(terminal, activityState));
-            if (
-              nextActivityStatus === "awaiting_approval" ||
-              nextActivityStatus === "awaiting_user_response"
-            ) {
-              syncBufferedOutput.flush();
+            const runtime = this.terminalManager.getRuntime(sessionId);
+            if (!runtime) {
+              return;
             }
+            setSessionStatus(
+              getCodexSessionStatus(runtime.status, activityState),
+            );
           },
           onLogEvent: (event) => {
             if (event.kind !== "codex_event") {
@@ -486,31 +482,37 @@ export class CodexSessionsManager {
       ? activityMonitor.getState()
       : null;
 
-    const terminal = createTerminalSession({
-      onData: ({ chunk }) => {
-        this.eventPublisher.publish(sessionId, {
-          type: "data",
-          data: chunk,
-        });
-
-        syncBufferedOutput.schedule();
+    const terminal = this.terminalManager.startTerminal({
+      terminalId: sessionId,
+      launch: {
+        file: "codex",
+        args,
+        runWithShell: true,
+        cwd,
+        cols,
+        rows,
+        env: sessionLogPath
+          ? {
+              CODEX_TUI_RECORD_SESSION: "1",
+              CODEX_TUI_SESSION_LOG_PATH: sessionLogPath,
+            }
+          : undefined,
       },
       onStatusChange: (status) => {
-        setSessionStatus(getCodexSessionStatus(terminal, activityState));
-        if (status === "stopped") {
-          syncBufferedOutput.flush();
-        }
+        setSessionStatus(getCodexSessionStatus(status, activityState));
 
-        // Plan mode: once terminal emits data, wait for plan prompt hints before submitting.
         if (status === "running" && shouldSwitchToPlanMode) {
           shouldSwitchToPlanMode = false;
 
           if (deferredPrompt) {
             setTimeout(() => {
-              terminal.write("\x1b[Z");
-              terminal.write(`${deferredPrompt}`);
+              this.terminalManager.writeToTerminal(sessionId, "\x1b[Z");
+              this.terminalManager.writeToTerminal(
+                sessionId,
+                `${deferredPrompt}`,
+              );
               setTimeout(() => {
-                terminal.write("\x1b[13u");
+                this.terminalManager.writeToTerminal(sessionId, "\x1b[13u");
               }, 100);
             }, 100);
           }
@@ -522,7 +524,6 @@ export class CodexSessionsManager {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
         });
-        syncBufferedOutput.flush();
       },
     });
     disposable.addDisposable(() => terminal.stop());
@@ -534,28 +535,17 @@ export class CodexSessionsManager {
       activityMonitor.startMonitoring(sessionLogPath);
     }
 
-    terminal.start({
-      file: "codex",
-      args,
-      runWithShell: true,
-      cwd,
-      cols,
-      rows,
-      env: sessionLogPath
-        ? {
-            CODEX_TUI_RECORD_SESSION: "1",
-            CODEX_TUI_SESSION_LOG_PATH: sessionLogPath,
-          }
-        : undefined,
-    });
-
     const session: CodexSessionRecord = {
-      terminal,
+      terminalId: sessionId,
       activityMonitor,
       dispose: disposable.dispose,
     };
     this.liveSessions.set(sessionId, session);
     disposable.addDisposable(() => this.liveSessions.delete(sessionId));
+
+    if (!this.terminalManager.getRuntime(sessionId)) {
+      void disposable.dispose();
+    }
   }
 
   async forkSession(input: z.infer<typeof forkCodexSessionSchema>) {
@@ -583,9 +573,9 @@ export class CodexSessionsManager {
         initialPrompt: sourceSession.startupConfig.initialPrompt,
         configOverrides: sourceSession.startupConfig.configOverrides,
       },
-      bufferedOutput: "",
     };
 
+    this.terminalManager.registerTerminal(sessionId);
     this.sessionsState.updateState((state) => {
       state[sessionId] = forkedSession;
     });
@@ -625,6 +615,7 @@ export class CodexSessionsManager {
 
   async deleteSession(sessionId: string) {
     await this.stopLiveSession(sessionId);
+    await this.terminalManager.unregisterTerminal(sessionId);
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
     });
@@ -649,12 +640,7 @@ export class CodexSessionsManager {
   }
 
   subscribeToTerminalEvents(sessionId: string, signal?: AbortSignal) {
-    const liveSession = this.liveSessions.get(sessionId);
-    return {
-      isLive: !!liveSession,
-      bufferedOutput: liveSession?.terminal.bufferedOutput ?? "",
-      stream: this.eventPublisher.subscribe(sessionId, { signal }),
-    };
+    return this.terminalManager.subscribeToTerminalEvents(sessionId, signal);
   }
 
   private createSessionLogPath(sessionId: string): string | null {

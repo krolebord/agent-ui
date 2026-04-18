@@ -1,10 +1,6 @@
-import { type ClientPromiseResult, consumeEventIterator } from "@orpc/client";
+import { LiveTerminalSurface } from "@renderer/components/live-terminal-surface";
 import { ProjectTerminalPane } from "@renderer/components/project-terminal-pane";
 import { SessionHeader } from "@renderer/components/session-header";
-import {
-  TerminalPane,
-  type TerminalPaneHandle,
-} from "@renderer/components/terminal-pane";
 import {
   Collapsible,
   CollapsibleContent,
@@ -16,8 +12,6 @@ import {
   ResizablePanelGroup,
 } from "@renderer/components/ui/resizable";
 import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
-import { orpc } from "@renderer/orpc-client";
-import type { TerminalEvent } from "@shared/terminal-types";
 import {
   AlertCircle,
   ChevronRight,
@@ -25,8 +19,7 @@ import {
   CircleX,
   LoaderCircle,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useRef } from "react";
-import { toast } from "sonner";
+import type { ReactNode } from "react";
 import { useAppState } from "./sync-state-provider";
 import { WelcomePage } from "./welcome-page";
 
@@ -57,15 +50,6 @@ export function SessionPage() {
         <TerminalPage
           session={session}
           bottomPane={<ProjectTerminalPane cwd={session.startupConfig.cwd} />}
-          subscribe={(sessionId) =>
-            orpc.sessions.localClaude.subscribeToSessionTerminal.call({
-              sessionId,
-            })
-          }
-          writeToTerminal={
-            orpc.sessions.localClaude.writeToSessionTerminal.call
-          }
-          resizeTerminal={orpc.sessions.localClaude.resizeSessionTerminal.call}
         />
       );
     case "local-terminal":
@@ -75,13 +59,6 @@ export function SessionPage() {
         <TerminalPage
           session={session}
           bottomPane={<ProjectTerminalPane cwd={session.startupConfig.cwd} />}
-          subscribe={(sessionId) =>
-            orpc.sessions.codex.subscribeToSessionTerminal.call({
-              sessionId,
-            })
-          }
-          writeToTerminal={orpc.sessions.codex.writeToSessionTerminal.call}
-          resizeTerminal={orpc.sessions.codex.resizeSessionTerminal.call}
         />
       );
     case "cursor-agent":
@@ -89,15 +66,6 @@ export function SessionPage() {
         <TerminalPage
           session={session}
           bottomPane={<ProjectTerminalPane cwd={session.startupConfig.cwd} />}
-          subscribe={(sessionId) =>
-            orpc.sessions.cursorAgent.subscribeToSessionTerminal.call({
-              sessionId,
-            })
-          }
-          writeToTerminal={
-            orpc.sessions.cursorAgent.writeToSessionTerminal.call
-          }
-          resizeTerminal={orpc.sessions.cursorAgent.resizeSessionTerminal.call}
         />
       );
     case "worktree-setup":
@@ -177,89 +145,15 @@ function WorktreeSetupStepRow({
 
 function TerminalPage({
   session,
-  subscribe,
-  writeToTerminal,
-  resizeTerminal,
   readOnly,
   controls,
   bottomPane,
 }: {
   session: Session;
-  subscribe: (
-    sessionId: string,
-  ) => ClientPromiseResult<AsyncGenerator<TerminalEvent, void, unknown>, Error>;
-  writeToTerminal: (opts: { sessionId: string; data: string }) => void;
-  resizeTerminal: (opts: {
-    sessionId: string;
-    cols: number;
-    rows: number;
-  }) => void;
   readOnly?: boolean;
   controls?: ReactNode;
   bottomPane?: ReactNode;
 }) {
-  const terminalRef = useRef<TerminalPaneHandle | null>(null);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: subscribe and bufferedOutput are intentionally captured once per session switch
-  useEffect(() => {
-    terminalRef.current?.clear();
-    terminalRef.current?.write(session.bufferedOutput ?? "");
-    terminalRef.current?.autofit();
-
-    const cancel = consumeEventIterator(
-      subscribe(session.sessionId).then((stream) => {
-        terminalRef.current?.focus();
-        return stream;
-      }),
-      {
-        onEvent(event) {
-          switch (event.type) {
-            case "data":
-              terminalRef.current?.write(event.data);
-              break;
-            case "clear":
-              terminalRef.current?.clear();
-              break;
-          }
-        },
-        onError(error) {
-          const message =
-            error instanceof Error ? error.message : "Unknown error";
-          if (message.includes("closed or aborted")) {
-            return;
-          }
-          toast.error(`Terminal stream disconnected: ${message}`);
-        },
-      },
-    );
-    return () => void cancel();
-  }, [session.sessionId]);
-
-  const handleTerminalInput = useCallback(
-    (data: string) => {
-      if (readOnly) {
-        return;
-      }
-
-      writeToTerminal({
-        sessionId: session.sessionId,
-        data,
-      });
-    },
-    [session.sessionId, readOnly, writeToTerminal],
-  );
-
-  const handleTerminalResize = useCallback(
-    (cols: number, rows: number) => {
-      resizeTerminal({
-        sessionId: session.sessionId,
-        cols,
-        rows,
-      });
-    },
-    [session.sessionId, resizeTerminal],
-  );
-
   const errorMessage = session.errorMessage || session.warningMessage || "";
 
   return (
@@ -276,10 +170,8 @@ function TerminalPage({
           ) : null}
 
           <div className="min-h-0 flex-1 overflow-hidden">
-            <TerminalPane
-              ref={terminalRef}
-              onInput={handleTerminalInput}
-              onResize={handleTerminalResize}
+            <LiveTerminalSurface
+              terminalId={session.sessionId}
               readOnly={readOnly}
             />
           </div>

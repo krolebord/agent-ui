@@ -1,4 +1,4 @@
-import { call, EventPublisher } from "@orpc/server";
+import { call } from "@orpc/server";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
 import { z } from "zod";
@@ -10,15 +10,12 @@ import {
   type CursorAgentPermissionMode,
 } from "../cursor-cli";
 import { getCursorUsage } from "../cursor-usage";
-import { withDebouncedRunner } from "../debounce-runner";
 import { generateCursorSessionTitle } from "../generate-cursor-session-title";
 import log from "../logger";
 import { procedure } from "../orpc";
 import { SessionTitleManager } from "../session-title-manager";
-import {
-  createTerminalSession,
-  type TerminalSession,
-} from "../terminal-session";
+import { TerminalManager } from "../terminal-manager";
+import type { TerminalSessionStatus } from "../terminal-session";
 import {
   commonSessionSchema,
   generateUniqueSessionId,
@@ -151,16 +148,16 @@ export const cursorAgentSessionsRouter = {
   subscribeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string() }))
     .handler(async function* ({ input, context, signal }) {
-      const { bufferedOutput, stream, isLive } =
-        context.sessions.cursorAgent.subscribeToTerminalEvents(
+      const { snapshot, stream, isLive } =
+        context.terminalManager.subscribeToTerminalEvents(
           input.sessionId,
           signal,
         );
 
       if (isLive) {
         yield { type: "clear" } as TerminalEvent;
-        if (bufferedOutput) {
-          yield { type: "data", data: bufferedOutput } as TerminalEvent;
+        if (snapshot) {
+          yield { type: "data", data: snapshot } as TerminalEvent;
         }
       }
       for await (const event of stream) {
@@ -170,37 +167,30 @@ export const cursorAgentSessionsRouter = {
   writeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string(), data: z.string() }))
     .handler(async ({ input, context }) => {
-      const session = context.sessions.cursorAgent.liveSessions.get(
-        input.sessionId,
-      );
-      if (!session) {
-        return;
-      }
-      session.terminal.write(input.data);
+      context.terminalManager.writeToTerminal(input.sessionId, input.data);
     }),
   resizeSessionTerminal: procedure
     .input(
       z.object({ sessionId: z.string(), cols: z.number(), rows: z.number() }),
     )
     .handler(async ({ input, context }) => {
-      const session = context.sessions.cursorAgent.liveSessions.get(
+      context.terminalManager.resizeTerminal(
         input.sessionId,
+        input.cols,
+        input.rows,
       );
-      if (!session) {
-        return;
-      }
-      session.terminal.resize(input.cols, input.rows);
     }),
 };
 
 interface CursorAgentSessionRecord {
-  terminal: TerminalSession;
+  terminalId: string;
   activityMonitor: CursorActivityMonitor | null;
   dispose: () => Promise<void>;
 }
 
 interface CursorAgentSessionsManagerOptions {
   state: SessionServiceState;
+  terminalManager?: TerminalManager;
   titleManager?: SessionTitleManager;
   cursorConfigDir?: string | null;
   sessionLogFileManager?: CursorSessionLogFileStore | null;
@@ -213,11 +203,9 @@ interface CursorSessionLogFileStore {
 }
 
 function getCursorSessionStatus(
-  terminal: TerminalSession,
+  terminalStatus: TerminalSessionStatus,
   activityState: ClaudeActivityState | null,
 ): SessionStatus {
-  const terminalStatus = terminal.status;
-
   if (terminalStatus === "starting") return "starting";
   if (terminalStatus === "stopping") return "stopping";
   if (terminalStatus === "error") return "error";
@@ -233,12 +221,8 @@ function getCursorSessionStatus(
 
 export class CursorAgentSessionsManager {
   readonly liveSessions = new Map<string, CursorAgentSessionRecord>();
-  private readonly eventPublisher = new EventPublisher<
-    Record<string, TerminalEvent>
-  >({
-    maxBufferedEvents: 0,
-  });
   private readonly sessionsState: SessionServiceState;
+  private readonly terminalManager: TerminalManager;
   private readonly titleManager: SessionTitleManager;
   private readonly cursorConfigDir: string | null;
   private readonly sessionLogFileManager: CursorSessionLogFileStore | null;
@@ -249,22 +233,38 @@ export class CursorAgentSessionsManager {
   ) {
     if ("updateState" in options) {
       this.sessionsState = options;
+      this.terminalManager = new TerminalManager();
       this.titleManager = new SessionTitleManager({
         generateTitle: generateCursorSessionTitle,
       });
       this.cursorConfigDir = null;
       this.sessionLogFileManager = null;
       this.cursorHooksWarning = null;
+      for (const [sessionId, session] of Object.entries(
+        this.sessionsState.state,
+      )) {
+        if (session.type === "cursor-agent") {
+          this.terminalManager.registerTerminal(sessionId);
+        }
+      }
       return;
     }
 
     this.sessionsState = options.state;
+    this.terminalManager = options.terminalManager ?? new TerminalManager();
     this.titleManager =
       options.titleManager ??
       new SessionTitleManager({ generateTitle: generateCursorSessionTitle });
     this.cursorConfigDir = options.cursorConfigDir ?? null;
     this.sessionLogFileManager = options.sessionLogFileManager ?? null;
     this.cursorHooksWarning = options.cursorHooksWarning ?? null;
+    for (const [sessionId, session] of Object.entries(
+      this.sessionsState.state,
+    )) {
+      if (session.type === "cursor-agent") {
+        this.terminalManager.registerTerminal(sessionId);
+      }
+    }
   }
 
   private buildSessionWarning(): string | undefined {
@@ -302,9 +302,9 @@ export class CursorAgentSessionsManager {
         initialPrompt,
       },
       cursorChatId: undefined,
-      bufferedOutput: "",
     };
 
+    this.terminalManager.registerTerminal(sessionId);
     this.sessionsState.updateState((state) => {
       state[sessionId] = newSession;
     });
@@ -382,14 +382,6 @@ export class CursorAgentSessionsManager {
       },
     });
 
-    const syncBufferedOutput = withDebouncedRunner(() => {
-      state.updateState((state) => {
-        state[sessionId].bufferedOutput =
-          session?.terminal.bufferedOutput ?? "";
-      });
-    }, 500);
-    disposable.addDisposable(() => syncBufferedOutput.dispose());
-
     const setSessionStatus = (nextStatus: SessionStatus) => {
       state.updateState((state) => {
         const target = state[sessionId];
@@ -415,14 +407,13 @@ export class CursorAgentSessionsManager {
       ? new CursorActivityMonitor({
           onStatusChange: (nextActivityStatus) => {
             activityState = nextActivityStatus;
-            setSessionStatus(getCursorSessionStatus(terminal, activityState));
-            if (
-              nextActivityStatus === "idle" ||
-              nextActivityStatus === "awaiting_approval" ||
-              nextActivityStatus === "awaiting_user_response"
-            ) {
-              syncBufferedOutput.flush();
+            const runtime = this.terminalManager.getRuntime(sessionId);
+            if (!runtime) {
+              return;
             }
+            setSessionStatus(
+              getCursorSessionStatus(runtime.status, activityState),
+            );
           },
           onHookEvent: (event) => {
             const hydratedCursorChatId =
@@ -459,20 +450,28 @@ export class CursorAgentSessionsManager {
       plan,
     });
 
-    const terminal = createTerminalSession({
-      onData: ({ chunk }) => {
-        this.eventPublisher.publish(sessionId, {
-          type: "data",
-          data: chunk,
-        });
-
-        syncBufferedOutput.schedule();
+    const terminal = this.terminalManager.startTerminal({
+      terminalId: sessionId,
+      launch: {
+        file: "cursor",
+        args: finalArgs,
+        runWithShell: true,
+        cwd,
+        cols,
+        rows,
+        env: this.cursorConfigDir
+          ? {
+              CURSOR_CONFIG_DIR: this.cursorConfigDir,
+              ...(hookLogFilePath
+                ? {
+                    AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath,
+                  }
+                : {}),
+            }
+          : undefined,
       },
       onStatusChange: (status) => {
-        setSessionStatus(getCursorSessionStatus(terminal, activityState));
-        if (status === "stopped") {
-          syncBufferedOutput.flush();
-        }
+        setSessionStatus(getCursorSessionStatus(status, activityState));
       },
       onExit: (payload) => {
         void this.stopLiveSession(sessionId);
@@ -480,7 +479,6 @@ export class CursorAgentSessionsManager {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
         });
-        syncBufferedOutput.flush();
       },
     });
     disposable.addDisposable(() => terminal.stop());
@@ -494,25 +492,6 @@ export class CursorAgentSessionsManager {
       });
     }
 
-    terminal.start({
-      file: "cursor",
-      args: finalArgs,
-      runWithShell: true,
-      cwd,
-      cols,
-      rows,
-      env: this.cursorConfigDir
-        ? {
-            CURSOR_CONFIG_DIR: this.cursorConfigDir,
-            ...(hookLogFilePath
-              ? {
-                  AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath,
-                }
-              : {}),
-          }
-        : undefined,
-    });
-
     // Mark initial prompt as sent so subsequent resumes don't re-send it
     if (initialPrompt) {
       state.updateState((state) => {
@@ -524,12 +503,16 @@ export class CursorAgentSessionsManager {
     }
 
     const session: CursorAgentSessionRecord = {
-      terminal,
+      terminalId: sessionId,
       activityMonitor,
       dispose: disposable.dispose,
     };
     this.liveSessions.set(sessionId, session);
     disposable.addDisposable(() => this.liveSessions.delete(sessionId));
+
+    if (!this.terminalManager.getRuntime(sessionId)) {
+      await disposable.dispose();
+    }
   }
 
   async stopLiveSession(sessionId: string) {
@@ -551,6 +534,7 @@ export class CursorAgentSessionsManager {
 
   async deleteSession(sessionId: string) {
     await this.stopLiveSession(sessionId);
+    await this.terminalManager.unregisterTerminal(sessionId);
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
     });
@@ -575,11 +559,6 @@ export class CursorAgentSessionsManager {
   }
 
   subscribeToTerminalEvents(sessionId: string, signal?: AbortSignal) {
-    const liveSession = this.liveSessions.get(sessionId);
-    return {
-      isLive: !!liveSession,
-      bufferedOutput: liveSession?.terminal.bufferedOutput ?? "",
-      stream: this.eventPublisher.subscribe(sessionId, { signal }),
-    };
+    return this.terminalManager.subscribeToTerminalEvents(sessionId, signal);
   }
 }

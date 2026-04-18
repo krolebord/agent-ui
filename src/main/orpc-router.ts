@@ -11,6 +11,7 @@ import { cursorAgentSessionsRouter } from "./sessions/cursor-agent.session";
 import { localTerminalRouter } from "./sessions/local-terminal.session";
 import { worktreeSetupSessionsRouter } from "./sessions/worktree-setup.session";
 import { stateSyncRouter } from "./state-orchestrator";
+import { terminalsRouter } from "./terminal-manager";
 
 const sessionsRouter = {
   markSeen: procedure
@@ -58,6 +59,7 @@ export const orpcRouter = {
   appSettings: appSettingsRouter,
   projects: projectsRouter,
   projectTerminals: projectTerminalsRouter,
+  terminals: terminalsRouter,
   fs: fsRouter,
   stateSync: stateSyncRouter,
   sessions: sessionsRouter,
