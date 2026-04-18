@@ -80,7 +80,7 @@ function mapThreadStatus(status: object): CodexAppServerSessionState | null {
   }
 
   if (activeFlags.includes("waitingOnUserInput")) {
-    return "awaiting_user_response";
+    return "awaiting_approval";
   }
 
   return "running";
@@ -101,6 +101,7 @@ export class CodexAppServerTracker {
   private nextRequestId = 1;
   private threadId: string | undefined;
   private lastStatus: CodexAppServerSessionState | null = null;
+  private shouldTreatIdleAsAwaitingUserResponse = false;
 
   constructor(options: CodexAppServerTrackerOptions) {
     this.sessionId = options.sessionId;
@@ -110,6 +111,7 @@ export class CodexAppServerTracker {
     this.onStatusChange = options.onStatusChange;
     this.onTitleUpdated = options.onTitleUpdated;
     this.onError = options.onError;
+    this.shouldTreatIdleAsAwaitingUserResponse = !!options.initialThreadId;
   }
 
   async start(): Promise<void> {
@@ -149,8 +151,6 @@ export class CodexAppServerTracker {
       capabilities: {
         experimentalApi: false,
         optOutNotificationMethods: [
-          "turn/started",
-          "turn/completed",
           "item/started",
           "item/completed",
           "item/agentMessage/delta",
@@ -302,13 +302,72 @@ export class CodexAppServerTracker {
           return;
         }
 
-        const nextStatus = mapThreadStatus(status);
+        const nextStatus = this.normalizeDisplayStatus(mapThreadStatus(status));
         if (!nextStatus || this.lastStatus === nextStatus) {
           return;
         }
 
         this.lastStatus = nextStatus;
         this.onStatusChange?.(nextStatus);
+        return;
+      }
+
+      case "turn/started": {
+        const threadId =
+          typeof message.params?.threadId === "string"
+            ? message.params.threadId
+            : undefined;
+        if (!threadId) {
+          return;
+        }
+
+        this.setThreadId(threadId);
+        if (this.threadId !== threadId) {
+          return;
+        }
+
+        this.shouldTreatIdleAsAwaitingUserResponse = true;
+        if (this.lastStatus === "running") {
+          return;
+        }
+
+        this.lastStatus = "running";
+        this.onStatusChange?.("running");
+        return;
+      }
+
+      case "turn/completed": {
+        const threadId =
+          typeof message.params?.threadId === "string"
+            ? message.params.threadId
+            : undefined;
+        const turn =
+          message.params?.turn && typeof message.params.turn === "object"
+            ? (message.params.turn as { status?: unknown })
+            : undefined;
+        if (!threadId || !turn) {
+          return;
+        }
+
+        this.setThreadId(threadId);
+        if (this.threadId !== threadId) {
+          return;
+        }
+
+        this.shouldTreatIdleAsAwaitingUserResponse = true;
+
+        if (turn.status === "failed") {
+          this.lastStatus = "error";
+          this.onStatusChange?.("error");
+          return;
+        }
+
+        if (this.lastStatus === "awaiting_user_response") {
+          return;
+        }
+
+        this.lastStatus = "awaiting_user_response";
+        this.onStatusChange?.("awaiting_user_response");
         return;
       }
 
@@ -344,12 +403,17 @@ export class CodexAppServerTracker {
         }
 
         this.setThreadId(threadId);
-        if (this.threadId !== threadId || this.lastStatus === "idle") {
+        if (this.threadId !== threadId) {
           return;
         }
 
-        this.lastStatus = "idle";
-        this.onStatusChange?.("idle");
+        const nextStatus = this.normalizeDisplayStatus("idle");
+        if (!nextStatus || this.lastStatus === nextStatus) {
+          return;
+        }
+
+        this.lastStatus = nextStatus;
+        this.onStatusChange?.(nextStatus);
         return;
       }
 
@@ -374,5 +438,17 @@ export class CodexAppServerTracker {
 
     this.threadId = threadId;
     this.onThreadId?.(threadId);
+  }
+
+  private normalizeDisplayStatus(
+    status: CodexAppServerSessionState | null,
+  ): CodexAppServerSessionState | null {
+    if (status !== "idle") {
+      return status;
+    }
+
+    return this.shouldTreatIdleAsAwaitingUserResponse
+      ? "awaiting_user_response"
+      : "idle";
   }
 }
