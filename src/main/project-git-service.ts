@@ -308,7 +308,12 @@ async function readProjectGitData(
   }
 
   const summary = await git.branchLocal();
-  const currentBranch = summary.current ?? undefined;
+  const currentBranch =
+    summary.current ||
+    (
+      await git.raw(["symbolic-ref", "--short", "HEAD"]).catch(() => "")
+    ).trim() ||
+    undefined;
   const diffBaseRef = await resolveDiffBaseRef(git);
   const diffSummary = await withTemporaryIndex(
     git,

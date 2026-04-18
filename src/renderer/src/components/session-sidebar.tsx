@@ -33,6 +33,7 @@ import {
   LoaderCircle,
   PlayIcon,
   Plus,
+  RefreshCw,
   Settings,
   SquareIcon,
   Trash2,
@@ -372,6 +373,10 @@ function SortableProjectGroup({
     );
   });
 
+  const refreshGitMutation = useMutation(
+    orpc.projects.refreshProject.mutationOptions(),
+  );
+
   const stopAllActiveSessionsMutation = useMutation({
     mutationFn: async (sessionsToStop: Session[]) => {
       const stopResults = await Promise.allSettled(
@@ -501,6 +506,13 @@ function SortableProjectGroup({
               <DropdownMenuItem disabled={locked} onClick={onOpenFolder}>
                 <FolderOpen className="size-3.5" />
                 Open project folder
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={locked || refreshGitMutation.isPending}
+                onClick={() => refreshGitMutation.mutate({ path: group.path })}
+              >
+                <RefreshCw className="size-3.5" />
+                Refresh git status
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
