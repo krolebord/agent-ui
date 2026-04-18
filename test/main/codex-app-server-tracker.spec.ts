@@ -66,26 +66,8 @@ describe("CodexAppServerTracker mappings", () => {
     expect(onStatusChange).toHaveBeenCalledWith("awaiting_approval");
   });
 
-  it("keeps a fresh idle thread as idle", () => {
+  it("maps fresh idle threads to awaiting_user_response", () => {
     const { tracker, onStatusChange } = createTracker();
-
-    asHarness(tracker).handleNotification({
-      method: "thread/status/changed",
-      params: {
-        threadId: "thread-1",
-        status: {
-          type: "idle",
-        },
-      },
-    });
-
-    expect(onStatusChange).toHaveBeenCalledWith("idle");
-  });
-
-  it("maps resumed idle threads to awaiting_user_response", () => {
-    const { tracker, onStatusChange } = createTracker({
-      initialThreadId: "thread-1",
-    });
 
     asHarness(tracker).handleNotification({
       method: "thread/status/changed",

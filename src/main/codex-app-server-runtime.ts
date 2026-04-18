@@ -80,6 +80,10 @@ export interface CodexAppServerProcessOptions {
   onUnexpectedExit?: (payload: CodexAppServerProcessExitPayload) => void;
 }
 
+export interface CodexAppServerStartOptions {
+  cwd?: string;
+}
+
 export class CodexAppServerProcess {
   readonly sessionId: string;
 
@@ -103,7 +107,7 @@ export class CodexAppServerProcess {
     return `ws://${HOST}:${this.port}`;
   }
 
-  async start(): Promise<void> {
+  async start(options: CodexAppServerStartOptions = {}): Promise<void> {
     if (this.process) {
       return;
     }
@@ -114,6 +118,7 @@ export class CodexAppServerProcess {
 
     const child = spawn("codex", ["app-server", "--listen", wsUrl], {
       stdio: ["ignore", "pipe", "pipe"],
+      cwd: options.cwd,
       env: process.env,
     });
 

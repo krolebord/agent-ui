@@ -7,7 +7,6 @@ import {
 import type { SessionServiceState } from "../../src/main/sessions/state";
 
 type TrackerState =
-  | "idle"
   | "running"
   | "awaiting_approval"
   | "awaiting_user_response"
@@ -241,7 +240,9 @@ describe("CodexSessionsManager", () => {
     const startCall = terminalSessionSpies.start.mock.calls[0]?.[0] as
       | { args?: string[]; env?: Record<string, string> }
       | undefined;
-    expect(appServerSpies.instances[0]?.start).toHaveBeenCalled();
+    expect(appServerSpies.instances[0]?.start).toHaveBeenCalledWith({
+      cwd: "/tmp",
+    });
     expect(trackerSpies.instances[0]?.start).toHaveBeenCalled();
     expect(startCall?.args).toEqual([
       "--remote",
@@ -348,8 +349,10 @@ describe("CodexSessionsManager", () => {
     callbacks?.onStatusChange("running");
     expect(session.status).toBe("idle");
 
-    trackerSpies.instances[0]?.callbacks.onStatusChange?.("idle");
-    expect(session.status).toBe("idle");
+    trackerSpies.instances[0]?.callbacks.onStatusChange?.(
+      "awaiting_user_response",
+    );
+    expect(session.status).toBe("awaiting_user_response");
 
     trackerSpies.instances[0]?.callbacks.onStatusChange?.("running");
     expect(session.status).toBe("running");
@@ -541,6 +544,35 @@ describe("CodexSessionsManager", () => {
     expect(startCall?.args).toContain("service_tier=fast");
 
     await manager.stopLiveSession(sessionId);
+  });
+
+  it("stores offlineBuffer when a codex terminal is stopped", async () => {
+    vi.useRealTimers();
+    try {
+      const { manager, sessionId, state } = createManager({
+        initialPrompt: undefined,
+      });
+
+      await manager.startLiveSession({
+        sessionId,
+        cwd: "/tmp",
+        modelReasoningEffort: "high",
+        fastMode: "off",
+        permissionMode: "default",
+        initialPrompt: undefined,
+      });
+
+      terminalSessionSpies.callbacks[0]?.onData({
+        chunk: "offline codex output",
+        bufferedOutput: "offline codex output",
+      });
+
+      await manager.stopLiveSession(sessionId);
+
+      expect(state[sessionId]?.offlineBuffer).toContain("offline codex output");
+    } finally {
+      vi.useFakeTimers();
+    }
   });
 
   it("creates and starts a forked session under a new local session ID", async () => {

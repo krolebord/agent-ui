@@ -80,6 +80,40 @@ describe("LocalTerminalSessionsManager", () => {
     expect(manager.liveSessions.size).toBe(0);
   });
 
+  it("stores offlineBuffer when a local terminal is stopped", async () => {
+    const { state, sessionsState } = createSessionsState();
+    const manager = new LocalTerminalSessionsManager(sessionsState);
+
+    state["session-local-1"] = {
+      sessionId: "session-local-1",
+      type: "local-terminal",
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+      status: "stopped",
+      title: "Local Terminal",
+      startupConfig: {
+        cwd: "/tmp",
+      },
+      bufferedOutput: "",
+    };
+
+    manager.startLiveSession({
+      sessionId: "session-local-1",
+      cwd: "/tmp",
+    });
+
+    terminalSessionSpies.callbacks[0]?.onData({
+      chunk: "offline local output",
+      bufferedOutput: "offline local output",
+    });
+
+    await manager.stopLiveSession("session-local-1");
+
+    expect(state["session-local-1"]?.offlineBuffer).toContain(
+      "offline local output",
+    );
+  });
+
   it("renames local terminal sessions", () => {
     const { state, sessionsState } = createSessionsState();
     const manager = new LocalTerminalSessionsManager(sessionsState);

@@ -282,9 +282,15 @@ describe("SessionsServiceNew", () => {
 
   describe("stopLiveSession", () => {
     it("cleans up the created state file path", async () => {
-      const { service, stateFileManager, titleManager } = createService();
+      const { service, state, stateFileManager, titleManager } =
+        createService();
 
       const sessionId = await service.startNewSession(makeStartInput());
+      const callbacks = terminalSessionSpies.callbacks[0];
+      callbacks?.onData({
+        chunk: "persist me",
+        bufferedOutput: "persist me",
+      });
 
       await service.stopLiveSession(sessionId);
 
@@ -295,6 +301,7 @@ describe("SessionsServiceNew", () => {
       expect(activityMonitorSpies.stopMonitoring).toHaveBeenCalledTimes(1);
       expect(terminalSessionSpies.stop).toHaveBeenCalledTimes(1);
       expect(titleManager.forget).toHaveBeenCalledWith(sessionId);
+      expect(state[sessionId]?.offlineBuffer).toContain("persist me");
     });
   });
 

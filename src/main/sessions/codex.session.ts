@@ -150,7 +150,7 @@ export const codexSessionsRouter = {
     .input(z.object({ sessionId: z.string() }))
     .handler(async function* ({ input, context, signal }) {
       const { snapshot, stream, isLive } =
-        context.terminalManager.subscribeToTerminalEvents(
+        await context.terminalManager.subscribeToTerminalEvents(
           input.sessionId,
           signal,
         );
@@ -339,6 +339,20 @@ export class CodexSessionsManager {
     });
   }
 
+  private persistOfflineBuffer(sessionId: string, offlineBuffer?: string) {
+    if (!offlineBuffer) {
+      return;
+    }
+
+    this.sessionsState.updateState((state) => {
+      const session = state[sessionId];
+      if (!session || session.type !== "codex-local-terminal") {
+        return;
+      }
+      session.offlineBuffer = offlineBuffer;
+    });
+  }
+
   async startLiveSession({
     sessionId,
     codexSessionId,
@@ -440,7 +454,7 @@ export class CodexSessionsManager {
     let tracker: CodexAppServerTracker | null = null;
 
     try {
-      await appServer.start();
+      await appServer.start({ cwd });
 
       tracker = new CodexAppServerTracker({
         sessionId,
@@ -524,7 +538,7 @@ export class CodexSessionsManager {
         }
       },
       onExit: (payload) => {
-        void this.stopLiveSession(sessionId);
+        void this.stopLiveSession(sessionId, payload.snapshot);
         state.updateState((state) => {
           const session = state[sessionId];
           if (!session) {
@@ -534,6 +548,7 @@ export class CodexSessionsManager {
           const errorMessage = payload.errorMessage ?? runtimeErrorMessage;
           session.status = errorMessage ? "error" : "stopped";
           session.errorMessage = errorMessage;
+          session.offlineBuffer = payload.snapshot;
         });
       },
     });
@@ -607,12 +622,16 @@ export class CodexSessionsManager {
     return { sessionId };
   }
 
-  async stopLiveSession(sessionId: string) {
+  async stopLiveSession(sessionId: string, offlineBuffer?: string) {
     const liveSession = this.liveSessions.get(sessionId);
     if (!liveSession) {
       return;
     }
 
+    this.persistOfflineBuffer(
+      sessionId,
+      offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),
+    );
     this.liveSessions.delete(sessionId);
     await liveSession.dispose();
   }

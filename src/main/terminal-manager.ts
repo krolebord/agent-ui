@@ -27,6 +27,7 @@ type TerminalExitPayload = {
   exitCode: number | null;
   signal?: number;
   errorMessage?: string;
+  snapshot?: string;
 };
 
 type StartManagedTerminalOptions = {
@@ -45,7 +46,7 @@ export interface ManagedTerminalRuntime {
   resize: (cols: number, rows: number) => void;
   clear: () => void;
   stop: () => Promise<void>;
-  getSnapshot: () => string;
+  getSnapshot: () => Promise<string>;
   readonly status: TerminalSessionStatus;
 }
 
@@ -79,7 +80,7 @@ export const terminalsRouter = {
       assertProjectPathInteractionAllowed(interactionCwd, context);
 
       const { snapshot, stream, isLive } =
-        context.terminalManager.subscribeToTerminalEvents(
+        await context.terminalManager.subscribeToTerminalEvents(
           input.terminalId,
           signal,
         );
@@ -157,6 +158,12 @@ export class TerminalManager {
     return this.liveTerminals.get(terminalId)?.runtime ?? null;
   }
 
+  async getSnapshot(terminalId: string): Promise<string> {
+    return (
+      (await this.liveTerminals.get(terminalId)?.runtime.getSnapshot()) ?? ""
+    );
+  }
+
   startTerminal({
     terminalId,
     launch,
@@ -192,6 +199,7 @@ export class TerminalManager {
     headless.loadAddon(serializeAddon as never);
 
     let sessionStatus: TerminalSessionStatus = "stopped";
+    let pendingHeadlessWrite = Promise.resolve();
 
     const disposable = createDisposable({
       onError: () => {},
@@ -205,7 +213,14 @@ export class TerminalManager {
           return;
         }
 
-        headless.write(renderedChunk);
+        pendingHeadlessWrite = pendingHeadlessWrite
+          .then(
+            () =>
+              new Promise<void>((resolve) => {
+                headless.write(renderedChunk, () => resolve());
+              }),
+          )
+          .catch(() => {});
         this.eventPublisher.publish(terminalId, {
           type: "data",
           data: renderedChunk,
@@ -216,8 +231,16 @@ export class TerminalManager {
         onStatusChange?.(status);
       },
       onExit: (payload) => {
-        this.liveTerminals.delete(terminalId);
-        onExit?.(payload);
+        void pendingHeadlessWrite.finally(() => {
+          const snapshot = serializeAddon.serialize({
+            scrollback: SNAPSHOT_SCROLLBACK,
+          });
+          this.liveTerminals.delete(terminalId);
+          onExit?.({
+            ...payload,
+            snapshot,
+          });
+        });
       },
     });
 
@@ -237,7 +260,8 @@ export class TerminalManager {
       stop: async () => {
         await disposable.dispose();
       },
-      getSnapshot: () => {
+      getSnapshot: async () => {
+        await pendingHeadlessWrite;
         return serializeAddon.serialize({
           scrollback: SNAPSHOT_SCROLLBACK,
         });
@@ -285,12 +309,12 @@ export class TerminalManager {
     this.liveTerminals.get(terminalId)?.runtime.resize(cols, rows);
   }
 
-  subscribeToTerminalEvents(terminalId: string, signal?: AbortSignal) {
+  async subscribeToTerminalEvents(terminalId: string, signal?: AbortSignal) {
     const liveTerminal = this.liveTerminals.get(terminalId);
     const stream = this.eventPublisher.subscribe(terminalId, { signal });
     return {
       isLive: !!liveTerminal,
-      snapshot: liveTerminal?.runtime.getSnapshot() ?? "",
+      snapshot: liveTerminal ? await liveTerminal.runtime.getSnapshot() : "",
       stream,
     };
   }

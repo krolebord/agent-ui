@@ -281,6 +281,40 @@ describe("CursorAgentSessionsManager", () => {
     );
   });
 
+  it("stores offlineBuffer when a cursor terminal is stopped", async () => {
+    const sessionsState = createState();
+    seedCursorSession(
+      sessionsState.state as Record<string, CursorAgentSessionData>,
+      "session-4",
+    );
+
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      cursorConfigDir: null,
+      sessionLogFileManager: null,
+    });
+
+    await manager.startLiveSession({
+      sessionId: "session-4",
+      cwd: "/tmp/project",
+      permissionMode: "default",
+      cursorChatId: undefined,
+    });
+
+    terminalSessionSpies.callbacks[0]?.onData({
+      chunk: "offline cursor output",
+      bufferedOutput: "offline cursor output",
+    });
+
+    await manager.stopLiveSession("session-4");
+
+    expect(
+      (sessionsState.state as Record<string, CursorAgentSessionData>)[
+        "session-4"
+      ]?.offlineBuffer,
+    ).toContain("offline cursor output");
+  });
+
   it("falls back to terminal-only status when hook monitor is unavailable", async () => {
     const sessionsState = createState();
     seedCursorSession(

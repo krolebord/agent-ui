@@ -151,7 +151,7 @@ export const claudeSessionsRouter = {
     .input(z.object({ sessionId: z.string() }))
     .handler(async function* ({ input, context, signal }) {
       const { snapshot, stream, isLive } =
-        context.terminalManager.subscribeToTerminalEvents(
+        await context.terminalManager.subscribeToTerminalEvents(
           input.sessionId,
           signal,
         );
@@ -540,12 +540,13 @@ export class SessionsServiceNew {
         });
       },
       onExit: (payload) => {
-        void this.stopLiveSession(opts.sessionId);
+        void this.stopLiveSession(opts.sessionId, payload.snapshot);
         state.updateState((state) => {
           state[opts.sessionId].status = payload.errorMessage
             ? "error"
             : "stopped";
           state[opts.sessionId].errorMessage = payload.errorMessage;
+          state[opts.sessionId].offlineBuffer = payload.snapshot;
         });
       },
     });
@@ -598,11 +599,29 @@ export class SessionsServiceNew {
     });
   }
 
-  async stopLiveSession(sessionId: string) {
+  private persistOfflineBuffer(sessionId: string, offlineBuffer?: string) {
+    if (!offlineBuffer) {
+      return;
+    }
+
+    this.sessionsState.updateState((state) => {
+      const session = state[sessionId];
+      if (!session || session.type !== "claude-local-terminal") {
+        return;
+      }
+      session.offlineBuffer = offlineBuffer;
+    });
+  }
+
+  async stopLiveSession(sessionId: string, offlineBuffer?: string) {
     const liveSession = this.liveSessions.get(sessionId);
     if (!liveSession) {
       return;
     }
+    this.persistOfflineBuffer(
+      sessionId,
+      offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),
+    );
     await liveSession.dispose();
   }
 

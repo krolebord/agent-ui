@@ -17,14 +17,17 @@ const MAX_RENDERED_RAW_JSON_CHARS = 200_000;
 
 interface RawSessionStateTarget {
   sessionId: string;
-  snapshot: Omit<Session, "bufferedOutput">;
+  snapshot: Omit<Session, "bufferedOutput" | "offlineBuffer">;
 }
 
 function stripSessionBufferedOutput(
   session: Session,
-): Omit<Session, "bufferedOutput"> {
-  const { bufferedOutput: _bufferedOutput, ...sessionWithoutBufferedOutput } =
-    session;
+): Omit<Session, "bufferedOutput" | "offlineBuffer"> {
+  const {
+    bufferedOutput: _bufferedOutput,
+    offlineBuffer: _offlineBuffer,
+    ...sessionWithoutBufferedOutput
+  } = session;
   return sessionWithoutBufferedOutput;
 }
 
@@ -98,7 +101,7 @@ export function RawSessionStateDialog() {
           <DialogTitle>Session state (raw JSON)</DialogTitle>
           <DialogDescription>
             Current in-memory session state for debugging and inspection
-            (`bufferedOutput` excluded).
+            (`bufferedOutput` and `offlineBuffer` excluded).
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">

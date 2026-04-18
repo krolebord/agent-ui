@@ -200,7 +200,7 @@ export const projectTerminalsRouter = {
       assertProjectPathInteractionAllowed(cwd, context);
 
       const { snapshot, stream, isLive } =
-        context.projectTerminalsManager.subscribeToTerminalEvents(
+        await context.projectTerminalsManager.subscribeToTerminalEvents(
           input.terminalId,
           signal,
         );

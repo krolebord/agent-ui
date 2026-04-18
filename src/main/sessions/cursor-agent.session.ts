@@ -149,7 +149,7 @@ export const cursorAgentSessionsRouter = {
     .input(z.object({ sessionId: z.string() }))
     .handler(async function* ({ input, context, signal }) {
       const { snapshot, stream, isLive } =
-        context.terminalManager.subscribeToTerminalEvents(
+        await context.terminalManager.subscribeToTerminalEvents(
           input.sessionId,
           signal,
         );
@@ -347,6 +347,20 @@ export class CursorAgentSessionsManager {
     });
   }
 
+  private persistOfflineBuffer(sessionId: string, offlineBuffer?: string) {
+    if (!offlineBuffer) {
+      return;
+    }
+
+    this.sessionsState.updateState((state) => {
+      const session = state[sessionId];
+      if (!session || session.type !== "cursor-agent") {
+        return;
+      }
+      session.offlineBuffer = offlineBuffer;
+    });
+  }
+
   async startLiveSession({
     sessionId,
     cwd,
@@ -474,10 +488,11 @@ export class CursorAgentSessionsManager {
         setSessionStatus(getCursorSessionStatus(status, activityState));
       },
       onExit: (payload) => {
-        void this.stopLiveSession(sessionId);
+        void this.stopLiveSession(sessionId, payload.snapshot);
         state.updateState((state) => {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
+          state[sessionId].offlineBuffer = payload.snapshot;
         });
       },
     });
@@ -515,11 +530,15 @@ export class CursorAgentSessionsManager {
     }
   }
 
-  async stopLiveSession(sessionId: string) {
+  async stopLiveSession(sessionId: string, offlineBuffer?: string) {
     const liveSession = this.liveSessions.get(sessionId);
     if (!liveSession) {
       return;
     }
+    this.persistOfflineBuffer(
+      sessionId,
+      offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),
+    );
     await liveSession.dispose();
   }
 

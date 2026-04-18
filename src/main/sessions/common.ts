@@ -28,5 +28,6 @@ export const commonSessionSchema = z.object({
     .catch("stopped"),
   warningMessage: z.string().optional(),
   errorMessage: z.string().optional(),
+  offlineBuffer: z.string().optional(),
   bufferedOutput: z.string().optional(),
 });

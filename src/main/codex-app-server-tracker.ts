@@ -1,7 +1,6 @@
 import log from "./logger";
 
 export type CodexAppServerSessionState =
-  | "idle"
   | "running"
   | "awaiting_approval"
   | "awaiting_user_response"
@@ -61,7 +60,7 @@ function mapThreadStatus(status: object): CodexAppServerSessionState | null {
     activeFlags?: unknown;
   };
   if (threadStatus.type === "idle") {
-    return "idle";
+    return "awaiting_user_response";
   }
 
   if (threadStatus.type === "systemError") {
@@ -101,7 +100,6 @@ export class CodexAppServerTracker {
   private nextRequestId = 1;
   private threadId: string | undefined;
   private lastStatus: CodexAppServerSessionState | null = null;
-  private shouldTreatIdleAsAwaitingUserResponse = false;
 
   constructor(options: CodexAppServerTrackerOptions) {
     this.sessionId = options.sessionId;
@@ -111,7 +109,6 @@ export class CodexAppServerTracker {
     this.onStatusChange = options.onStatusChange;
     this.onTitleUpdated = options.onTitleUpdated;
     this.onError = options.onError;
-    this.shouldTreatIdleAsAwaitingUserResponse = !!options.initialThreadId;
   }
 
   async start(): Promise<void> {
@@ -302,7 +299,7 @@ export class CodexAppServerTracker {
           return;
         }
 
-        const nextStatus = this.normalizeDisplayStatus(mapThreadStatus(status));
+        const nextStatus = mapThreadStatus(status);
         if (!nextStatus || this.lastStatus === nextStatus) {
           return;
         }
@@ -326,7 +323,6 @@ export class CodexAppServerTracker {
           return;
         }
 
-        this.shouldTreatIdleAsAwaitingUserResponse = true;
         if (this.lastStatus === "running") {
           return;
         }
@@ -353,8 +349,6 @@ export class CodexAppServerTracker {
         if (this.threadId !== threadId) {
           return;
         }
-
-        this.shouldTreatIdleAsAwaitingUserResponse = true;
 
         if (turn.status === "failed") {
           this.lastStatus = "error";
@@ -407,7 +401,7 @@ export class CodexAppServerTracker {
           return;
         }
 
-        const nextStatus = this.normalizeDisplayStatus("idle");
+        const nextStatus = "awaiting_user_response";
         if (!nextStatus || this.lastStatus === nextStatus) {
           return;
         }
@@ -438,17 +432,5 @@ export class CodexAppServerTracker {
 
     this.threadId = threadId;
     this.onThreadId?.(threadId);
-  }
-
-  private normalizeDisplayStatus(
-    status: CodexAppServerSessionState | null,
-  ): CodexAppServerSessionState | null {
-    if (status !== "idle") {
-      return status;
-    }
-
-    return this.shouldTreatIdleAsAwaitingUserResponse
-      ? "awaiting_user_response"
-      : "idle";
   }
 }

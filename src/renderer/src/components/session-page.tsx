@@ -155,6 +155,10 @@ function TerminalPage({
   bottomPane?: ReactNode;
 }) {
   const errorMessage = session.errorMessage || session.warningMessage || "";
+  const terminalAttachmentState =
+    session.status === "stopped" || session.status === "error"
+      ? "offline"
+      : "live";
 
   return (
     <SessionPageLayout
@@ -172,7 +176,9 @@ function TerminalPage({
           <div className="min-h-0 flex-1 overflow-hidden">
             <LiveTerminalSurface
               terminalId={session.sessionId}
+              initialBuffer={session.offlineBuffer}
               readOnly={readOnly}
+              attachKey={`${session.sessionId}:${terminalAttachmentState}`}
             />
           </div>
         </div>
