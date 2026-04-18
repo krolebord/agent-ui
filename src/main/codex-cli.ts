@@ -6,6 +6,7 @@ import type {
 } from "../shared/codex-types";
 
 export interface BuildCodexArgsInput {
+  remoteWsUrl?: string;
   permissionMode: CodexPermissionMode;
   model?: string;
   modelReasoningEffort?: CodexModelReasoningEffort;
@@ -21,11 +22,17 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
     throw new Error("Codex sessions cannot resume and fork at the same time.");
   }
 
-  const args: string[] = input.resumeSessionId
-    ? ["resume", input.resumeSessionId]
-    : input.forkSessionId
-      ? ["fork", input.forkSessionId]
-      : [];
+  const args: string[] = [];
+
+  if (input.remoteWsUrl?.trim()) {
+    args.push("--remote", input.remoteWsUrl.trim());
+  }
+
+  if (input.resumeSessionId) {
+    args.push("resume", input.resumeSessionId);
+  } else if (input.forkSessionId) {
+    args.push("fork", input.forkSessionId);
+  }
 
   args.push("--no-alt-screen");
   args.push("--disable apps");

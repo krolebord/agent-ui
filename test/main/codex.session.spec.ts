@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CodexSessionLogFileManager } from "../../src/main/codex-session-log-file-manager";
 import type { SessionTitleManager } from "../../src/main/session-title-manager";
 import {
   type CodexLocalTerminalSessionData,
@@ -7,12 +6,12 @@ import {
 } from "../../src/main/sessions/codex.session";
 import type { SessionServiceState } from "../../src/main/sessions/state";
 
-type HookState =
+type TrackerState =
   | "idle"
-  | "working"
+  | "running"
   | "awaiting_approval"
   | "awaiting_user_response"
-  | "unknown";
+  | "error";
 
 const terminalSessionSpies = vi.hoisted(() => {
   return {
@@ -40,15 +39,30 @@ const terminalSessionSpies = vi.hoisted(() => {
   };
 });
 
-const activityMonitorSpies = vi.hoisted(() => {
+const appServerSpies = vi.hoisted(() => {
   return {
-    state: "unknown" as HookState,
     instances: [] as Array<{
-      startMonitoring: ReturnType<typeof vi.fn>;
-      stopMonitoring: ReturnType<typeof vi.fn>;
+      start: ReturnType<typeof vi.fn>;
+      stop: ReturnType<typeof vi.fn>;
+      wsUrl: string;
+      onUnexpectedExit?: (payload: {
+        exitCode: number | null;
+        signal?: NodeJS.Signals;
+      }) => void;
+    }>,
+  };
+});
+
+const trackerSpies = vi.hoisted(() => {
+  return {
+    instances: [] as Array<{
+      start: ReturnType<typeof vi.fn>;
+      stop: ReturnType<typeof vi.fn>;
       callbacks: {
-        onStatusChange: (status: HookState) => void;
-        onLogEvent?: (event: unknown) => void;
+        onThreadId?: (threadId: string) => void;
+        onStatusChange?: (status: TrackerState) => void;
+        onTitleUpdated?: (title: string) => void;
+        onError?: (errorMessage: string) => void;
       };
     }>,
   };
@@ -84,16 +98,34 @@ vi.mock("../../src/main/terminal-session", () => ({
   }),
 }));
 
-vi.mock("../../src/main/codex-activity-monitor", () => ({
+vi.mock("../../src/main/codex-app-server-runtime", () => ({
   // biome-ignore lint/complexity/useArrowFunction: class constructor mock
-  CodexActivityMonitor: vi.fn().mockImplementation(function (callbacks) {
+  CodexAppServerProcess: vi.fn().mockImplementation(function (options) {
     const instance = {
-      startMonitoring: vi.fn(),
-      stopMonitoring: vi.fn(),
-      callbacks,
-      getState: () => activityMonitorSpies.state,
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      wsUrl: "ws://127.0.0.1:34567",
+      onUnexpectedExit: options.onUnexpectedExit,
     };
-    activityMonitorSpies.instances.push(instance);
+    appServerSpies.instances.push(instance);
+    return instance;
+  }),
+}));
+
+vi.mock("../../src/main/codex-app-server-tracker", () => ({
+  // biome-ignore lint/complexity/useArrowFunction: class constructor mock
+  CodexAppServerTracker: vi.fn().mockImplementation(function (options) {
+    const instance = {
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn().mockResolvedValue(undefined),
+      callbacks: {
+        onThreadId: options.onThreadId,
+        onStatusChange: options.onStatusChange,
+        onTitleUpdated: options.onTitleUpdated,
+        onError: options.onError,
+      },
+    };
+    trackerSpies.instances.push(instance);
     return instance;
   }),
 }));
@@ -112,19 +144,16 @@ function createSessionsState() {
 
 function createManager(opts?: {
   initialPrompt?: string;
-  sessionLogFileManager?: CodexSessionLogFileManager;
   titleManager?: SessionTitleManager;
   title?: string;
 }) {
   const { state, sessionsState } = createSessionsState();
-  const manager =
-    opts?.sessionLogFileManager || opts?.titleManager
-      ? new CodexSessionsManager({
-          state: sessionsState,
-          sessionLogFileManager: opts.sessionLogFileManager,
-          titleManager: opts.titleManager,
-        })
-      : new CodexSessionsManager(sessionsState);
+  const manager = opts?.titleManager
+    ? new CodexSessionsManager({
+        state: sessionsState,
+        titleManager: opts.titleManager,
+      })
+    : new CodexSessionsManager(sessionsState);
   const sessionId = "session-codex-1";
   const startupConfig: CodexLocalTerminalSessionData["startupConfig"] = {
     cwd: "/tmp",
@@ -158,8 +187,8 @@ describe("CodexSessionsManager", () => {
     terminalSessionSpies.status = "stopped";
     terminalSessionSpies.callbacks = [];
     terminalSessionSpies.bufferedOutput = "";
-    activityMonitorSpies.instances = [];
-    activityMonitorSpies.state = "unknown";
+    appServerSpies.instances = [];
+    trackerSpies.instances = [];
   });
 
   afterEach(() => {
@@ -169,7 +198,7 @@ describe("CodexSessionsManager", () => {
   it("submits deferred /plan prompt after switching to running", async () => {
     const { manager, sessionId } = createManager();
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -195,12 +224,12 @@ describe("CodexSessionsManager", () => {
     await manager.stopLiveSession(sessionId);
   });
 
-  it("starts codex with --no-alt-screen", async () => {
+  it("starts codex against the per-session app-server", async () => {
     const { manager, sessionId } = createManager({
       initialPrompt: undefined,
     });
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -212,23 +241,31 @@ describe("CodexSessionsManager", () => {
     const startCall = terminalSessionSpies.start.mock.calls[0]?.[0] as
       | { args?: string[]; env?: Record<string, string> }
       | undefined;
-    expect(startCall?.args?.[0]).toBe("--no-alt-screen");
+    expect(appServerSpies.instances[0]?.start).toHaveBeenCalled();
+    expect(trackerSpies.instances[0]?.start).toHaveBeenCalled();
+    expect(startCall?.args).toEqual([
+      "--remote",
+      "ws://127.0.0.1:34567",
+      "--no-alt-screen",
+      "--disable apps",
+      "--model",
+      "gpt-5.3-codex",
+      "--disable",
+      "fast_mode",
+      "-c",
+      "model_reasoning_effort=high",
+    ]);
     expect(startCall?.env).toBeUndefined();
 
     await manager.stopLiveSession(sessionId);
   });
 
-  it("stores codex session id from session_configured events", async () => {
-    const sessionLogFileManager = {
-      create: vi.fn(() => "/tmp/claude-state/codex-session-codex-1.jsonl"),
-      cleanup: vi.fn(),
-    } as unknown as CodexSessionLogFileManager;
+  it("stores thread id reported by the tracker", async () => {
     const { manager, sessionId, state } = createManager({
       initialPrompt: undefined,
-      sessionLogFileManager,
     });
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -237,68 +274,19 @@ describe("CodexSessionsManager", () => {
       initialPrompt: undefined,
     });
 
-    activityMonitorSpies.instances[0]?.callbacks.onLogEvent?.({
-      ts: new Date().toISOString(),
-      dir: "to_tui",
-      kind: "codex_event",
-      payload: {
-        msg: {
-          type: "session_configured",
-          session_id: "019d0192-767b-7cc1-bdd9-9c8a13484557",
-        },
-      },
-    });
+    trackerSpies.instances[0]?.callbacks.onThreadId?.(
+      "019d0192-767b-7cc1-bdd9-9c8a13484557",
+    );
 
     expect(state[sessionId]?.codexSessionId).toBe(
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
     );
   });
 
-  it("sets session recording env vars when a codex log file manager is provided", async () => {
-    const sessionLogFileManager = {
-      create: vi.fn(() => "/tmp/claude-state/codex-session-codex-1.jsonl"),
-      cleanup: vi.fn(),
-    } as unknown as CodexSessionLogFileManager;
-    const { manager, sessionId } = createManager({
-      initialPrompt: undefined,
-      sessionLogFileManager,
-    });
-
-    manager.startLiveSession({
-      sessionId,
-      cwd: "/tmp",
-      modelReasoningEffort: "high",
-      fastMode: "off",
-      permissionMode: "default",
-      initialPrompt: undefined,
-    });
-
-    const startCall = terminalSessionSpies.start.mock.calls[0]?.[0] as
-      | { env?: Record<string, string> }
-      | undefined;
-    expect(sessionLogFileManager.create).toHaveBeenCalledWith(sessionId);
-    expect(startCall?.env).toEqual({
-      CODEX_TUI_RECORD_SESSION: "1",
-      CODEX_TUI_SESSION_LOG_PATH:
-        "/tmp/claude-state/codex-session-codex-1.jsonl",
-    });
-    expect(
-      activityMonitorSpies.instances[0]?.startMonitoring,
-    ).toHaveBeenCalledWith("/tmp/claude-state/codex-session-codex-1.jsonl");
-
-    await manager.stopLiveSession(sessionId);
-    expect(sessionLogFileManager.cleanup).toHaveBeenCalledWith(
-      "/tmp/claude-state/codex-session-codex-1.jsonl",
-    );
-    expect(
-      activityMonitorSpies.instances[0]?.stopMonitoring,
-    ).toHaveBeenCalled();
-  });
-
   it("does not defer-submit prompt when it is not /plan mode", async () => {
     const { manager, sessionId } = createManager();
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -318,7 +306,7 @@ describe("CodexSessionsManager", () => {
   it("submits deferred /plan prompt only once", async () => {
     const { manager, sessionId } = createManager();
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -334,27 +322,16 @@ describe("CodexSessionsManager", () => {
     callbacks?.onStatusChange("running");
     await vi.advanceTimersByTimeAsync(200);
     expect(terminalSessionSpies.write).toHaveBeenCalledTimes(3);
-    expect(terminalSessionSpies.write).toHaveBeenNthCalledWith(1, "\x1b[Z");
-    expect(terminalSessionSpies.write).toHaveBeenNthCalledWith(
-      2,
-      "summarize recent commits",
-    );
-    expect(terminalSessionSpies.write).toHaveBeenNthCalledWith(3, "\x1b[13u");
 
     await manager.stopLiveSession(sessionId);
   });
 
-  it("derives status from terminal + codex activity", async () => {
-    const sessionLogFileManager = {
-      create: vi.fn(() => "/tmp/claude-state/codex-session-codex-1.jsonl"),
-      cleanup: vi.fn(),
-    } as unknown as CodexSessionLogFileManager;
+  it("derives status from terminal + tracker state", async () => {
     const { manager, sessionId, state } = createManager({
       initialPrompt: undefined,
-      sessionLogFileManager,
     });
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -371,59 +348,37 @@ describe("CodexSessionsManager", () => {
     callbacks?.onStatusChange("running");
     expect(session.status).toBe("idle");
 
-    activityMonitorSpies.instances[0]?.callbacks.onStatusChange("idle");
+    trackerSpies.instances[0]?.callbacks.onStatusChange?.("idle");
     expect(session.status).toBe("idle");
 
-    activityMonitorSpies.instances[0]?.callbacks.onStatusChange("working");
+    trackerSpies.instances[0]?.callbacks.onStatusChange?.("running");
     expect(session.status).toBe("running");
 
-    activityMonitorSpies.instances[0]?.callbacks.onStatusChange(
-      "awaiting_approval",
-    );
+    trackerSpies.instances[0]?.callbacks.onStatusChange?.("awaiting_approval");
     expect(session.status).toBe("awaiting_approval");
 
-    activityMonitorSpies.instances[0]?.callbacks.onStatusChange(
+    trackerSpies.instances[0]?.callbacks.onStatusChange?.(
       "awaiting_user_response",
     );
     expect(session.status).toBe("awaiting_user_response");
 
+    trackerSpies.instances[0]?.callbacks.onStatusChange?.("error");
+    expect(session.status).toBe("error");
+
     callbacks?.onStatusChange("stopping");
     expect(session.status).toBe("stopping");
-
-    callbacks?.onStatusChange("error");
-    expect(session.status).toBe("error");
 
     callbacks?.onStatusChange("stopped");
     expect(session.status).toBe("stopped");
   });
 
-  it("falls back to terminal-only status when log monitoring is unavailable", async () => {
-    const { manager, sessionId, state } = createManager({
-      initialPrompt: undefined,
-    });
-
-    manager.startLiveSession({
-      sessionId,
-      cwd: "/tmp",
-      modelReasoningEffort: "high",
-      fastMode: "off",
-      permissionMode: "default",
-      initialPrompt: undefined,
-    });
-
-    expect(activityMonitorSpies.instances).toHaveLength(0);
-    const callbacks = terminalSessionSpies.callbacks[0];
-    callbacks?.onStatusChange("running");
-    expect(state[sessionId]?.status).toBe("idle");
-  });
-
-  it("uses codex resume when a persisted codex session id exists", async () => {
+  it("uses codex resume when a persisted thread id exists", async () => {
     const { manager, sessionId, state } = createManager({
       initialPrompt: "summarize recent commits",
     });
     state[sessionId].codexSessionId = "019d0192-767b-7cc1-bdd9-9c8a13484557";
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       codexSessionId: state[sessionId].codexSessionId,
       cwd: "/tmp",
@@ -431,12 +386,14 @@ describe("CodexSessionsManager", () => {
       fastMode: "off",
       permissionMode: "default",
       initialPrompt: undefined,
-    } as Parameters<CodexSessionsManager["startLiveSession"]>[0]);
+    });
 
     const startCall = terminalSessionSpies.start.mock.calls.at(-1)?.[0] as
       | { args?: string[] }
       | undefined;
     expect(startCall?.args).toEqual([
+      "--remote",
+      "ws://127.0.0.1:34567",
       "resume",
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
       "--no-alt-screen",
@@ -451,26 +408,12 @@ describe("CodexSessionsManager", () => {
     expect(startCall?.args).not.toContain("'summarize recent commits'");
   });
 
-  it("triggers title generation from the first submitted codex prompt", async () => {
-    const titleManager = {
-      maybeGenerate: vi.fn(),
-      forget: vi.fn(),
-    } as unknown as SessionTitleManager;
-    const sessionLogFileManager = {
-      create: vi.fn(() => "/tmp/claude-state/codex-session-codex-1.jsonl"),
-      cleanup: vi.fn(),
-    } as unknown as CodexSessionLogFileManager;
+  it("updates the default title from tracker notifications", async () => {
     const { manager, sessionId, state } = createManager({
       initialPrompt: undefined,
-      sessionLogFileManager,
-      titleManager,
     });
 
-    vi.mocked(titleManager.maybeGenerate).mockImplementation((params) => {
-      params.onTitleReady("Generated from log");
-    });
-
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -479,44 +422,18 @@ describe("CodexSessionsManager", () => {
       initialPrompt: undefined,
     });
 
-    activityMonitorSpies.instances[0]?.callbacks.onLogEvent?.({
-      ts: new Date().toISOString(),
-      dir: "to_tui",
-      kind: "codex_event",
-      payload: {
-        msg: {
-          type: "user_message",
-          message: "  /plan   add codex title generation from logs  ",
-        },
-      },
-    });
+    trackerSpies.instances[0]?.callbacks.onTitleUpdated?.("Generated title");
 
-    expect(titleManager.maybeGenerate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId,
-        prompt: "add codex title generation from logs",
-      }),
-    );
-    expect(state[sessionId]?.title).toBe("Generated from log");
+    expect(state[sessionId]?.title).toBe("Generated title");
   });
 
-  it("does not trigger title generation from log prompts when title is already custom", async () => {
-    const titleManager = {
-      maybeGenerate: vi.fn(),
-      forget: vi.fn(),
-    } as unknown as SessionTitleManager;
-    const sessionLogFileManager = {
-      create: vi.fn(() => "/tmp/claude-state/codex-session-codex-1.jsonl"),
-      cleanup: vi.fn(),
-    } as unknown as CodexSessionLogFileManager;
-    const { manager, sessionId } = createManager({
+  it("does not overwrite a custom title from tracker notifications", async () => {
+    const { manager, sessionId, state } = createManager({
       initialPrompt: undefined,
-      sessionLogFileManager,
-      titleManager,
       title: "Already named",
     });
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -525,19 +442,9 @@ describe("CodexSessionsManager", () => {
       initialPrompt: undefined,
     });
 
-    activityMonitorSpies.instances[0]?.callbacks.onLogEvent?.({
-      ts: new Date().toISOString(),
-      dir: "to_tui",
-      kind: "codex_event",
-      payload: {
-        msg: {
-          type: "user_message",
-          message: "rename me",
-        },
-      },
-    });
+    trackerSpies.instances[0]?.callbacks.onTitleUpdated?.("Generated title");
 
-    expect(titleManager.maybeGenerate).not.toHaveBeenCalled();
+    expect(state[sessionId]?.title).toBe("Already named");
   });
 
   it("does not change status on output events", async () => {
@@ -545,7 +452,7 @@ describe("CodexSessionsManager", () => {
       initialPrompt: undefined,
     });
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -561,10 +468,11 @@ describe("CodexSessionsManager", () => {
     expect(session.status).toBe("idle");
 
     callbacks?.onStatusChange("running");
-    expect(session.status).toBe("idle");
+    trackerSpies.instances[0]?.callbacks.onStatusChange?.("running");
+    expect(session.status).toBe("running");
 
     callbacks?.onData({ chunk: "still working...", bufferedOutput: "..." });
-    expect(session.status).toBe("idle");
+    expect(session.status).toBe("running");
   });
 
   it("dispose stops all live sessions", async () => {
@@ -591,7 +499,7 @@ describe("CodexSessionsManager", () => {
         startupConfig,
         bufferedOutput: "",
       };
-      manager.startLiveSession({
+      await manager.startLiveSession({
         sessionId,
         cwd: "/tmp",
         modelReasoningEffort: "high",
@@ -604,6 +512,10 @@ describe("CodexSessionsManager", () => {
     await manager.dispose();
 
     expect(terminalSessionSpies.stop).toHaveBeenCalledTimes(2);
+    expect(appServerSpies.instances[0]?.stop).toHaveBeenCalled();
+    expect(appServerSpies.instances[1]?.stop).toHaveBeenCalled();
+    expect(trackerSpies.instances[0]?.stop).toHaveBeenCalled();
+    expect(trackerSpies.instances[1]?.stop).toHaveBeenCalled();
     expect(manager.liveSessions.size).toBe(0);
   });
 
@@ -612,7 +524,7 @@ describe("CodexSessionsManager", () => {
       initialPrompt: undefined,
     });
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId,
       cwd: "/tmp",
       modelReasoningEffort: "high",
@@ -687,6 +599,8 @@ describe("CodexSessionsManager", () => {
       rows: 30,
     });
     expect(startCall?.args).toEqual([
+      "--remote",
+      "ws://127.0.0.1:34567",
       "fork",
       "codex-session-1",
       "--no-alt-screen",

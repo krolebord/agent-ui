@@ -51,12 +51,15 @@ describe("buildCodexArgs", () => {
 
   it("builds resume args when a codex session id is provided", () => {
     const { args } = buildCodexArgs({
+      remoteWsUrl: "ws://127.0.0.1:34567",
       permissionMode: "default",
       resumeSessionId: "019d0192-767b-7cc1-bdd9-9c8a13484557",
       initialPrompt: "should not be forwarded",
     });
 
     expect(args).toEqual([
+      "--remote",
+      "ws://127.0.0.1:34567",
       "resume",
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
       "--no-alt-screen",
@@ -70,12 +73,15 @@ describe("buildCodexArgs", () => {
 
   it("builds fork args when a codex session id is provided", () => {
     const { args } = buildCodexArgs({
+      remoteWsUrl: "ws://127.0.0.1:34567",
       permissionMode: "default",
       forkSessionId: "019d0192-767b-7cc1-bdd9-9c8a13484557",
       initialPrompt: "should not be forwarded",
     });
 
     expect(args).toEqual([
+      "--remote",
+      "ws://127.0.0.1:34567",
       "fork",
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
       "--no-alt-screen",

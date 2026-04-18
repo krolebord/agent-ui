@@ -4,7 +4,6 @@ import {
   defineAppSettingsState,
 } from "./app-settings";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
-import { CodexSessionLogFileManager } from "./codex-session-log-file-manager";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { DesktopIntegrationManager } from "./desktop-integration-manager";
@@ -132,9 +131,6 @@ export async function createServices(options: CreateServicesOptions) {
   });
 
   const stateFileManager = new SessionStateFileManager(userDataPath);
-  const codexSessionLogFileManager = new CodexSessionLogFileManager(
-    userDataPath,
-  );
   const cursorSessionLogFileManager = new CursorSessionLogFileManager(
     userDataPath,
   );
@@ -205,7 +201,6 @@ export async function createServices(options: CreateServicesOptions) {
     state: sessionsState,
     terminalManager,
     titleManager: codexTitleManager,
-    sessionLogFileManager: codexSessionLogFileManager,
   });
   const cursorAgentSessionsManager = new CursorAgentSessionsManager({
     state: sessionsState,
