@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const chokidarWatchMock = vi.hoisted(() => vi.fn());
 const simpleGitFactoryMock = vi.hoisted(() => vi.fn());
 const checkIsRepoMock = vi.hoisted(() => vi.fn());
 const branchLocalMock = vi.hoisted(() => vi.fn());
@@ -10,6 +11,12 @@ const readdirMock = vi.hoisted(() => vi.fn());
 const rmMock = vi.hoisted(() => vi.fn());
 const writeFileMock = vi.hoisted(() => vi.fn());
 const writeProjectSettingsFileMock = vi.hoisted(() => vi.fn());
+
+vi.mock("chokidar", () => ({
+  default: {
+    watch: chokidarWatchMock,
+  },
+}));
 
 vi.mock("simple-git", () => ({
   default: simpleGitFactoryMock,
@@ -30,6 +37,35 @@ vi.mock("../../src/main/project-settings-file", () => ({
 import { ProjectGitService } from "../../src/main/project-git-service";
 import { defineProjectState } from "../../src/main/project-service";
 
+type MockWatcher = {
+  close: ReturnType<typeof vi.fn>;
+  emit: (eventName: string, ...args: unknown[]) => void;
+  on: ReturnType<typeof vi.fn>;
+};
+
+function createMockWatcher(): MockWatcher {
+  const listeners = new Map<string, Array<(...args: unknown[]) => unknown>>();
+
+  const watcher: MockWatcher = {
+    close: vi.fn().mockResolvedValue(undefined),
+    emit: (eventName, ...args) => {
+      for (const listener of listeners.get(eventName) ?? []) {
+        void listener(...args);
+      }
+    },
+    on: vi.fn(
+      (eventName: string, listener: (...args: unknown[]) => unknown) => {
+        const currentListeners = listeners.get(eventName) ?? [];
+        currentListeners.push(listener);
+        listeners.set(eventName, currentListeners);
+        return watcher;
+      },
+    ),
+  };
+
+  return watcher;
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -49,6 +85,8 @@ function createDeferred<T>() {
 describe("ProjectGitService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
+    chokidarWatchMock.mockImplementation(() => createMockWatcher());
     simpleGitFactoryMock.mockImplementation((projectPath: string) => {
       const envVars: Record<string, string> = {};
       const git = {
@@ -89,6 +127,10 @@ describe("ProjectGitService", () => {
     );
     rmMock.mockResolvedValue(undefined);
     writeFileMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("hydrates git branches for all tracked projects", async () => {
@@ -279,6 +321,134 @@ describe("ProjectGitService", () => {
         gitDiffStats: { addedLines: 0, deletedLines: 0 },
       },
     ]);
+  });
+
+  it("auto-refreshes watched projects with a 5 second debounce", async () => {
+    vi.useFakeTimers();
+
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({ path: "/repo-one", collapsed: false });
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+
+    const service = new ProjectGitService(projectsState);
+    const refreshProjectSpy = vi.spyOn(service, "refreshProject");
+
+    service.start();
+    await vi.waitFor(() => {
+      expect(chokidarWatchMock).toHaveBeenCalledWith(
+        ".",
+        expect.objectContaining({
+          cwd: "/repo-one",
+          ignoreInitial: true,
+        }),
+      );
+    });
+
+    refreshProjectSpy.mockClear();
+    const watcher = chokidarWatchMock.mock.results[0]?.value as MockWatcher;
+
+    watcher.emit("all", "change", "src/file.ts");
+    watcher.emit("all", "change", "src/other.ts");
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(refreshProjectSpy).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(1);
+    expect(refreshProjectSpy).toHaveBeenCalledWith("/repo-one");
+  });
+
+  it("ignores watched paths that match gitignore output", async () => {
+    vi.useFakeTimers();
+
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({ path: "/repo-one", collapsed: false });
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+    rawMock.mockImplementation(async (projectPath: string, args: string[]) => {
+      if (projectPath !== "/repo-one") {
+        return "";
+      }
+      if (args[0] === "ls-files") {
+        return "dist/\u0000";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--verify") {
+        return "0123456789abcdef\n";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--git-path") {
+        return ".git/index\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(projectsState);
+    const refreshProjectSpy = vi.spyOn(service, "refreshProject");
+
+    service.start();
+    await vi.waitFor(() => {
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "-z",
+      ]);
+    });
+
+    refreshProjectSpy.mockClear();
+    const watcher = chokidarWatchMock.mock.results[0]?.value as MockWatcher;
+
+    watcher.emit("all", "change", "dist/bundle.js");
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(refreshProjectSpy).not.toHaveBeenCalled();
+  });
+
+  it("closes a project watcher when the project is removed", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push(
+        { path: "/repo-one", collapsed: false },
+        { path: "/repo-two", collapsed: false },
+      );
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+
+    const service = new ProjectGitService(projectsState);
+    service.start();
+
+    await vi.waitFor(() => {
+      expect(chokidarWatchMock).toHaveBeenCalledTimes(2);
+    });
+
+    const firstWatcher = chokidarWatchMock.mock.results[0]
+      ?.value as MockWatcher;
+    const secondWatcher = chokidarWatchMock.mock.results[1]
+      ?.value as MockWatcher;
+
+    projectsState.updateState((projects) => {
+      projects.splice(
+        projects.findIndex((project) => project.path === "/repo-one"),
+        1,
+      );
+    });
+
+    await vi.waitFor(() => {
+      expect(firstWatcher.close).toHaveBeenCalledTimes(1);
+    });
+    expect(secondWatcher.close).not.toHaveBeenCalled();
+
+    await service.dispose();
   });
 
   it("hydrates clean repos with zero diff stats", async () => {
