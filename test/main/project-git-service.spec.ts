@@ -323,7 +323,7 @@ describe("ProjectGitService", () => {
     ]);
   });
 
-  it("auto-refreshes watched projects with a 5 second debounce", async () => {
+  it("throttles watched project refreshes and runs again after inactivity", async () => {
     vi.useFakeTimers();
 
     const projectsState = defineProjectState();
@@ -352,14 +352,37 @@ describe("ProjectGitService", () => {
     const watcher = chokidarWatchMock.mock.results[0]?.value as MockWatcher;
 
     watcher.emit("all", "change", "src/file.ts");
-    watcher.emit("all", "change", "src/other.ts");
-
-    await vi.advanceTimersByTimeAsync(4_999);
-    expect(refreshProjectSpy).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(1);
     expect(refreshProjectSpy).toHaveBeenCalledTimes(1);
     expect(refreshProjectSpy).toHaveBeenCalledWith("/repo-one");
+
+    watcher.emit("all", "change", "src/other.ts");
+    await vi.advanceTimersByTimeAsync(1_998);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(2);
+
+    watcher.emit("all", "change", "src/third.ts");
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(3);
+
+    watcher.emit("all", "change", "src/fourth.ts");
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(3);
+
+    await vi.advanceTimersByTimeAsync(2);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(4);
+
+    await vi.advanceTimersByTimeAsync(2_998);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(4);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(refreshProjectSpy).toHaveBeenCalledTimes(5);
   });
 
   it("ignores watched paths that match gitignore output", async () => {

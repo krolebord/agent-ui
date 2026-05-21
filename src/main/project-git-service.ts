@@ -18,6 +18,7 @@ import {
 import { parseSetupCommands } from "./sessions/worktree-setup.session";
 
 const EMPTY_GIT_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const GIT_STATUS_WATCH_THROTTLE_MS = 2_000;
 const GIT_STATUS_WATCH_DEBOUNCE_MS = 5_000;
 const gitIndexPathCache = new Map<string, string>();
 
@@ -37,8 +38,12 @@ interface ProjectGitData {
 
 interface ProjectWatcherState {
   debounceTimer: ReturnType<typeof setTimeout> | null;
+  hasPendingChanges: boolean;
   ignoredPaths: Set<string>;
   ignoredPathsRefreshInFlight: Promise<void> | null;
+  lastRefreshStartedAt: number;
+  needsInactivityRefresh: boolean;
+  throttleTimer: ReturnType<typeof setTimeout> | null;
   watcher: FSWatcher;
 }
 
@@ -1050,8 +1055,12 @@ export class ProjectGitService {
     });
 
     watcherState.debounceTimer = null;
+    watcherState.hasPendingChanges = false;
     watcherState.ignoredPaths = new Set();
     watcherState.ignoredPathsRefreshInFlight = null;
+    watcherState.lastRefreshStartedAt = 0;
+    watcherState.needsInactivityRefresh = false;
+    watcherState.throttleTimer = null;
     watcherState.watcher = watcher;
 
     watcher.on("all", (_eventName, watchedPath) => {
@@ -1086,19 +1095,48 @@ export class ProjectGitService {
     projectPath: string,
     watcherState: ProjectWatcherState,
   ): void {
+    watcherState.hasPendingChanges = true;
+    watcherState.needsInactivityRefresh = true;
+
     if (watcherState.debounceTimer) {
       clearTimeout(watcherState.debounceTimer);
     }
 
     watcherState.debounceTimer = setTimeout(() => {
       watcherState.debounceTimer = null;
-      void this.refreshWatchedProject(projectPath, watcherState);
+      void this.refreshWatchedProject(projectPath, watcherState, {
+        force: true,
+      });
     }, GIT_STATUS_WATCH_DEBOUNCE_MS);
+
+    this.scheduleThrottledProjectRefresh(projectPath, watcherState);
+  }
+
+  private scheduleThrottledProjectRefresh(
+    projectPath: string,
+    watcherState: ProjectWatcherState,
+  ): void {
+    if (watcherState.throttleTimer) {
+      return;
+    }
+
+    const now = Date.now();
+    const nextAllowedRefreshAt =
+      watcherState.lastRefreshStartedAt + GIT_STATUS_WATCH_THROTTLE_MS;
+    const throttleDelayMs = Math.max(0, nextAllowedRefreshAt - now);
+
+    watcherState.throttleTimer = setTimeout(() => {
+      watcherState.throttleTimer = null;
+      void this.refreshWatchedProject(projectPath, watcherState);
+    }, throttleDelayMs);
   }
 
   private async refreshWatchedProject(
     projectPath: string,
     watcherState: ProjectWatcherState,
+    options?: {
+      force?: boolean;
+    },
   ): Promise<void> {
     if (
       this.disposed ||
@@ -1107,6 +1145,19 @@ export class ProjectGitService {
     ) {
       return;
     }
+
+    const force = options?.force ?? false;
+    if (!force && !watcherState.hasPendingChanges) {
+      return;
+    }
+
+    const hadPendingChanges = watcherState.hasPendingChanges;
+    const hadPendingInactivityRefresh = watcherState.needsInactivityRefresh;
+    watcherState.hasPendingChanges = false;
+    if (force) {
+      watcherState.needsInactivityRefresh = false;
+    }
+    watcherState.lastRefreshStartedAt = Date.now();
 
     try {
       await this.refreshWatcherIgnoredPaths(projectPath, watcherState);
@@ -1119,6 +1170,8 @@ export class ProjectGitService {
 
       await this.refreshProject(projectPath);
     } catch (error) {
+      watcherState.hasPendingChanges = hadPendingChanges || force;
+      watcherState.needsInactivityRefresh = hadPendingInactivityRefresh;
       if (this.disposed) {
         return;
       }
@@ -1127,6 +1180,10 @@ export class ProjectGitService {
         projectPath,
         message: error instanceof Error ? error.message : String(error),
       });
+    }
+
+    if (watcherState.hasPendingChanges) {
+      this.scheduleThrottledProjectRefresh(projectPath, watcherState);
     }
   }
 
@@ -1164,6 +1221,10 @@ export class ProjectGitService {
     if (watcherState.debounceTimer) {
       clearTimeout(watcherState.debounceTimer);
       watcherState.debounceTimer = null;
+    }
+    if (watcherState.throttleTimer) {
+      clearTimeout(watcherState.throttleTimer);
+      watcherState.throttleTimer = null;
     }
 
     await watcherState.watcher.close();
