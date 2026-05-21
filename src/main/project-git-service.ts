@@ -7,7 +7,6 @@ import type {
   GitUpstreamDiffStats,
 } from "@shared/claude-types";
 import { buildSuggestedWorktreePath } from "@shared/project-worktree";
-import chokidar, { type FSWatcher } from "chokidar";
 import simpleGit from "simple-git";
 import log from "./logger";
 import type { ProjectState } from "./project-service";
@@ -16,10 +15,10 @@ import {
   writeProjectSettingsFile,
 } from "./project-settings-file";
 import { parseSetupCommands } from "./sessions/worktree-setup.session";
+import { withThrottledAsyncRunner } from "./throttle-runner";
 
 const EMPTY_GIT_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const GIT_STATUS_WATCH_THROTTLE_MS = 2_000;
-const GIT_STATUS_WATCH_DEBOUNCE_MS = 5_000;
+const GIT_PROJECT_REFRESH_THROTTLE_MS = 2_000;
 const gitIndexPathCache = new Map<string, string>();
 
 type ProjectGitMetadata = Pick<
@@ -34,17 +33,6 @@ interface ProjectGitData {
   isRepo: boolean;
   localBranches: string[];
   git: ReturnType<typeof simpleGit>;
-}
-
-interface ProjectWatcherState {
-  debounceTimer: ReturnType<typeof setTimeout> | null;
-  hasPendingChanges: boolean;
-  ignoredPaths: Set<string>;
-  ignoredPathsRefreshInFlight: Promise<void> | null;
-  lastRefreshStartedAt: number;
-  needsInactivityRefresh: boolean;
-  throttleTimer: ReturnType<typeof setTimeout> | null;
-  watcher: FSWatcher;
 }
 
 function getDiscoveredLocalBranchNames(summary: {
@@ -72,50 +60,6 @@ function parseBranchOrderOutput(output: string): string[] {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
-}
-
-function parseNullDelimitedOutput(output: string): string[] {
-  return output
-    .split("\0")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function normalizeWatchedRelativePath(watchedPath: string): string | null {
-  const normalized = watchedPath.replaceAll("\\", "/").trim();
-  if (!normalized || normalized === ".") {
-    return null;
-  }
-
-  const withoutLeadingDotSlash = normalized.startsWith("./")
-    ? normalized.slice(2)
-    : normalized;
-  const segments = withoutLeadingDotSlash.split("/").filter(Boolean);
-  if (segments.length === 0 || segments.includes("..")) {
-    return null;
-  }
-
-  return segments.join("/");
-}
-
-function isGitignoredPath(
-  relativePath: string | null,
-  ignoredPaths: Set<string>,
-): boolean {
-  if (!relativePath) {
-    return false;
-  }
-
-  for (const ignoredPath of ignoredPaths) {
-    if (
-      relativePath === ignoredPath ||
-      relativePath.startsWith(`${ignoredPath}/`)
-    ) {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 async function getLocalBranchNames(
@@ -155,33 +99,6 @@ async function getLocalBranchNames(
     return orderedBranches;
   } catch {
     return alphabetizeBranchNames(discoveredBranches);
-  }
-}
-
-async function readGitignoredPaths(projectPath: string): Promise<Set<string>> {
-  try {
-    const git = simpleGit(projectPath);
-    const isRepo = await git.checkIsRepo();
-    if (!isRepo) {
-      return new Set();
-    }
-
-    const ignoredOutput = await git.raw([
-      "ls-files",
-      "--others",
-      "--ignored",
-      "--exclude-standard",
-      "--directory",
-      "-z",
-    ]);
-
-    return new Set(
-      parseNullDelimitedOutput(ignoredOutput)
-        .map(normalizeWatchedRelativePath)
-        .filter((entry): entry is string => entry !== null),
-    );
-  } catch {
-    return new Set();
   }
 }
 
@@ -557,14 +474,10 @@ async function isWorktreeWorkingTreeClean(
 }
 
 export class ProjectGitService {
-  private readonly projectWatchers = new Map<string, ProjectWatcherState>();
-  private readonly handleProjectsStateUpdate = () => {
-    if (this.disposed) {
-      return;
-    }
-
-    this.syncProjectWatchers();
-  };
+  private readonly refreshRunners = new Map<
+    string,
+    ReturnType<typeof withThrottledAsyncRunner>
+  >();
 
   private refreshInFlight: Promise<void> | null = null;
   private disposed = false;
@@ -578,15 +491,33 @@ export class ProjectGitService {
     }
 
     this.started = true;
-    this.projectsState.eventTarget.addEventListener(
-      "state-update",
-      this.handleProjectsStateUpdate,
-    );
-    this.syncProjectWatchers();
     this.triggerRefresh();
   }
 
-  async refreshProject(projectPath: string): Promise<void> {
+  refreshProject(projectPath: string): Promise<void> {
+    if (this.disposed) {
+      return Promise.resolve();
+    }
+
+    return this.getRefreshRunner(projectPath).schedule();
+  }
+
+  private getRefreshRunner(projectPath: string) {
+    const existingRunner = this.refreshRunners.get(projectPath);
+    if (existingRunner) {
+      return existingRunner;
+    }
+
+    const runner = withThrottledAsyncRunner(
+      () => this.refreshProjectNow(projectPath),
+      GIT_PROJECT_REFRESH_THROTTLE_MS,
+      { leading: true, trailing: true },
+    );
+    this.refreshRunners.set(projectPath, runner);
+    return runner;
+  }
+
+  private async refreshProjectNow(projectPath: string): Promise<void> {
     const metadata = await resolveProjectGitMetadata(projectPath);
     if (this.disposed) {
       return;
@@ -1020,229 +951,16 @@ export class ProjectGitService {
     });
   }
 
-  private syncProjectWatchers(): void {
-    const trackedPaths = new Set(
-      this.projectsState.state.map((project) => project.path),
-    );
-
-    for (const projectPath of trackedPaths) {
-      this.ensureProjectWatcher(projectPath);
-    }
-
-    for (const [projectPath] of this.projectWatchers) {
-      if (trackedPaths.has(projectPath)) {
-        continue;
-      }
-
-      void this.disposeProjectWatcher(projectPath);
-    }
-  }
-
-  private ensureProjectWatcher(projectPath: string): void {
-    if (this.disposed || this.projectWatchers.has(projectPath)) {
-      return;
-    }
-
-    const watcherState = {} as ProjectWatcherState;
-    const watcher = chokidar.watch(".", {
-      cwd: projectPath,
-      ignoreInitial: true,
-      ignored: (watchedPath) =>
-        isGitignoredPath(
-          normalizeWatchedRelativePath(watchedPath),
-          watcherState.ignoredPaths,
-        ),
-    });
-
-    watcherState.debounceTimer = null;
-    watcherState.hasPendingChanges = false;
-    watcherState.ignoredPaths = new Set();
-    watcherState.ignoredPathsRefreshInFlight = null;
-    watcherState.lastRefreshStartedAt = 0;
-    watcherState.needsInactivityRefresh = false;
-    watcherState.throttleTimer = null;
-    watcherState.watcher = watcher;
-
-    watcher.on("all", (_eventName, watchedPath) => {
-      if (
-        isGitignoredPath(
-          normalizeWatchedRelativePath(watchedPath),
-          watcherState.ignoredPaths,
-        )
-      ) {
-        return;
-      }
-
-      this.scheduleProjectRefresh(projectPath, watcherState);
-    });
-
-    watcher.on("error", (error) => {
-      if (this.disposed) {
-        return;
-      }
-
-      log.warn("Project git watcher error", {
-        projectPath,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    });
-
-    this.projectWatchers.set(projectPath, watcherState);
-    void this.refreshWatcherIgnoredPaths(projectPath, watcherState);
-  }
-
-  private scheduleProjectRefresh(
-    projectPath: string,
-    watcherState: ProjectWatcherState,
-  ): void {
-    watcherState.hasPendingChanges = true;
-    watcherState.needsInactivityRefresh = true;
-
-    if (watcherState.debounceTimer) {
-      clearTimeout(watcherState.debounceTimer);
-    }
-
-    watcherState.debounceTimer = setTimeout(() => {
-      watcherState.debounceTimer = null;
-      void this.refreshWatchedProject(projectPath, watcherState, {
-        force: true,
-      });
-    }, GIT_STATUS_WATCH_DEBOUNCE_MS);
-
-    this.scheduleThrottledProjectRefresh(projectPath, watcherState);
-  }
-
-  private scheduleThrottledProjectRefresh(
-    projectPath: string,
-    watcherState: ProjectWatcherState,
-  ): void {
-    if (watcherState.throttleTimer) {
-      return;
-    }
-
-    const now = Date.now();
-    const nextAllowedRefreshAt =
-      watcherState.lastRefreshStartedAt + GIT_STATUS_WATCH_THROTTLE_MS;
-    const throttleDelayMs = Math.max(0, nextAllowedRefreshAt - now);
-
-    watcherState.throttleTimer = setTimeout(() => {
-      watcherState.throttleTimer = null;
-      void this.refreshWatchedProject(projectPath, watcherState);
-    }, throttleDelayMs);
-  }
-
-  private async refreshWatchedProject(
-    projectPath: string,
-    watcherState: ProjectWatcherState,
-    options?: {
-      force?: boolean;
-    },
-  ): Promise<void> {
-    if (
-      this.disposed ||
-      this.projectWatchers.get(projectPath) !== watcherState ||
-      !this.projectsState.state.some((project) => project.path === projectPath)
-    ) {
-      return;
-    }
-
-    const force = options?.force ?? false;
-    if (!force && !watcherState.hasPendingChanges) {
-      return;
-    }
-
-    const hadPendingChanges = watcherState.hasPendingChanges;
-    const hadPendingInactivityRefresh = watcherState.needsInactivityRefresh;
-    watcherState.hasPendingChanges = false;
-    if (force) {
-      watcherState.needsInactivityRefresh = false;
-    }
-    watcherState.lastRefreshStartedAt = Date.now();
-
-    try {
-      await this.refreshWatcherIgnoredPaths(projectPath, watcherState);
-      if (
-        this.disposed ||
-        this.projectWatchers.get(projectPath) !== watcherState
-      ) {
-        return;
-      }
-
-      await this.refreshProject(projectPath);
-    } catch (error) {
-      watcherState.hasPendingChanges = hadPendingChanges || force;
-      watcherState.needsInactivityRefresh = hadPendingInactivityRefresh;
-      if (this.disposed) {
-        return;
-      }
-
-      log.warn("Watched project git refresh failed", {
-        projectPath,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    if (watcherState.hasPendingChanges) {
-      this.scheduleThrottledProjectRefresh(projectPath, watcherState);
-    }
-  }
-
-  private refreshWatcherIgnoredPaths(
-    projectPath: string,
-    watcherState: ProjectWatcherState,
-  ): Promise<void> {
-    if (watcherState.ignoredPathsRefreshInFlight) {
-      return watcherState.ignoredPathsRefreshInFlight;
-    }
-
-    watcherState.ignoredPathsRefreshInFlight = (async () => {
-      const ignoredPaths = await readGitignoredPaths(projectPath);
-      if (this.projectWatchers.get(projectPath) !== watcherState) {
-        return;
-      }
-
-      watcherState.ignoredPaths = ignoredPaths;
-    })().finally(() => {
-      if (this.projectWatchers.get(projectPath) === watcherState) {
-        watcherState.ignoredPathsRefreshInFlight = null;
-      }
-    });
-
-    return watcherState.ignoredPathsRefreshInFlight;
-  }
-
-  private async disposeProjectWatcher(projectPath: string): Promise<void> {
-    const watcherState = this.projectWatchers.get(projectPath);
-    if (!watcherState) {
-      return;
-    }
-
-    this.projectWatchers.delete(projectPath);
-    if (watcherState.debounceTimer) {
-      clearTimeout(watcherState.debounceTimer);
-      watcherState.debounceTimer = null;
-    }
-    if (watcherState.throttleTimer) {
-      clearTimeout(watcherState.throttleTimer);
-      watcherState.throttleTimer = null;
-    }
-
-    await watcherState.watcher.close();
-  }
-
   async dispose(): Promise<void> {
     this.disposed = true;
-    if (this.started) {
-      this.projectsState.eventTarget.removeEventListener(
-        "state-update",
-        this.handleProjectsStateUpdate,
-      );
-    }
 
     await Promise.allSettled(
-      Array.from(this.projectWatchers.keys()).map(async (projectPath) =>
-        this.disposeProjectWatcher(projectPath),
-      ),
+      Array.from(this.refreshRunners.values()).map((runner) => runner.flush()),
     );
+
+    for (const runner of this.refreshRunners.values()) {
+      runner.dispose();
+    }
+    this.refreshRunners.clear();
   }
 }

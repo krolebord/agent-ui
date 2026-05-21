@@ -141,13 +141,9 @@ export function SessionHeader({ session }: { session: Session }) {
 
   useEffect(() => {
     session.sessionId;
+    session.status;
     refreshGitStats();
-  }, [session.sessionId]);
-  useEffect(() => {
-    if (session.status === "awaiting_user_response") {
-      void refreshGitStats();
-    }
-  }, [session.status]);
+  }, [session.sessionId, session.status]);
 
   const openFolderInAppMutation = useMutation({
     mutationFn: async (app: OpenInAppTarget) => {
