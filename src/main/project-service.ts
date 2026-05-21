@@ -1,16 +1,6 @@
 import { type FileDiffMetadata, parsePatchFiles } from "@pierre/diffs";
 import z from "zod";
-import {
-  type ClaudeProject,
-  claudeEffortSchema,
-  claudeModelSchema,
-  claudePermissionModeSchema,
-} from "../shared/claude-types";
-import {
-  codexFastModeSchema,
-  codexModelReasoningEffortSchema,
-  codexPermissionModeSchema,
-} from "../shared/codex-types";
+import type { ClaudeProject } from "../shared/claude-types";
 import { defineServiceState } from "../shared/service-state";
 import type { Services } from "./create-services";
 import log from "./logger";
@@ -23,34 +13,6 @@ import {
 } from "./project-settings-file";
 import type { Session } from "./sessions/state";
 
-const cursorAgentModeSchema = z.enum(["plan", "ask"]);
-const cursorAgentPermissionModeSchema = z.enum(["default", "yolo"]);
-
-const localClaudeProjectSettingsSchema = z.object({
-  defaultModel: claudeModelSchema.optional().catch(undefined),
-  defaultPermissionMode: claudePermissionModeSchema.optional().catch(undefined),
-  defaultEffort: claudeEffortSchema.optional().catch(undefined),
-  defaultHaikuModelOverride: claudeModelSchema.optional().catch(undefined),
-  defaultSubagentModelOverride: claudeModelSchema.optional().catch(undefined),
-  defaultSystemPrompt: z.string().optional().catch(undefined),
-});
-
-const localCodexProjectSettingsSchema = z.object({
-  model: z.string().optional().catch(undefined),
-  permissionMode: codexPermissionModeSchema.optional().catch(undefined),
-  modelReasoningEffort: codexModelReasoningEffortSchema
-    .optional()
-    .catch(undefined),
-  fastMode: codexFastModeSchema.optional().catch(undefined),
-  configOverrides: z.string().optional().catch(undefined),
-});
-
-const localCursorProjectSettingsSchema = z.object({
-  model: z.string().optional().catch(undefined),
-  mode: cursorAgentModeSchema.optional().catch(undefined),
-  permissionMode: cursorAgentPermissionModeSchema.optional().catch(undefined),
-});
-
 const projectAliasSchema = z.string().trim().optional().catch(undefined);
 const worktreeOriginPathSchema = z
   .string()
@@ -58,17 +20,6 @@ const worktreeOriginPathSchema = z
   .min(1)
   .optional()
   .catch(undefined);
-
-function toOptionalSettings<T extends Record<string, unknown>>(
-  value: T | undefined,
-): T | undefined {
-  if (!value) {
-    return undefined;
-  }
-  return Object.values(value).some((item) => item !== undefined)
-    ? value
-    : undefined;
-}
 
 const projectDeletionToastSchema = z.object({
   kind: z.enum(["warning", "error"]),
@@ -81,9 +32,6 @@ export const claudeProjectSchema = z.object({
   alias: projectAliasSchema,
   worktreeOriginPath: worktreeOriginPathSchema,
   worktreeSetupCommands: z.string().optional().catch(undefined),
-  localClaude: localClaudeProjectSettingsSchema.optional().catch(undefined),
-  localCodex: localCodexProjectSettingsSchema.optional().catch(undefined),
-  localCursor: localCursorProjectSettingsSchema.optional().catch(undefined),
   interactionDisabled: z.boolean().optional().catch(undefined),
   deletionToast: projectDeletionToastSchema.optional().catch(undefined),
 });
@@ -304,7 +252,9 @@ export async function addTrackedProject(
       return;
     }
 
-    Object.assign(project, hydratedSettings);
+    if (hydratedSettings.worktreeSetupCommands) {
+      project.worktreeSetupCommands = hydratedSettings.worktreeSetupCommands;
+    }
   });
 
   await context.projectGitService.refreshProject(normalizedPath);
@@ -425,9 +375,6 @@ export const projectsRouter = {
     .input(
       z.object({
         path: projectPathSchema,
-        localClaude: localClaudeProjectSettingsSchema.optional(),
-        localCodex: localCodexProjectSettingsSchema.optional(),
-        localCursor: localCursorProjectSettingsSchema.optional(),
         worktreeSetupCommands: z.string().optional(),
       }),
     )
@@ -438,23 +385,14 @@ export const projectsRouter = {
       assertProjectPathInteractionAllowed(path, context);
 
       const worktreeSetupCommands = input.worktreeSetupCommands || undefined;
-      const settings = {
-        localClaude: toOptionalSettings(input.localClaude),
-        localCodex: toOptionalSettings(input.localCodex),
-        localCursor: toOptionalSettings(input.localCursor),
-        worktreeSetupCommands,
-      };
 
       context.projectsState.updateState((projects) => {
         const project = projects.find((p) => p.path === path);
         if (!project) return;
-        project.localClaude = settings.localClaude;
-        project.localCodex = settings.localCodex;
-        project.localCursor = settings.localCursor;
         project.worktreeSetupCommands = worktreeSetupCommands;
       });
 
-      await writeProjectSettingsFile(path, settings);
+      await writeProjectSettingsFile(path, { worktreeSetupCommands });
     }),
   deleteProject: procedure
     .input(z.object({ path: z.string().trim().min(1) }))

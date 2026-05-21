@@ -758,15 +758,7 @@ describe("ProjectGitService", () => {
         path: "/repo-one",
         collapsed: false,
         gitBranch: "main",
-        localClaude: {
-          defaultModel: "opus",
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: "yolo",
-          modelReasoningEffort: "high",
-          fastMode: "fast",
-        },
+        worktreeSetupCommands: "pnpm install",
       });
     });
 
@@ -807,7 +799,7 @@ describe("ProjectGitService", () => {
       path: "/repo-one-feature-new-ui",
       projectRoot: "/repo-one",
       worktreeRoot: "/repo-one-feature-new-ui",
-      setupCommands: [],
+      setupCommands: ["pnpm install"],
     });
     expect(rawMock).toHaveBeenCalledWith("/repo-one", [
       "worktree",
@@ -820,16 +812,7 @@ describe("ProjectGitService", () => {
     expect(writeProjectSettingsFileMock).toHaveBeenCalledWith(
       "/repo-one-feature-new-ui",
       {
-        localClaude: {
-          defaultModel: "opus",
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: "yolo",
-          modelReasoningEffort: "high",
-          fastMode: "fast",
-        },
-        localCursor: undefined,
+        worktreeSetupCommands: "pnpm install",
       },
     );
     expect(projectsState.state).toEqual([
@@ -837,30 +820,14 @@ describe("ProjectGitService", () => {
         path: "/repo-one",
         collapsed: false,
         gitBranch: "main",
-        localClaude: {
-          defaultModel: "opus",
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: "yolo",
-          modelReasoningEffort: "high",
-          fastMode: "fast",
-        },
+        worktreeSetupCommands: "pnpm install",
       },
       {
         path: "/repo-one-feature-new-ui",
         collapsed: false,
         alias: "UI Worktree",
         worktreeOriginPath: "/repo-one",
-        localClaude: {
-          defaultModel: "opus",
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: "yolo",
-          modelReasoningEffort: "high",
-          fastMode: "fast",
-        },
+        worktreeSetupCommands: "pnpm install",
         gitBranch: "feature/new-ui",
         gitDiffStats: { addedLines: 0, deletedLines: 0 },
       },

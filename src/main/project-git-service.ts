@@ -401,26 +401,12 @@ function getProjectSettingsSnapshot(
   project?: ClaudeProject,
 ): ProjectSettingsFile {
   return {
-    localClaude: project?.localClaude
-      ? structuredClone(project.localClaude)
-      : undefined,
-    localCodex: project?.localCodex
-      ? structuredClone(project.localCodex)
-      : undefined,
-    localCursor: project?.localCursor
-      ? structuredClone(project.localCursor)
-      : undefined,
     worktreeSetupCommands: project?.worktreeSetupCommands,
   };
 }
 
 function hasProjectSettings(settings: ProjectSettingsFile): boolean {
-  return Boolean(
-    settings.localClaude ||
-      settings.localCodex ||
-      settings.localCursor ||
-      settings.worktreeSetupCommands,
-  );
+  return Boolean(settings.worktreeSetupCommands);
 }
 
 function getDefaultWorktreeBranch(projectGitData: ProjectGitData): string {

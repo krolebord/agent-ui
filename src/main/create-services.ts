@@ -154,7 +154,7 @@ export async function createServices(options: CreateServicesOptions) {
     defineProjectTerminalsPersistence(projectTerminalsState),
   );
 
-  // Hydrate project defaults from .agent-ui/settings.jsonc files
+  // Hydrate worktree setup commands from .agent-ui/settings.jsonc files
   const projectPaths = projectsState.state.map((p) => p.path);
   if (projectPaths.length > 0) {
     const fileSettings = await readProjectSettingsForAll(projectPaths);
@@ -162,8 +162,8 @@ export async function createServices(options: CreateServicesOptions) {
       projectsState.updateState((projects) => {
         for (const project of projects) {
           const settings = fileSettings.get(project.path);
-          if (!settings) continue;
-          Object.assign(project, settings);
+          if (!settings?.worktreeSetupCommands) continue;
+          project.worktreeSetupCommands = settings.worktreeSetupCommands;
         }
       });
     }

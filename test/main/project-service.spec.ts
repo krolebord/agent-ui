@@ -45,20 +45,12 @@ describe("project-service addTrackedProject", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("hydrates existing .agent-ui settings when adding a project", async () => {
+  it("hydrates worktree setup commands from .agent-ui settings when adding a project", async () => {
     const projectPath = path.join(tempDir, "repo-with-settings");
     readProjectSettingsFileMock.mockResolvedValue({
+      worktreeSetupCommands: "pnpm install",
       localClaude: {
         defaultModel: "sonnet",
-        defaultEffort: "high",
-      },
-      localCodex: {
-        permissionMode: "yolo",
-        fastMode: "fast",
-      },
-      localCursor: {
-        mode: "ask",
-        permissionMode: "default",
       },
     });
 
@@ -77,18 +69,7 @@ describe("project-service addTrackedProject", () => {
       {
         path: projectPath,
         collapsed: false,
-        localClaude: {
-          defaultModel: "sonnet",
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: "yolo",
-          fastMode: "fast",
-        },
-        localCursor: {
-          mode: "ask",
-          permissionMode: "default",
-        },
+        worktreeSetupCommands: "pnpm install",
       },
     ]);
     expect(refreshProject).toHaveBeenCalledWith(projectPath);
@@ -121,7 +102,7 @@ describe("project-service addTrackedProject", () => {
   it("does not duplicate a project when two adds overlap", async () => {
     const projectPath = path.join(tempDir, "race-repo");
     const deferredSettings = createDeferred<{
-      localClaude?: { defaultModel?: string };
+      worktreeSetupCommands?: string;
     } | null>();
     readProjectSettingsFileMock.mockReturnValue(deferredSettings.promise);
 
@@ -145,9 +126,7 @@ describe("project-service addTrackedProject", () => {
     expect(readProjectSettingsFileMock).toHaveBeenCalledTimes(1);
 
     deferredSettings.resolve({
-      localClaude: {
-        defaultModel: "sonnet",
-      },
+      worktreeSetupCommands: "pnpm install",
     });
 
     await expect(Promise.all([firstAdd, secondAdd])).resolves.toEqual([
@@ -159,9 +138,7 @@ describe("project-service addTrackedProject", () => {
       {
         path: projectPath,
         collapsed: false,
-        localClaude: {
-          defaultModel: "sonnet",
-        },
+        worktreeSetupCommands: "pnpm install",
       },
     ]);
     expect(refreshProject).toHaveBeenCalledTimes(1);

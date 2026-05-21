@@ -13,13 +13,6 @@ describe("project-settings-file", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = await mkdir(
-      path.join(tmpdir(), `project-settings-test-${Date.now()}`),
-      {
-        recursive: true,
-      },
-    ).then(() => path.join(tmpdir(), `project-settings-test-${Date.now()}`));
-    // Use a fresh unique dir
     tempDir = path.join(
       tmpdir(),
       `project-settings-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -39,20 +32,19 @@ describe("project-settings-file", () => {
       expect(result).toBeNull();
     });
 
-    it("parses valid JSONC with comments", async () => {
+    it("parses worktree setup commands and ignores session settings", async () => {
       await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
         settingsPath(),
         `{
-  // Default settings for this project
+  // Worktree setup for this project
+  "worktreeSetupCommands": "pnpm install",
   "localClaude": {
     "defaultModel": "sonnet",
     "defaultEffort": "high"
   },
   "localCodex": {
-    "permissionMode": "full-auto",
-    "modelReasoningEffort": "xhigh",
-    "fastMode": true
+    "permissionMode": "full-auto"
   }
 }`,
         "utf-8",
@@ -60,15 +52,7 @@ describe("project-settings-file", () => {
 
       const result = await readProjectSettingsFile(tempDir);
       expect(result).toEqual({
-        localClaude: {
-          defaultModel: "sonnet",
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: "full-auto",
-          modelReasoningEffort: "xhigh",
-          fastMode: "fast",
-        },
+        worktreeSetupCommands: "pnpm install",
       });
     });
 
@@ -80,42 +64,12 @@ describe("project-settings-file", () => {
       expect(result).toBeNull();
     });
 
-    it("uses .catch(undefined) for unknown enum values", async () => {
-      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
-      await writeFile(
-        settingsPath(),
-        `{
-  "localClaude": {
-    "defaultModel": "unknown-model-xyz",
-    "defaultEffort": "high"
-  },
-  "localCodex": {
-    "permissionMode": "not-a-mode",
-    "modelReasoningEffort": "low"
-  }
-}`,
-        "utf-8",
-      );
-
-      const result = await readProjectSettingsFile(tempDir);
-      expect(result).toEqual({
-        localClaude: {
-          defaultModel: undefined,
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: undefined,
-          modelReasoningEffort: "low",
-        },
-      });
-    });
-
     it("strips unknown keys", async () => {
       await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
         settingsPath(),
         `{
-  "localClaude": { "defaultModel": "opus", "unknownKey": true },
+  "worktreeSetupCommands": "pnpm install",
   "unknownTopLevel": true
 }`,
         "utf-8",
@@ -123,7 +77,7 @@ describe("project-settings-file", () => {
 
       const result = await readProjectSettingsFile(tempDir);
       expect(result).toEqual({
-        localClaude: { defaultModel: "opus" },
+        worktreeSetupCommands: "pnpm install",
       });
       expect(result).not.toHaveProperty("unknownTopLevel");
     });
@@ -144,103 +98,68 @@ describe("project-settings-file", () => {
   describe("writeProjectSettingsFile", () => {
     it("creates .agent-ui directory and file", async () => {
       await writeProjectSettingsFile(tempDir, {
-        localClaude: {
-          defaultModel: "sonnet",
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: "yolo",
-          modelReasoningEffort: "high",
-          fastMode: "fast",
-        },
+        worktreeSetupCommands: "pnpm install",
       });
 
       expect(existsSync(settingsPath())).toBe(true);
       const content = readFileSync(settingsPath(), "utf-8");
-      expect(content).toContain('"localClaude"');
-      expect(content).toContain('"defaultModel": "sonnet"');
-      expect(content).toContain('"defaultEffort": "high"');
-      expect(content).toContain('"localCodex"');
-      expect(content).toContain('"permissionMode": "yolo"');
-      expect(content).toContain('"modelReasoningEffort": "high"');
-      expect(content).toContain('"fastMode": "fast"');
+      expect(content).toContain('"worktreeSetupCommands": "pnpm install"');
     });
 
     it("preserves existing comments on re-write", async () => {
       await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       const original = `{
   // This is a project comment
-  "localClaude": {
-    "defaultModel": "sonnet",
-    "defaultEffort": "low"
-  }
+  "worktreeSetupCommands": "pnpm install"
 }`;
       await writeFile(settingsPath(), original, "utf-8");
 
       await writeProjectSettingsFile(tempDir, {
-        localClaude: {
-          defaultModel: "opus",
-          defaultEffort: "high",
-        },
+        worktreeSetupCommands: "pnpm build",
       });
 
       const content = readFileSync(settingsPath(), "utf-8");
       expect(content).toContain("// This is a project comment");
-      expect(content).toContain('"defaultModel": "opus"');
-      expect(content).toContain('"defaultEffort": "high"');
+      expect(content).toContain('"worktreeSetupCommands": "pnpm build"');
     });
 
-    it("removes keys set to undefined and prunes empty groups", async () => {
+    it("removes worktree setup commands when cleared", async () => {
       await writeProjectSettingsFile(tempDir, {
-        localClaude: {
-          defaultModel: "sonnet",
-          defaultEffort: "high",
-        },
-        localCodex: {
-          permissionMode: "default",
-          modelReasoningEffort: "high",
-        },
+        worktreeSetupCommands: "pnpm install",
       });
 
-      await writeProjectSettingsFile(tempDir, {
-        localClaude: undefined,
-        localCodex: {
-          permissionMode: "default",
-          modelReasoningEffort: "high",
-        },
-      });
+      await writeProjectSettingsFile(tempDir, {});
 
       const content = readFileSync(settingsPath(), "utf-8");
-      expect(content).not.toContain("defaultModel");
-      expect(content).not.toContain("localClaude");
-      expect(content).toContain('"localCodex"');
+      expect(content).not.toContain("worktreeSetupCommands");
     });
 
-    it("removes legacy flat keys on write", async () => {
+    it("removes legacy session settings keys on write", async () => {
       await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
         settingsPath(),
         `{
   "defaultModel": "opus",
-  "defaultEffort": "high",
+  "localClaude": {
+    "defaultModel": "sonnet"
+  },
   "localCodex": {
     "permissionMode": "default"
-  }
+  },
+  "worktreeSetupCommands": "pnpm install"
 }`,
         "utf-8",
       );
 
       await writeProjectSettingsFile(tempDir, {
-        localClaude: {
-          defaultModel: "sonnet",
-        },
+        worktreeSetupCommands: "pnpm build",
       });
 
       const content = readFileSync(settingsPath(), "utf-8");
-      expect(content).not.toContain('"defaultModel": "opus"');
-      expect(content).not.toContain('"defaultEffort": "high"');
-      expect(content).toContain('"localClaude"');
-      expect(content).toContain('"defaultModel": "sonnet"');
+      expect(content).not.toContain("defaultModel");
+      expect(content).not.toContain("localClaude");
+      expect(content).not.toContain("localCodex");
+      expect(content).toContain('"worktreeSetupCommands": "pnpm build"');
     });
   });
 
@@ -253,17 +172,16 @@ describe("project-settings-file", () => {
       await mkdir(path.join(projectA, ".agent-ui"), { recursive: true });
       await writeFile(
         path.join(projectA, ".agent-ui", "settings.jsonc"),
-        '{ "localClaude": { "defaultModel": "opus" } }',
+        '{ "worktreeSetupCommands": "pnpm install" }',
         "utf-8",
       );
 
       await mkdir(projectB, { recursive: true });
-      // project-b has no settings file
 
       await mkdir(path.join(projectC, ".agent-ui"), { recursive: true });
       await writeFile(
         path.join(projectC, ".agent-ui", "settings.jsonc"),
-        '{ "localCodex": { "permissionMode": "yolo" } }',
+        '{ "worktreeSetupCommands": "pnpm build" }',
         "utf-8",
       );
 
@@ -275,10 +193,10 @@ describe("project-settings-file", () => {
 
       expect(map.size).toBe(2);
       expect(map.get(projectA)).toEqual({
-        localClaude: { defaultModel: "opus" },
+        worktreeSetupCommands: "pnpm install",
       });
       expect(map.get(projectC)).toEqual({
-        localCodex: { permissionMode: "yolo" },
+        worktreeSetupCommands: "pnpm build",
       });
       expect(map.has(projectB)).toBe(false);
     });

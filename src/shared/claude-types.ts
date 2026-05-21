@@ -1,9 +1,4 @@
 import { z } from "zod";
-import type {
-  CodexFastMode,
-  CodexModelReasoningEffort,
-  CodexPermissionMode,
-} from "./codex-types";
 
 export const claudeActivityStateSchema = z.enum([
   "idle",
@@ -37,31 +32,8 @@ export const claudeEffortSchema = z.enum(["low", "medium", "high"]);
 
 export type ClaudeEffort = z.infer<typeof claudeEffortSchema>;
 
-export interface LocalClaudeProjectSettings {
-  defaultModel?: ClaudeModel;
-  defaultPermissionMode?: ClaudePermissionMode;
-  defaultEffort?: ClaudeEffort;
-  defaultHaikuModelOverride?: ClaudeModel;
-  defaultSubagentModelOverride?: ClaudeModel;
-  defaultSystemPrompt?: string;
-}
-
-export interface LocalCodexProjectSettings {
-  model?: string;
-  permissionMode?: CodexPermissionMode;
-  modelReasoningEffort?: CodexModelReasoningEffort;
-  fastMode?: CodexFastMode;
-  configOverrides?: string;
-}
-
 export type CursorAgentMode = "plan" | "ask";
 export type CursorAgentPermissionMode = "default" | "yolo";
-
-export interface LocalCursorProjectSettings {
-  model?: string;
-  mode?: CursorAgentMode;
-  permissionMode?: CursorAgentPermissionMode;
-}
 
 export interface GitDiffStats {
   addedLines: number;
@@ -90,9 +62,6 @@ export interface ClaudeProject {
   gitUpstreamDiffStats?: GitUpstreamDiffStats;
   worktreeOriginPath?: string;
   worktreeSetupCommands?: string;
-  localClaude?: LocalClaudeProjectSettings;
-  localCodex?: LocalCodexProjectSettings;
-  localCursor?: LocalCursorProjectSettings;
   /** Ephemeral: UI + main reject mutations while a worktree delete is in flight */
   interactionDisabled?: boolean;
   /** Ephemeral: one-shot toast payload for renderer (not persisted) */

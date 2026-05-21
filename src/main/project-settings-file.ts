@@ -2,64 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { applyEdits, modify, type ParseError, parse } from "jsonc-parser";
 import z from "zod";
-import {
-  claudeEffortSchema,
-  claudeModelSchema,
-  claudePermissionModeSchema,
-} from "../shared/claude-types";
-import {
-  codexFastModeSchema,
-  codexModelReasoningEffortSchema,
-  codexPermissionModeSchema,
-} from "../shared/codex-types";
 import log from "./logger";
-
-const cursorAgentModeSchema = z.enum(["plan", "ask"]);
-const cursorAgentPermissionModeSchema = z.enum(["default", "yolo"]);
 
 const SETTINGS_DIR = ".agent-ui";
 const SETTINGS_FILE = "settings.jsonc";
 
-const localClaudeProjectSettingsSchema = z.object({
-  defaultModel: claudeModelSchema.optional().catch(undefined),
-  defaultPermissionMode: claudePermissionModeSchema.optional().catch(undefined),
-  defaultEffort: claudeEffortSchema.optional().catch(undefined),
-  defaultHaikuModelOverride: claudeModelSchema.optional().catch(undefined),
-  defaultSubagentModelOverride: claudeModelSchema.optional().catch(undefined),
-  defaultSystemPrompt: z.string().optional().catch(undefined),
-});
-
-const localCodexProjectSettingsSchema = z.object({
-  model: z.string().optional().catch(undefined),
-  permissionMode: codexPermissionModeSchema.optional().catch(undefined),
-  modelReasoningEffort: codexModelReasoningEffortSchema
-    .optional()
-    .catch(undefined),
-  fastMode: codexFastModeSchema.optional().catch(undefined),
-  configOverrides: z.string().optional().catch(undefined),
-});
-
-const localCursorProjectSettingsSchema = z.object({
-  model: z.string().optional().catch(undefined),
-  mode: cursorAgentModeSchema.optional().catch(undefined),
-  permissionMode: cursorAgentPermissionModeSchema.optional().catch(undefined),
-});
-
-function toOptionalSettings<T extends Record<string, unknown>>(
-  value: T | undefined,
-): T | undefined {
-  if (!value) {
-    return undefined;
-  }
-  return Object.values(value).some((item) => item !== undefined)
-    ? value
-    : undefined;
-}
-
 export const projectSettingsFileSchema = z.object({
-  localClaude: localClaudeProjectSettingsSchema.optional().catch(undefined),
-  localCodex: localCodexProjectSettingsSchema.optional().catch(undefined),
-  localCursor: localCursorProjectSettingsSchema.optional().catch(undefined),
   worktreeSetupCommands: z.string().optional().catch(undefined),
 });
 
@@ -131,6 +79,9 @@ const LEGACY_SETTINGS_KEYS = [
   "defaultHaikuModelOverride",
   "defaultSubagentModelOverride",
   "defaultSystemPrompt",
+  "localClaude",
+  "localCodex",
+  "localCursor",
 ] as const;
 
 export async function writeProjectSettingsFile(
@@ -147,30 +98,25 @@ export async function writeProjectSettingsFile(
     content = "{}";
   }
 
-  const localClaude = toOptionalSettings(settings.localClaude);
-  const localCodex = toOptionalSettings(settings.localCodex);
-  const localCursor = toOptionalSettings(settings.localCursor);
   const worktreeSetupCommands = settings.worktreeSetupCommands ?? undefined;
 
-  for (const [key, value] of [
-    ["localClaude", localClaude],
-    ["localCodex", localCodex],
-    ["localCursor", localCursor],
-    ["worktreeSetupCommands", worktreeSetupCommands],
-  ] as const) {
-    const edits = modify(content, [key], value ?? undefined, {
+  const edits = modify(
+    content,
+    ["worktreeSetupCommands"],
+    worktreeSetupCommands,
+    {
       isArrayInsertion: false,
       formattingOptions: { tabSize: 2, insertSpaces: true },
-    });
-    content = applyEdits(content, edits);
-  }
+    },
+  );
+  content = applyEdits(content, edits);
 
   for (const key of LEGACY_SETTINGS_KEYS) {
-    const edits = modify(content, [key], undefined, {
+    const legacyEdits = modify(content, [key], undefined, {
       isArrayInsertion: false,
       formattingOptions: { tabSize: 2, insertSpaces: true },
     });
-    content = applyEdits(content, edits);
+    content = applyEdits(content, legacyEdits);
   }
 
   await mkdir(dir, { recursive: true });

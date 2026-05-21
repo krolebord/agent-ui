@@ -134,8 +134,7 @@ export function SessionSidebar() {
     mutationFn: async () => {
       const cwd = await orpc.fs.selectFolder.call();
       if (!cwd) return;
-      const { path } = await orpc.projects.addProject.call({ path: cwd });
-      setOpenProjectCwd(path);
+      await orpc.projects.addProject.call({ path: cwd });
     },
   });
 

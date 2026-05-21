@@ -19,6 +19,7 @@ import {
   useEffect,
   useEffectEvent,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { toast } from "sonner";
@@ -144,6 +145,28 @@ export function SessionHeader({ session }: { session: Session }) {
     session.status;
     refreshGitStats();
   }, [session.sessionId, session.status]);
+
+  const wasAppUnfocusedRef = useRef(false);
+
+  useEffect(() => {
+    const handleBlur = () => {
+      wasAppUnfocusedRef.current = true;
+    };
+    const handleFocus = () => {
+      if (!wasAppUnfocusedRef.current) {
+        return;
+      }
+      wasAppUnfocusedRef.current = false;
+      refreshGitStats();
+    };
+
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, []);
 
   const openFolderInAppMutation = useMutation({
     mutationFn: async (app: OpenInAppTarget) => {

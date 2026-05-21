@@ -39,17 +39,22 @@ import {
   getProjectDisplayName,
   MODEL_OPTIONS,
 } from "@renderer/services/terminal-session-selectors";
-import type {
-  ClaudeEffort,
-  ClaudeModel,
-  ClaudePermissionMode,
-} from "@shared/claude-types";
+import type { ClaudeEffort, ClaudeModel } from "@shared/claude-types";
 import type {
   CodexFastMode,
   CodexModelReasoningEffort,
-  CodexPermissionMode,
 } from "@shared/codex-types";
 import { cursorModels } from "@shared/cursor-models";
+import {
+  type LastClaudeSessionOptions,
+  type LastCodexSessionOptions,
+  type LastCursorSessionOptions,
+  type LastSessionOptions,
+  type LastSessionType,
+  resolveClaudeSessionOptions,
+  resolveCodexSessionOptions,
+  resolveCursorSessionOptions,
+} from "@shared/last-session-options";
 import {
   formatForDisplay,
   type Hotkey,
@@ -58,7 +63,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, ChevronsUpDown } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import {
@@ -80,10 +85,8 @@ export const useNewSessionDialogStore = create(
   ),
 );
 
-type SessionType = "claude" | "codex" | "cursorAgent";
-
 const SESSION_TYPE_OPTIONS: {
-  value: SessionType;
+  value: LastSessionType;
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }[] = [
@@ -117,10 +120,72 @@ const CLAUDE_EFFORT_OPTIONS: { value: ClaudeEffort; label: string }[] = [
 
 const switchSessionTypeHotkey: Hotkey = "Alt+Tab";
 
+type CursorAgentMode = "default" | "plan" | "ask";
+
+const CURSOR_AGENT_MODE_OPTIONS: {
+  value: CursorAgentMode;
+  label: string;
+}[] = [
+  { value: "default", label: "Default" },
+  { value: "plan", label: "Plan" },
+  { value: "ask", label: "Ask" },
+];
+
+function cycleCursorAgentMode(current: CursorAgentMode): CursorAgentMode {
+  const index = CURSOR_AGENT_MODE_OPTIONS.findIndex(
+    (option) => option.value === current,
+  );
+  return (
+    CURSOR_AGENT_MODE_OPTIONS[(index + 1) % CURSOR_AGENT_MODE_OPTIONS.length]
+      ?.value ?? "default"
+  );
+}
+
+const cycleCursorModeHotkey: Hotkey = "Shift+Tab";
+
+function toStoredCursorMode(
+  mode: CursorAgentMode,
+): LastCursorSessionOptions["mode"] {
+  return mode === "default" ? undefined : mode;
+}
+
+function toCursorAgentMode(
+  mode: LastCursorSessionOptions["mode"],
+): CursorAgentMode {
+  return mode ?? "default";
+}
+
+function buildLastSessionOptions(input: {
+  sessionType: LastSessionType;
+  claude: LastClaudeSessionOptions;
+  codex: LastCodexSessionOptions;
+  cursor: LastCursorSessionOptions;
+}): LastSessionOptions {
+  return {
+    lastSessionType: input.sessionType,
+    claude: {
+      ...input.claude,
+      systemPrompt: input.claude.systemPrompt?.trim() || undefined,
+    },
+    codex: {
+      ...input.codex,
+      model: input.codex.model?.trim() || undefined,
+      configOverrides: input.codex.configOverrides?.trim() || undefined,
+    },
+    cursor: {
+      ...input.cursor,
+      model: input.cursor.model?.trim() || undefined,
+    },
+  };
+}
+
 export function NewSessionDialog() {
   const openProjectCwd = useNewSessionDialogStore((s) => s.openProjectCwd);
   const setOpenProjectCwd = useNewSessionDialogStore(
     (s) => s.setOpenProjectCwd,
+  );
+  const storedLastSessionOptions = useAppState(
+    (state) => state.appSettings.lastSessionOptions,
   );
   const project = useAppState((state) => {
     if (!openProjectCwd) {
@@ -135,7 +200,65 @@ export function NewSessionDialog() {
     }
   }, [openProjectCwd, project?.interactionDisabled, setOpenProjectCwd]);
 
-  const [sessionType, setSessionType] = useState<SessionType>("claude");
+  const [sessionType, setSessionType] = useState<LastSessionType>("claude");
+  const [initialPrompt, setInitialPrompt] = useState("");
+  const [sessionName, setSessionName] = useState("");
+  const [claudeOptions, setClaudeOptions] = useState<LastClaudeSessionOptions>(
+    resolveClaudeSessionOptions(undefined),
+  );
+  const [codexOptions, setCodexOptions] = useState<LastCodexSessionOptions>(
+    resolveCodexSessionOptions(undefined),
+  );
+  const [cursorOptions, setCursorOptions] = useState<LastCursorSessionOptions>(
+    resolveCursorSessionOptions(undefined),
+  );
+
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (!openProjectCwd) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) {
+      return;
+    }
+    wasOpenRef.current = true;
+
+    setSessionType(storedLastSessionOptions.lastSessionType ?? "claude");
+    setInitialPrompt("");
+    setSessionName("");
+    setClaudeOptions(
+      resolveClaudeSessionOptions(storedLastSessionOptions.claude),
+    );
+    setCodexOptions(resolveCodexSessionOptions(storedLastSessionOptions.codex));
+    setCursorOptions(
+      resolveCursorSessionOptions(storedLastSessionOptions.cursor),
+    );
+  }, [openProjectCwd, storedLastSessionOptions]);
+
+  const persistLastSessionOptions = useMutation(
+    orpc.appSettings.setLastSessionOptions.mutationOptions(),
+  );
+
+  const persistAndClose = useCallback(() => {
+    persistLastSessionOptions.mutate(
+      buildLastSessionOptions({
+        sessionType,
+        claude: claudeOptions,
+        codex: codexOptions,
+        cursor: cursorOptions,
+      }),
+    );
+    setOpenProjectCwd(null);
+  }, [
+    claudeOptions,
+    codexOptions,
+    cursorOptions,
+    persistLastSessionOptions,
+    sessionType,
+    setOpenProjectCwd,
+  ]);
 
   useHotkey(
     switchSessionTypeHotkey,
@@ -161,17 +284,12 @@ export function NewSessionDialog() {
   const projectPath = project?.path ?? openProjectCwd;
   const projectName = project ? getProjectDisplayName(project) : projectPath;
 
-  const closeDialog = () => {
-    setSessionType("claude");
-    setOpenProjectCwd(null);
-  };
-
   return (
     <Dialog
       open
       onOpenChange={(isOpen) => {
         if (!isOpen) {
-          closeDialog();
+          persistAndClose();
         }
       }}
     >
@@ -198,7 +316,7 @@ export function NewSessionDialog() {
           value={sessionType}
           onValueChange={(value) => {
             if (value) {
-              setSessionType(value as SessionType);
+              setSessionType(value as LastSessionType);
             }
           }}
         >
@@ -223,51 +341,66 @@ export function NewSessionDialog() {
         </ToggleGroup>
 
         {sessionType === "claude" ? (
-          <LocalClaudeSessionForm key={`claude-${openProjectCwd}`} />
+          <LocalClaudeSessionForm
+            projectPath={projectPath}
+            initialPrompt={initialPrompt}
+            setInitialPrompt={setInitialPrompt}
+            sessionName={sessionName}
+            setSessionName={setSessionName}
+            options={claudeOptions}
+            setOptions={setClaudeOptions}
+            onClose={persistAndClose}
+          />
         ) : sessionType === "codex" ? (
-          <CodexSessionForm key={`codex-${openProjectCwd}`} />
+          <CodexSessionForm
+            projectPath={projectPath}
+            initialPrompt={initialPrompt}
+            setInitialPrompt={setInitialPrompt}
+            sessionName={sessionName}
+            setSessionName={setSessionName}
+            options={codexOptions}
+            setOptions={setCodexOptions}
+            onClose={persistAndClose}
+          />
         ) : (
-          <CursorAgentSessionForm key={`cursor-agent-${openProjectCwd}`} />
+          <CursorAgentSessionForm
+            projectPath={projectPath}
+            initialPrompt={initialPrompt}
+            setInitialPrompt={setInitialPrompt}
+            sessionName={sessionName}
+            setSessionName={setSessionName}
+            options={cursorOptions}
+            setOptions={setCursorOptions}
+            onClose={persistAndClose}
+          />
         )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function LocalClaudeSessionForm() {
-  const openProjectCwd = useNewSessionDialogStore(
-    (s) => s.openProjectCwd,
-  ) as string;
-  const setOpenProjectCwd = useNewSessionDialogStore(
-    (s) => s.setOpenProjectCwd,
-  );
-  const project = useAppState(
-    (state) =>
-      state.projects.find((item) => item.path === openProjectCwd) ?? null,
-  );
-  const projectPath = project?.path ?? openProjectCwd;
-  const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
+interface SessionFormProps<TOptions> {
+  projectPath: string;
+  initialPrompt: string;
+  setInitialPrompt: (value: string) => void;
+  sessionName: string;
+  setSessionName: (value: string) => void;
+  options: TOptions;
+  setOptions: (value: TOptions | ((current: TOptions) => TOptions)) => void;
+  onClose: () => void;
+}
 
-  const [initialPrompt, setInitialPrompt] = useState("");
-  const [sessionName, setSessionName] = useState("");
-  const [model, setModel] = useState<ClaudeModel>(
-    project?.localClaude?.defaultModel ?? "opus",
-  );
-  const [effort, setEffort] = useState<ClaudeEffort | undefined>(
-    project?.localClaude?.defaultEffort,
-  );
-  const [permissionMode, setPermissionMode] = useState<ClaudePermissionMode>(
-    project?.localClaude?.defaultPermissionMode ?? "default",
-  );
-  const [haikuModelOverride, setHaikuModelOverride] = useState<
-    ClaudeModel | undefined
-  >(project?.localClaude?.defaultHaikuModelOverride);
-  const [subagentModelOverride, setSubagentModelOverride] = useState<
-    ClaudeModel | undefined
-  >(project?.localClaude?.defaultSubagentModelOverride);
-  const [systemPrompt, setSystemPrompt] = useState(
-    project?.localClaude?.defaultSystemPrompt ?? "",
-  );
+function LocalClaudeSessionForm({
+  projectPath,
+  initialPrompt,
+  setInitialPrompt,
+  sessionName,
+  setSessionName,
+  options,
+  setOptions,
+  onClose,
+}: SessionFormProps<LastClaudeSessionOptions>) {
+  const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleError = (error: unknown) => {
@@ -282,7 +415,7 @@ function LocalClaudeSessionForm() {
     orpc.sessions.localClaude.startSession.mutationOptions({
       onSuccess: (sessionId) => {
         setActiveSessionId(sessionId);
-        setOpenProjectCwd(null);
+        onClose();
       },
       onError: handleError,
     }),
@@ -298,12 +431,12 @@ function LocalClaudeSessionForm() {
           rows,
           initialPrompt: initialPrompt || undefined,
           sessionName: sessionName || undefined,
-          model,
-          effort,
-          haikuModelOverride,
-          subagentModelOverride,
-          systemPrompt: systemPrompt || undefined,
-          permissionMode,
+          model: options.model,
+          effort: options.effort,
+          haikuModelOverride: options.haikuModelOverride,
+          subagentModelOverride: options.subagentModelOverride,
+          systemPrompt: options.systemPrompt || undefined,
+          permissionMode: options.permissionMode,
         });
       },
       onError: handleError,
@@ -356,9 +489,9 @@ function LocalClaudeSessionForm() {
 
       <PermissionModeToggleGroup
         label="Permission mode"
-        permissionMode={permissionMode}
+        permissionMode={options.permissionMode}
         onPermissionModeChange={(value) => {
-          setPermissionMode(value);
+          setOptions((current) => ({ ...current, permissionMode: value }));
         }}
       />
 
@@ -366,9 +499,12 @@ function LocalClaudeSessionForm() {
         <div className="min-w-0 flex-1 space-y-2">
           <Label>Model</Label>
           <Select
-            value={model}
+            value={options.model}
             onValueChange={(value) => {
-              setModel(value as ClaudeModel);
+              setOptions((current) => ({
+                ...current,
+                model: value as ClaudeModel,
+              }));
             }}
           >
             <SelectTrigger className="w-full">
@@ -387,9 +523,12 @@ function LocalClaudeSessionForm() {
         <div className="w-fit shrink-0 space-y-2">
           <Label className="whitespace-nowrap">Effort</Label>
           <Select
-            value={effort ?? "no"}
+            value={options.effort ?? "no"}
             onValueChange={(value) => {
-              setEffort(value === "no" ? undefined : (value as ClaudeEffort));
+              setOptions((current) => ({
+                ...current,
+                effort: value === "no" ? undefined : (value as ClaudeEffort),
+              }));
             }}
           >
             <SelectTrigger className="w-auto min-w-24 whitespace-nowrap">
@@ -441,11 +580,13 @@ function LocalClaudeSessionForm() {
           <div className="space-y-2">
             <Label>Override haiku model</Label>
             <Select
-              value={haikuModelOverride ?? "no"}
+              value={options.haikuModelOverride ?? "no"}
               onValueChange={(value) => {
-                setHaikuModelOverride(
-                  value === "no" ? undefined : (value as ClaudeModel),
-                );
+                setOptions((current) => ({
+                  ...current,
+                  haikuModelOverride:
+                    value === "no" ? undefined : (value as ClaudeModel),
+                }));
               }}
             >
               <SelectTrigger className="w-full">
@@ -465,11 +606,13 @@ function LocalClaudeSessionForm() {
           <div className="space-y-2">
             <Label>Override subagent model</Label>
             <Select
-              value={subagentModelOverride ?? "no"}
+              value={options.subagentModelOverride ?? "no"}
               onValueChange={(value) => {
-                setSubagentModelOverride(
-                  value === "no" ? undefined : (value as ClaudeModel),
-                );
+                setOptions((current) => ({
+                  ...current,
+                  subagentModelOverride:
+                    value === "no" ? undefined : (value as ClaudeModel),
+                }));
               }}
             >
               <SelectTrigger className="w-full">
@@ -493,9 +636,12 @@ function LocalClaudeSessionForm() {
             <Textarea
               id="new-session-system-prompt"
               placeholder="Custom system prompt passed via --system-prompt"
-              value={systemPrompt}
+              value={options.systemPrompt ?? ""}
               onChange={(event) => {
-                setSystemPrompt(event.target.value);
+                setOptions((current) => ({
+                  ...current,
+                  systemPrompt: event.target.value,
+                }));
               }}
               rows={3}
             />
@@ -514,7 +660,7 @@ function LocalClaudeSessionForm() {
         <Button
           type="button"
           variant="outline"
-          onClick={() => setOpenProjectCwd(null)}
+          onClick={onClose}
           disabled={isPending}
         >
           Cancel
@@ -527,36 +673,17 @@ function LocalClaudeSessionForm() {
   );
 }
 
-function CodexSessionForm() {
-  const openProjectCwd = useNewSessionDialogStore(
-    (s) => s.openProjectCwd,
-  ) as string;
-  const setOpenProjectCwd = useNewSessionDialogStore(
-    (s) => s.setOpenProjectCwd,
-  );
-  const project = useAppState(
-    (state) =>
-      state.projects.find((item) => item.path === openProjectCwd) ?? null,
-  );
-  const projectPath = project?.path ?? openProjectCwd;
+function CodexSessionForm({
+  projectPath,
+  initialPrompt,
+  setInitialPrompt,
+  sessionName,
+  setSessionName,
+  options,
+  setOptions,
+  onClose,
+}: SessionFormProps<LastCodexSessionOptions>) {
   const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
-
-  const [initialPrompt, setInitialPrompt] = useState("");
-  const [sessionName, setSessionName] = useState("");
-  const [model, setModel] = useState(project?.localCodex?.model ?? "");
-  const [modelReasoningEffort, setModelReasoningEffort] =
-    useState<CodexModelReasoningEffort>(
-      project?.localCodex?.modelReasoningEffort ?? "high",
-    );
-  const [fastMode, setFastMode] = useState<CodexFastMode>(
-    project?.localCodex?.fastMode ?? "default",
-  );
-  const [permissionMode, setPermissionMode] = useState<CodexPermissionMode>(
-    project?.localCodex?.permissionMode ?? "default",
-  );
-  const [configOverrides, setConfigOverrides] = useState(
-    project?.localCodex?.configOverrides ?? "",
-  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleError = (error: unknown) => {
@@ -571,7 +698,7 @@ function CodexSessionForm() {
     orpc.sessions.codex.startSession.mutationOptions({
       onSuccess: (result) => {
         setActiveSessionId(result.sessionId);
-        setOpenProjectCwd(null);
+        onClose();
       },
       onError: handleError,
     }),
@@ -586,12 +713,12 @@ function CodexSessionForm() {
           cols,
           rows,
           sessionName: sessionName || undefined,
-          model: model || undefined,
-          modelReasoningEffort,
-          fastMode,
-          permissionMode,
+          model: options.model || undefined,
+          modelReasoningEffort: options.modelReasoningEffort,
+          fastMode: options.fastMode,
+          permissionMode: options.permissionMode,
           initialPrompt: initialPrompt || undefined,
-          configOverrides: configOverrides || undefined,
+          configOverrides: options.configOverrides || undefined,
         });
       },
       onError: handleError,
@@ -644,8 +771,10 @@ function CodexSessionForm() {
 
       <CodexPermissionModeToggleGroup
         label="Permission mode"
-        permissionMode={permissionMode}
-        onPermissionModeChange={setPermissionMode}
+        permissionMode={options.permissionMode}
+        onPermissionModeChange={(value) => {
+          setOptions((current) => ({ ...current, permissionMode: value }));
+        }}
       />
 
       <div className="flex items-start gap-3">
@@ -654,9 +783,12 @@ function CodexSessionForm() {
           <Input
             id="new-codex-model"
             placeholder="gpt-5.3-codex"
-            value={model}
+            value={options.model ?? ""}
             onChange={(event) => {
-              setModel(event.target.value);
+              setOptions((current) => ({
+                ...current,
+                model: event.target.value,
+              }));
             }}
           />
         </div>
@@ -664,9 +796,12 @@ function CodexSessionForm() {
         <div className="w-fit shrink-0 space-y-2">
           <Label className="whitespace-nowrap">Effort</Label>
           <Select
-            value={modelReasoningEffort}
+            value={options.modelReasoningEffort}
             onValueChange={(value) => {
-              setModelReasoningEffort(value as CodexModelReasoningEffort);
+              setOptions((current) => ({
+                ...current,
+                modelReasoningEffort: value as CodexModelReasoningEffort,
+              }));
             }}
           >
             <SelectTrigger className="w-auto min-w-24 whitespace-nowrap">
@@ -689,9 +824,12 @@ function CodexSessionForm() {
         <div className="w-fit shrink-0 space-y-2">
           <Label className="whitespace-nowrap">Fast mode</Label>
           <Select
-            value={fastMode}
+            value={options.fastMode}
             onValueChange={(value) => {
-              setFastMode(value as CodexFastMode);
+              setOptions((current) => ({
+                ...current,
+                fastMode: value as CodexFastMode,
+              }));
             }}
           >
             <SelectTrigger className="w-auto min-w-24 whitespace-nowrap">
@@ -746,9 +884,12 @@ function CodexSessionForm() {
             <Textarea
               id="new-codex-config-overrides"
               placeholder="Each line becomes a separate --config argument"
-              value={configOverrides}
+              value={options.configOverrides ?? ""}
               onChange={(event) => {
-                setConfigOverrides(event.target.value);
+                setOptions((current) => ({
+                  ...current,
+                  configOverrides: event.target.value,
+                }));
               }}
               rows={3}
             />
@@ -767,7 +908,7 @@ function CodexSessionForm() {
         <Button
           type="button"
           variant="outline"
-          onClick={() => setOpenProjectCwd(null)}
+          onClick={onClose}
           disabled={isPending}
         >
           Cancel
@@ -780,59 +921,29 @@ function CodexSessionForm() {
   );
 }
 
-type CursorAgentMode = "default" | "plan" | "ask";
-
-const CURSOR_AGENT_MODE_OPTIONS: {
-  value: CursorAgentMode;
-  label: string;
-  description: string;
-}[] = [
-  { value: "default", label: "Default", description: "Full agent mode" },
-  { value: "plan", label: "Plan", description: "Read-only planning" },
-  { value: "ask", label: "Ask", description: "Q&A, no edits" },
-];
-
-function cycleCursorAgentMode(current: CursorAgentMode): CursorAgentMode {
-  const index = CURSOR_AGENT_MODE_OPTIONS.findIndex(
-    (option) => option.value === current,
-  );
-  return (
-    CURSOR_AGENT_MODE_OPTIONS[(index + 1) % CURSOR_AGENT_MODE_OPTIONS.length]
-      ?.value ?? "default"
-  );
-}
-
-const cycleCursorModeHotkey: Hotkey = "Shift+Tab";
-
-function CursorAgentSessionForm() {
-  const openProjectCwd = useNewSessionDialogStore(
-    (s) => s.openProjectCwd,
-  ) as string;
-  const setOpenProjectCwd = useNewSessionDialogStore(
-    (s) => s.setOpenProjectCwd,
-  );
-  const project = useAppState(
-    (state) =>
-      state.projects.find((item) => item.path === openProjectCwd) ?? null,
-  );
-  const projectPath = project?.path ?? openProjectCwd;
+function CursorAgentSessionForm({
+  projectPath,
+  initialPrompt,
+  setInitialPrompt,
+  sessionName,
+  setSessionName,
+  options,
+  setOptions,
+  onClose,
+}: SessionFormProps<LastCursorSessionOptions>) {
   const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
-
-  const [initialPrompt, setInitialPrompt] = useState("");
-  const [sessionName, setSessionName] = useState("");
-  const [model, setModel] = useState(project?.localCursor?.model ?? "");
-  const [mode, setMode] = useState<CursorAgentMode>(
-    project?.localCursor?.mode ?? "default",
-  );
-  const [permissionMode, setPermissionMode] = useState<"default" | "yolo">(
-    project?.localCursor?.permissionMode ?? "default",
-  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const mode = toCursorAgentMode(options.mode);
 
   useHotkey(
     cycleCursorModeHotkey,
     () => {
-      setMode((current) => cycleCursorAgentMode(current));
+      setOptions((current) => ({
+        ...current,
+        mode: toStoredCursorMode(
+          cycleCursorAgentMode(toCursorAgentMode(current.mode)),
+        ),
+      }));
     },
     {
       ignoreInputs: false,
@@ -851,7 +962,7 @@ function CursorAgentSessionForm() {
     orpc.sessions.cursorAgent.startSession.mutationOptions({
       onSuccess: (result) => {
         setActiveSessionId(result.sessionId);
-        setOpenProjectCwd(null);
+        onClose();
       },
       onError: handleError,
     }),
@@ -866,9 +977,9 @@ function CursorAgentSessionForm() {
           cols,
           rows,
           sessionName: sessionName || undefined,
-          model: model || undefined,
-          mode: mode === "default" ? undefined : mode,
-          permissionMode: permissionMode,
+          model: options.model || undefined,
+          mode: options.mode,
+          permissionMode: options.permissionMode,
           initialPrompt: initialPrompt || undefined,
         });
       },
@@ -933,7 +1044,10 @@ function CursorAgentSessionForm() {
           value={mode}
           onValueChange={(value) => {
             if (value) {
-              setMode(value as CursorAgentMode);
+              setOptions((current) => ({
+                ...current,
+                mode: toStoredCursorMode(value as CursorAgentMode),
+              }));
             }
           }}
           className="w-full"
@@ -954,9 +1068,12 @@ function CursorAgentSessionForm() {
         <div className="min-w-0 flex-1 space-y-2">
           <Label>Model (optional)</Label>
           <Select
-            value={model || "auto"}
+            value={options.model || "auto"}
             onValueChange={(value) => {
-              setModel(value === "auto" ? "" : value);
+              setOptions((current) => ({
+                ...current,
+                model: value === "auto" ? undefined : value,
+              }));
             }}
           >
             <SelectTrigger className="w-full">
@@ -975,9 +1092,13 @@ function CursorAgentSessionForm() {
         <div className="w-fit shrink-0 space-y-2">
           <Label className="whitespace-nowrap">Permission mode</Label>
           <Select
-            value={permissionMode}
+            value={options.permissionMode}
             onValueChange={(value) => {
-              setPermissionMode(value as "default" | "yolo");
+              setOptions((current) => ({
+                ...current,
+                permissionMode:
+                  value as LastCursorSessionOptions["permissionMode"],
+              }));
             }}
           >
             <SelectTrigger className="w-auto min-w-28 whitespace-nowrap">
@@ -1035,7 +1156,7 @@ function CursorAgentSessionForm() {
         <Button
           type="button"
           variant="outline"
-          onClick={() => setOpenProjectCwd(null)}
+          onClick={onClose}
           disabled={isPending}
         >
           Cancel
