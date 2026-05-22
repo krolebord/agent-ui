@@ -7,7 +7,6 @@ import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { DesktopIntegrationManager } from "./desktop-integration-manager";
-import { generateCodexSessionTitle } from "./generate-codex-session-title";
 import log from "./logger";
 import { PersistenceOrchestrator } from "./persistence-orchestrator";
 import { ProjectGitService } from "./project-git-service";
@@ -23,7 +22,6 @@ import {
 } from "./project-terminals";
 import { SessionsServiceNew } from "./session-service";
 import { SessionStateFileManager } from "./session-state-file-manager";
-import { SessionTitleManager } from "./session-title-manager";
 import { CodexSessionsManager } from "./sessions/codex.session";
 import { CursorAgentSessionsManager } from "./sessions/cursor-agent.session";
 import { LocalTerminalSessionsManager } from "./sessions/local-terminal.session";
@@ -36,6 +34,7 @@ import { WorktreeSetupSessionsManager } from "./sessions/worktree-setup.session"
 import { ensureShellIntegrationScripts } from "./shell-integration/scripts";
 import { StateOrchestrator } from "./state-orchestrator";
 import { TerminalManager } from "./terminal-manager";
+import { TitleGenerationService } from "./title-generation-service";
 
 const STORAGE_SCHEMA_VERSION = 3;
 
@@ -125,11 +124,6 @@ export async function createServices(options: CreateServicesOptions) {
     initializeShellIntegration(userDataPath),
   ]);
 
-  const titleManager = new SessionTitleManager();
-  const codexTitleManager = new SessionTitleManager({
-    generateTitle: generateCodexSessionTitle,
-  });
-
   const stateFileManager = new SessionStateFileManager(userDataPath);
   const cursorSessionLogFileManager = new CursorSessionLogFileManager(
     userDataPath,
@@ -143,6 +137,10 @@ export async function createServices(options: CreateServicesOptions) {
   persistenceService.registerAndHydrate(
     defineAppSettingsPersistence(appSettingsState),
   );
+
+  const titleGenerationService = new TitleGenerationService({
+    getSettings: () => appSettingsState.state.titleGeneration,
+  });
 
   const projectsState = defineProjectState();
   persistenceService.registerAndHydrate(
@@ -182,7 +180,7 @@ export async function createServices(options: CreateServicesOptions) {
     pluginDir: managedPluginDir,
     pluginWarning,
     terminalManager: new TerminalManager(),
-    titleManager,
+    titleGeneration: titleGenerationService,
     stateFileManager,
     state: sessionsState,
   });
@@ -200,11 +198,12 @@ export async function createServices(options: CreateServicesOptions) {
   const codexSessionsManager = new CodexSessionsManager({
     state: sessionsState,
     terminalManager,
-    titleManager: codexTitleManager,
+    titleGeneration: titleGenerationService,
   });
   const cursorAgentSessionsManager = new CursorAgentSessionsManager({
     state: sessionsState,
     terminalManager,
+    titleGeneration: titleGenerationService,
     cursorConfigDir,
     sessionLogFileManager: cursorSessionLogFileManager,
     cursorHooksWarning,

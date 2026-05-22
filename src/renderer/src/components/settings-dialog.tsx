@@ -8,11 +8,21 @@ import {
   DialogTitle,
 } from "@renderer/components/ui/dialog";
 import { Kbd, KbdGroup } from "@renderer/components/ui/kbd";
+import { Label } from "@renderer/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@renderer/components/ui/select";
 import { Switch } from "@renderer/components/ui/switch";
 import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
 import { orpc } from "@renderer/orpc-client";
+import { cursorModels } from "@shared/cursor-models";
+import { titleGenerationProviders } from "@shared/title-generation";
 import { useMutation } from "@tanstack/react-query";
-import { Bug, FolderOpen, Keyboard, LoaderCircle } from "lucide-react";
+import { Bug, FolderOpen, Keyboard, LoaderCircle, Type } from "lucide-react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import { useAppState } from "./sync-state-provider";
@@ -53,6 +63,8 @@ export function SettingsDialog() {
           <PreventSleepToggle />
           <DockBadgeForAttentionToggle />
           <DockBounceOnAttentionToggle />
+
+          <TitleGenerationSettings />
 
           <OpenLogFolder />
           <OpenStatePluginFolder />
@@ -230,6 +242,83 @@ function DockBadgeForAttentionToggle() {
         checked={enabled}
         onCheckedChange={(checked) => mutate({ enabled: checked })}
       />
+    </div>
+  );
+}
+
+const titleGenerationProviderLabels: Record<
+  (typeof titleGenerationProviders)[number],
+  string
+> = {
+  cursor: "Cursor",
+};
+
+function TitleGenerationSettings() {
+  const titleGeneration = useAppState((s) => s.appSettings.titleGeneration);
+  const { mutate } = useMutation(
+    orpc.appSettings.setTitleGeneration.mutationOptions(),
+  );
+
+  return (
+    <div className="py-2.5">
+      <div className="mb-2 flex items-center gap-2">
+        <Type className="size-3.5 text-muted-foreground" />
+        <div className="text-xs font-medium text-muted-foreground">
+          Session titles
+        </div>
+      </div>
+      <div className="space-y-3">
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Provider</Label>
+          <Select
+            value={titleGeneration.provider}
+            onValueChange={(value) => {
+              mutate({
+                provider: value as typeof titleGeneration.provider,
+                model: titleGeneration.model,
+              });
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {titleGenerationProviders.map((provider) => (
+                <SelectItem key={provider} value={provider}>
+                  {titleGenerationProviderLabels[provider]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Model</Label>
+          <Select
+            value={titleGeneration.model}
+            onValueChange={(model) => {
+              mutate({
+                provider: titleGeneration.provider,
+                model,
+              });
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {cursorModels.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Used to auto-generate titles for unnamed sessions from the first
+            prompt
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

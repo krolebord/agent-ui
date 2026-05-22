@@ -4,8 +4,8 @@ import {
   SessionsServiceNew,
 } from "../../src/main/session-service";
 import type { SessionStateFileManager } from "../../src/main/session-state-file-manager";
-import type { SessionTitleManager } from "../../src/main/session-title-manager";
 import type { SessionServiceState } from "../../src/main/sessions/state";
+import type { TitleGenerationService } from "../../src/main/title-generation-service";
 
 const terminalSessionSpies = vi.hoisted(() => {
   return {
@@ -99,9 +99,9 @@ function createService() {
     },
   } as unknown as SessionServiceState;
 
-  const titleManager = {
+  const titleGeneration = {
     forget: vi.fn(),
-    maybeGenerate: vi.fn(),
+    requestFromPrompt: vi.fn(),
   };
   const stateFileManager = {
     create: vi.fn().mockResolvedValue("/tmp/test-state.ndjson"),
@@ -111,12 +111,12 @@ function createService() {
   const service = new SessionsServiceNew({
     pluginDir: null,
     pluginWarning: null,
-    titleManager: titleManager as unknown as SessionTitleManager,
+    titleGeneration: titleGeneration as unknown as TitleGenerationService,
     stateFileManager: stateFileManager as unknown as SessionStateFileManager,
     state: sessionsState,
   });
 
-  return { service, state, titleManager, stateFileManager };
+  return { service, state, titleGeneration, stateFileManager };
 }
 
 type StartNewSessionInput = Parameters<
@@ -213,11 +213,13 @@ describe("SessionsServiceNew", () => {
     });
 
     it("triggers title generation from first prompt submit for unnamed sessions", async () => {
-      const { service, state, titleManager } = createService();
+      const { service, state, titleGeneration } = createService();
 
-      vi.mocked(titleManager.maybeGenerate).mockImplementation((params) => {
-        params.onTitleReady("Generated from prompt");
-      });
+      vi.mocked(titleGeneration.requestFromPrompt).mockImplementation(
+        (params) => {
+          params.setTitle("Generated from prompt");
+        },
+      );
 
       const sessionId = await service.startNewSession(makeStartInput());
 
@@ -227,8 +229,8 @@ describe("SessionsServiceNew", () => {
         prompt: "  Draft release notes  ",
       });
 
-      expect(titleManager.maybeGenerate).toHaveBeenCalledTimes(1);
-      expect(titleManager.maybeGenerate).toHaveBeenCalledWith(
+      expect(titleGeneration.requestFromPrompt).toHaveBeenCalledTimes(1);
+      expect(titleGeneration.requestFromPrompt).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId,
           prompt: "Draft release notes",
@@ -238,7 +240,7 @@ describe("SessionsServiceNew", () => {
     });
 
     it("does not trigger title generation for named sessions", async () => {
-      const { service, titleManager } = createService();
+      const { service, titleGeneration } = createService();
 
       await service.startNewSession(
         makeStartInput({
@@ -252,11 +254,11 @@ describe("SessionsServiceNew", () => {
         prompt: "Summarize status",
       });
 
-      expect(titleManager.maybeGenerate).not.toHaveBeenCalled();
+      expect(titleGeneration.requestFromPrompt).not.toHaveBeenCalled();
     });
 
     it("does not retain a live session when terminal exits during start", async () => {
-      const { service, state, stateFileManager, titleManager } =
+      const { service, state, stateFileManager, titleGeneration } =
         createService();
 
       terminalSessionSpies.start.mockImplementationOnce(() => {
@@ -275,14 +277,14 @@ describe("SessionsServiceNew", () => {
       expect(stateFileManager.cleanup).toHaveBeenCalledWith(
         "/tmp/test-state.ndjson",
       );
-      expect(titleManager.forget).toHaveBeenCalledWith(sessionId);
+      expect(titleGeneration.forget).toHaveBeenCalledWith(sessionId);
       expect(state[sessionId]?.status).toBe("error");
     });
   });
 
   describe("stopLiveSession", () => {
     it("cleans up the created state file path", async () => {
-      const { service, state, stateFileManager, titleManager } =
+      const { service, state, stateFileManager, titleGeneration } =
         createService();
 
       const sessionId = await service.startNewSession(makeStartInput());
@@ -300,14 +302,14 @@ describe("SessionsServiceNew", () => {
       expect(stateFileManager.cleanup).not.toHaveBeenCalledWith(sessionId);
       expect(activityMonitorSpies.stopMonitoring).toHaveBeenCalledTimes(1);
       expect(terminalSessionSpies.stop).toHaveBeenCalledTimes(1);
-      expect(titleManager.forget).toHaveBeenCalledWith(sessionId);
+      expect(titleGeneration.forget).toHaveBeenCalledWith(sessionId);
       expect(state[sessionId]?.offlineBuffer).toContain("persist me");
     });
   });
 
   describe("dispose", () => {
     it("stops and cleans up all live sessions", async () => {
-      const { service, stateFileManager, titleManager } = createService();
+      const { service, stateFileManager, titleGeneration } = createService();
 
       const firstSessionId = await service.startNewSession(makeStartInput());
       const secondSessionId = await service.startNewSession(makeStartInput());
@@ -317,8 +319,8 @@ describe("SessionsServiceNew", () => {
       expect(terminalSessionSpies.stop).toHaveBeenCalledTimes(2);
       expect(activityMonitorSpies.stopMonitoring).toHaveBeenCalledTimes(2);
       expect(stateFileManager.cleanup).toHaveBeenCalledTimes(2);
-      expect(titleManager.forget).toHaveBeenCalledWith(firstSessionId);
-      expect(titleManager.forget).toHaveBeenCalledWith(secondSessionId);
+      expect(titleGeneration.forget).toHaveBeenCalledWith(firstSessionId);
+      expect(titleGeneration.forget).toHaveBeenCalledWith(secondSessionId);
       expect(service.getLiveSession(firstSessionId)).toBeNull();
       expect(service.getLiveSession(secondSessionId)).toBeNull();
     });

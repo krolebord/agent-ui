@@ -28,13 +28,19 @@ type PendingRequest = {
   reject: (error: Error) => void;
 };
 
+type CodexThreadReadResponse = {
+  thread?: {
+    preview?: unknown;
+    turns?: unknown;
+  };
+};
+
 export interface CodexAppServerTrackerOptions {
   sessionId: string;
   wsUrl: string;
   initialThreadId?: string;
   onThreadId?: (threadId: string) => void;
   onStatusChange?: (status: CodexAppServerSessionState) => void;
-  onTitleUpdated?: (title: string) => void;
   onError?: (errorMessage: string) => void;
 }
 
@@ -85,6 +91,72 @@ function mapThreadStatus(status: object): CodexAppServerSessionState | null {
   return "running";
 }
 
+function getTextFromUserInput(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") {
+    return undefined;
+  }
+
+  const item = input as { type?: unknown; text?: unknown };
+  if (item.type !== "text" || typeof item.text !== "string") {
+    return undefined;
+  }
+
+  return item.text.trim() || undefined;
+}
+
+function getPromptFromThreadReadResponse(
+  response: unknown,
+): string | undefined {
+  const thread = (response as CodexThreadReadResponse | undefined)?.thread;
+  if (!thread || typeof thread !== "object") {
+    return undefined;
+  }
+
+  if (typeof thread.preview === "string" && thread.preview.trim()) {
+    return thread.preview.trim();
+  }
+
+  if (!Array.isArray(thread.turns)) {
+    return undefined;
+  }
+
+  for (const turn of thread.turns) {
+    if (!turn || typeof turn !== "object") {
+      continue;
+    }
+
+    const items = (turn as { items?: unknown }).items;
+    if (!Array.isArray(items)) {
+      continue;
+    }
+
+    for (const item of items) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+
+      const threadItem = item as { type?: unknown; content?: unknown };
+      if (
+        threadItem.type !== "userMessage" ||
+        !Array.isArray(threadItem.content)
+      ) {
+        continue;
+      }
+
+      const text = threadItem.content
+        .map(getTextFromUserInput)
+        .filter((part): part is string => !!part)
+        .join("\n")
+        .trim();
+      if (text) {
+        return text;
+      }
+    }
+  }
+
+  return undefined;
+}
+
 export class CodexAppServerTracker {
   private readonly sessionId: string;
   private readonly wsUrl: string;
@@ -92,7 +164,6 @@ export class CodexAppServerTracker {
   private readonly onStatusChange?: (
     status: CodexAppServerSessionState,
   ) => void;
-  private readonly onTitleUpdated?: (title: string) => void;
   private readonly onError?: (errorMessage: string) => void;
   private readonly pendingRequests = new Map<number, PendingRequest>();
 
@@ -107,7 +178,6 @@ export class CodexAppServerTracker {
     this.threadId = options.initialThreadId;
     this.onThreadId = options.onThreadId;
     this.onStatusChange = options.onStatusChange;
-    this.onTitleUpdated = options.onTitleUpdated;
     this.onError = options.onError;
   }
 
@@ -191,6 +261,20 @@ export class CodexAppServerTracker {
     });
   }
 
+  async readThreadPrompt(
+    threadId = this.threadId,
+  ): Promise<string | undefined> {
+    if (!threadId) {
+      return undefined;
+    }
+
+    const response = await this.call("thread/read", {
+      threadId,
+      includeTurns: true,
+    });
+    return getPromptFromThreadReadResponse(response);
+  }
+
   private rejectPendingRequests(error: Error) {
     const requests = Array.from(this.pendingRequests.values());
     this.pendingRequests.clear();
@@ -263,20 +347,6 @@ export class CodexAppServerTracker {
             : undefined;
         if (threadId) {
           this.setThreadId(threadId);
-        }
-
-        const threadName =
-          "name" in thread && typeof thread.name === "string"
-            ? thread.name
-            : undefined;
-        const preview =
-          "preview" in thread && typeof thread.preview === "string"
-            ? thread.preview
-            : undefined;
-
-        const title = threadName?.trim() || preview?.trim();
-        if (title) {
-          this.onTitleUpdated?.(title);
         }
         return;
       }
@@ -362,28 +432,6 @@ export class CodexAppServerTracker {
 
         this.lastStatus = "awaiting_user_response";
         this.onStatusChange?.("awaiting_user_response");
-        return;
-      }
-
-      case "thread/name/updated": {
-        const threadId =
-          typeof message.params?.threadId === "string"
-            ? message.params.threadId
-            : undefined;
-        const threadName =
-          typeof message.params?.threadName === "string"
-            ? message.params.threadName.trim()
-            : "";
-        if (!threadId || !threadName) {
-          return;
-        }
-
-        this.setThreadId(threadId);
-        if (this.threadId !== threadId) {
-          return;
-        }
-
-        this.onTitleUpdated?.(threadName);
         return;
       }
 

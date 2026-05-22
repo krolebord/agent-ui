@@ -10,12 +10,11 @@ import {
   type CursorAgentPermissionMode,
 } from "../cursor-cli";
 import { getCursorUsage } from "../cursor-usage";
-import { generateCursorSessionTitle } from "../generate-cursor-session-title";
 import log from "../logger";
 import { procedure } from "../orpc";
-import { SessionTitleManager } from "../session-title-manager";
 import { TerminalManager } from "../terminal-manager";
 import type { TerminalSessionStatus } from "../terminal-session";
+import type { TitleGenerationService } from "../title-generation-service";
 import {
   commonSessionSchema,
   generateUniqueSessionId,
@@ -191,7 +190,7 @@ interface CursorAgentSessionRecord {
 interface CursorAgentSessionsManagerOptions {
   state: SessionServiceState;
   terminalManager?: TerminalManager;
-  titleManager?: SessionTitleManager;
+  titleGeneration?: TitleGenerationService;
   cursorConfigDir?: string | null;
   sessionLogFileManager?: CursorSessionLogFileStore | null;
   cursorHooksWarning?: string | null;
@@ -223,7 +222,7 @@ export class CursorAgentSessionsManager {
   readonly liveSessions = new Map<string, CursorAgentSessionRecord>();
   private readonly sessionsState: SessionServiceState;
   private readonly terminalManager: TerminalManager;
-  private readonly titleManager: SessionTitleManager;
+  private readonly titleGeneration: TitleGenerationService | null;
   private readonly cursorConfigDir: string | null;
   private readonly sessionLogFileManager: CursorSessionLogFileStore | null;
   private readonly cursorHooksWarning: string | null;
@@ -234,9 +233,7 @@ export class CursorAgentSessionsManager {
     if ("updateState" in options) {
       this.sessionsState = options;
       this.terminalManager = new TerminalManager();
-      this.titleManager = new SessionTitleManager({
-        generateTitle: generateCursorSessionTitle,
-      });
+      this.titleGeneration = null;
       this.cursorConfigDir = null;
       this.sessionLogFileManager = null;
       this.cursorHooksWarning = null;
@@ -252,9 +249,7 @@ export class CursorAgentSessionsManager {
 
     this.sessionsState = options.state;
     this.terminalManager = options.terminalManager ?? new TerminalManager();
-    this.titleManager =
-      options.titleManager ??
-      new SessionTitleManager({ generateTitle: generateCursorSessionTitle });
+    this.titleGeneration = options.titleGeneration ?? null;
     this.cursorConfigDir = options.cursorConfigDir ?? null;
     this.sessionLogFileManager = options.sessionLogFileManager ?? null;
     this.cursorHooksWarning = options.cursorHooksWarning ?? null;
@@ -310,35 +305,35 @@ export class CursorAgentSessionsManager {
     });
 
     if (!sessionName && initialPrompt) {
-      this.maybeGenerateTitleFromInitialPrompt(sessionId, initialPrompt);
+      this.requestTitleFromUserPrompt(sessionId, initialPrompt);
     }
 
     return sessionId;
   }
 
-  private maybeGenerateTitleFromInitialPrompt(
-    sessionId: string,
-    initialPrompt: string,
-  ) {
-    const prompt = initialPrompt.trim();
+  private requestTitleFromUserPrompt(sessionId: string, userPrompt: string) {
+    if (!this.titleGeneration) {
+      return;
+    }
+
+    const prompt = userPrompt.trim();
     if (!prompt) {
       return;
     }
 
-    this.titleManager.maybeGenerate({
+    const state = this.sessionsState;
+    this.titleGeneration.requestFromPrompt({
       sessionId,
       prompt,
-      sessionExists: () => {
-        const session = this.sessionsState.state[sessionId];
-        return !!session && session.type === "cursor-agent";
+      defaultTitle: DEFAULT_CURSOR_AGENT_SESSION_TITLE,
+      getTitle: () => {
+        const session = state.state[sessionId];
+        return session?.type === "cursor-agent" ? session.title : undefined;
       },
-      onTitleReady: (title) => {
-        this.sessionsState.updateState((state) => {
-          const session = state[sessionId];
+      setTitle: (title) => {
+        state.updateState((draft) => {
+          const session = draft[sessionId];
           if (!session || session.type !== "cursor-agent") {
-            return;
-          }
-          if (session.title !== DEFAULT_CURSOR_AGENT_SESSION_TITLE) {
             return;
           }
           session.title = title;
@@ -430,6 +425,19 @@ export class CursorAgentSessionsManager {
             );
           },
           onHookEvent: (event) => {
+            if (event.hook_event_name === "beforeSubmitPrompt") {
+              const session = state.state[sessionId];
+              if (
+                session?.type === "cursor-agent" &&
+                session.title === DEFAULT_CURSOR_AGENT_SESSION_TITLE
+              ) {
+                const prompt = event.prompt?.trim();
+                if (prompt) {
+                  this.requestTitleFromUserPrompt(sessionId, prompt);
+                }
+              }
+            }
+
             const hydratedCursorChatId =
               event.conversation_id ?? event.session_id;
             if (!hydratedCursorChatId) {
@@ -557,7 +565,7 @@ export class CursorAgentSessionsManager {
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
     });
-    this.titleManager.forget(sessionId);
+    this.titleGeneration?.forget(sessionId);
   }
 
   renameSession(sessionId: string, title: string) {
@@ -574,7 +582,7 @@ export class CursorAgentSessionsManager {
       session.title = nextTitle;
     });
 
-    this.titleManager.forget(sessionId);
+    this.titleGeneration?.forget(sessionId);
   }
 
   subscribeToTerminalEvents(sessionId: string, signal?: AbortSignal) {

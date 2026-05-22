@@ -1,6 +1,12 @@
 import z from "zod";
 import { lastSessionOptionsSchema } from "../shared/last-session-options";
 import { defineServiceState } from "../shared/service-state";
+import {
+  defaultTitleGenerationSettings,
+  type TitleGenerationSettings,
+  titleGenerationProviders,
+  titleGenerationSettingsSchema,
+} from "../shared/title-generation";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
 
@@ -9,6 +15,7 @@ export interface AppSettings {
   dockBadgeForAttention: boolean;
   dockBounceOnAttention: boolean;
   lastSessionOptions: z.infer<typeof lastSessionOptionsSchema>;
+  titleGeneration: TitleGenerationSettings;
 }
 
 const defaults: AppSettings = {
@@ -16,6 +23,7 @@ const defaults: AppSettings = {
   dockBadgeForAttention: true,
   dockBounceOnAttention: false,
   lastSessionOptions: {},
+  titleGeneration: defaultTitleGenerationSettings,
 };
 
 export type AppSettingsState = ReturnType<typeof defineAppSettingsState>;
@@ -29,6 +37,9 @@ const appSettingsPersistenceSchema = z.object({
   dockBadgeForAttention: z.boolean().catch(true),
   dockBounceOnAttention: z.boolean().catch(false),
   lastSessionOptions: lastSessionOptionsSchema.catch({}),
+  titleGeneration: titleGenerationSettingsSchema.catch(
+    defaultTitleGenerationSettings,
+  ),
 });
 
 export function defineAppSettingsPersistence(state: AppSettingsState) {
@@ -65,6 +76,18 @@ export const appSettingsRouter = {
     .handler(async ({ input, context }) => {
       context.appSettingsState.updateState((state) => {
         state.lastSessionOptions = input;
+      });
+    }),
+  setTitleGeneration: procedure
+    .input(
+      z.object({
+        provider: z.enum(titleGenerationProviders),
+        model: z.string().trim().min(1),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      context.appSettingsState.updateState((state) => {
+        state.titleGeneration = input;
       });
     }),
 };

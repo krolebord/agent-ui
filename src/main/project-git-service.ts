@@ -18,7 +18,7 @@ import { parseSetupCommands } from "./sessions/worktree-setup.session";
 import { withThrottledAsyncRunner } from "./throttle-runner";
 
 const EMPTY_GIT_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-const GIT_PROJECT_REFRESH_THROTTLE_MS = 2_000;
+const GIT_PROJECT_REFRESH_THROTTLE_MS = 3_000;
 const gitIndexPathCache = new Map<string, string>();
 
 type ProjectGitMetadata = Pick<

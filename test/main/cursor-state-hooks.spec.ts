@@ -64,6 +64,7 @@ describe("ensureManagedCursorStateHooks", () => {
     );
     expect(script).toContain("hook_event_name");
     expect(script).toContain("AGENT_UI_CURSOR_STATE_FILE");
+    expect(script).toContain("payload.prompt");
   });
 
   it("merges managed hooks with existing user hooks without duplicates", async () => {

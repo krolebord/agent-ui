@@ -16,9 +16,9 @@ import {
 import { buildCodexArgs } from "../codex-cli";
 import { getCodexUsage } from "../codex-usage";
 import { procedure } from "../orpc";
-import { SessionTitleManager } from "../session-title-manager";
 import { TerminalManager } from "../terminal-manager";
 import type { TerminalSessionStatus } from "../terminal-session";
+import type { TitleGenerationService } from "../title-generation-service";
 import {
   commonSessionSchema,
   generateUniqueSessionId,
@@ -193,7 +193,7 @@ interface CodexSessionRecord {
 interface CodexSessionsManagerOptions {
   state: SessionServiceState;
   terminalManager?: TerminalManager;
-  titleManager?: SessionTitleManager;
+  titleGeneration?: TitleGenerationService;
 }
 
 function getCodexSessionStatus(
@@ -225,13 +225,13 @@ export class CodexSessionsManager {
   readonly liveSessions = new Map<string, CodexSessionRecord>();
   private readonly sessionsState: SessionServiceState;
   private readonly terminalManager: TerminalManager;
-  private readonly titleManager: SessionTitleManager;
+  private readonly titleGeneration: TitleGenerationService | null;
 
   constructor(options: CodexSessionsManagerOptions | SessionServiceState) {
     if ("updateState" in options) {
       this.sessionsState = options;
       this.terminalManager = new TerminalManager();
-      this.titleManager = new SessionTitleManager();
+      this.titleGeneration = null;
       for (const [sessionId, session] of Object.entries(
         this.sessionsState.state,
       )) {
@@ -244,7 +244,7 @@ export class CodexSessionsManager {
 
     this.sessionsState = options.state;
     this.terminalManager = options.terminalManager ?? new TerminalManager();
-    this.titleManager = options.titleManager ?? new SessionTitleManager();
+    this.titleGeneration = options.titleGeneration ?? null;
     for (const [sessionId, session] of Object.entries(
       this.sessionsState.state,
     )) {
@@ -307,36 +307,59 @@ export class CodexSessionsManager {
     sessionId: string,
     initialPrompt: string,
   ) {
+    if (!this.titleGeneration) {
+      return;
+    }
+
     const prompt = normalizeCodexTitlePrompt(initialPrompt);
     if (!prompt) {
       return;
     }
 
-    this.triggerTitleGeneration(sessionId, prompt);
-  }
-
-  private triggerTitleGeneration(sessionId: string, prompt: string) {
     const state = this.sessionsState;
-    this.titleManager.maybeGenerate({
+    this.titleGeneration.requestFromPrompt({
       sessionId,
       prompt,
-      sessionExists: () => {
+      defaultTitle: DEFAULT_CODEX_SESSION_TITLE,
+      getTitle: () => {
         const session = state.state[sessionId];
-        return !!session && session.type === "codex-local-terminal";
+        return session?.type === "codex-local-terminal"
+          ? session.title
+          : undefined;
       },
-      onTitleReady: (title) => {
-        state.updateState((state) => {
-          const session = state[sessionId];
+      setTitle: (title) => {
+        state.updateState((draft) => {
+          const session = draft[sessionId];
           if (!session || session.type !== "codex-local-terminal") {
-            return;
-          }
-          if (session.title !== DEFAULT_CODEX_SESSION_TITLE) {
             return;
           }
           session.title = title;
         });
       },
     });
+  }
+
+  private async maybeGenerateTitleFromCodexThread(
+    sessionId: string,
+    tracker: CodexAppServerTracker,
+  ) {
+    if (!this.titleGeneration) {
+      return;
+    }
+
+    const session = this.sessionsState.state[sessionId];
+    if (
+      !session ||
+      session.type !== "codex-local-terminal" ||
+      session.title !== DEFAULT_CODEX_SESSION_TITLE
+    ) {
+      return;
+    }
+
+    const prompt = await tracker.readThreadPrompt().catch(() => undefined);
+    if (prompt) {
+      this.maybeGenerateTitleFromInitialPrompt(sessionId, prompt);
+    }
   }
 
   private persistOfflineBuffer(sessionId: string, offlineBuffer?: string) {
@@ -424,24 +447,6 @@ export class CodexSessionsManager {
       setSessionStatus(getCodexSessionStatus(terminalStatus, trackerState));
     };
 
-    const applySuggestedTitle = (title: string) => {
-      const nextTitle = title.trim();
-      if (!nextTitle) {
-        return;
-      }
-
-      state.updateState((state) => {
-        const session = state[sessionId];
-        if (!session || session.type !== "codex-local-terminal") {
-          return;
-        }
-        if (session.title !== DEFAULT_CODEX_SESSION_TITLE) {
-          return;
-        }
-        session.title = nextTitle;
-      });
-    };
-
     const appServer = new CodexAppServerProcess({
       sessionId,
       onUnexpectedExit: ({ exitCode, signal }) => {
@@ -472,9 +477,9 @@ export class CodexSessionsManager {
         onStatusChange: (nextTrackerState) => {
           trackerState = nextTrackerState;
           syncSessionStatus();
-        },
-        onTitleUpdated: (title) => {
-          applySuggestedTitle(title);
+          if (nextTrackerState === "awaiting_user_response" && tracker) {
+            void this.maybeGenerateTitleFromCodexThread(sessionId, tracker);
+          }
         },
         onError: (errorMessage) => {
           runtimeErrorMessage = errorMessage;
@@ -651,7 +656,7 @@ export class CodexSessionsManager {
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
     });
-    this.titleManager.forget(sessionId);
+    this.titleGeneration?.forget(sessionId);
   }
 
   renameSession(sessionId: string, title: string) {
@@ -668,7 +673,7 @@ export class CodexSessionsManager {
       session.title = nextTitle;
     });
 
-    this.titleManager.forget(sessionId);
+    this.titleGeneration?.forget(sessionId);
   }
 
   subscribeToTerminalEvents(sessionId: string, signal?: AbortSignal) {

@@ -4,6 +4,7 @@ import {
   CursorAgentSessionsManager,
 } from "../../src/main/sessions/cursor-agent.session";
 import type { SessionServiceState } from "../../src/main/sessions/state";
+import type { TitleGenerationService } from "../../src/main/title-generation-service";
 
 type HookState =
   | "idle"
@@ -46,8 +47,10 @@ const activityMonitorSpies = vi.hoisted(() => {
       callbacks: {
         onStatusChange: (status: HookState) => void;
         onHookEvent?: (event: {
+          hook_event_name?: string;
           conversation_id?: string;
           session_id?: string;
+          prompt?: string;
         }) => void;
       };
     }>,
@@ -101,6 +104,7 @@ vi.mock("../../src/main/cursor-activity-monitor", () => ({
 function seedCursorSession(
   state: Record<string, CursorAgentSessionData>,
   sessionId: string,
+  overrides: Partial<CursorAgentSessionData> = {},
 ) {
   state[sessionId] = {
     sessionId,
@@ -108,7 +112,7 @@ function seedCursorSession(
     createdAt: Date.now(),
     lastActivityAt: Date.now(),
     status: "stopped",
-    title: "Cursor Session",
+    title: "Cursor Agent Session",
     startupConfig: {
       cwd: "/tmp/project",
       permissionMode: "default",
@@ -116,6 +120,7 @@ function seedCursorSession(
     },
     cursorChatId: undefined,
     bufferedOutput: "",
+    ...overrides,
   };
 }
 
@@ -313,6 +318,97 @@ describe("CursorAgentSessionsManager", () => {
         "session-4"
       ]?.offlineBuffer,
     ).toContain("offline cursor output");
+  });
+
+  it("triggers title generation on beforeSubmitPrompt for unnamed sessions", async () => {
+    const sessionsState = createState();
+    seedCursorSession(
+      sessionsState.state as Record<string, CursorAgentSessionData>,
+      "session-title",
+    );
+    const titleGeneration = {
+      requestFromPrompt: vi.fn(),
+      forget: vi.fn(),
+    };
+    vi.mocked(titleGeneration.requestFromPrompt).mockImplementation(
+      (params) => {
+        params.setTitle("Generated from hook");
+      },
+    );
+
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      cursorConfigDir: "/tmp/cursor-config",
+      sessionLogFileManager: {
+        create: vi.fn(() => "/tmp/cursor-session-title.ndjson"),
+        cleanup: vi.fn(),
+      },
+      titleGeneration: titleGeneration as unknown as TitleGenerationService,
+    });
+
+    await manager.startLiveSession({
+      sessionId: "session-title",
+      cwd: "/tmp/project",
+      permissionMode: "default",
+      cursorChatId: undefined,
+    });
+
+    activityMonitorSpies.instances[0]?.callbacks.onHookEvent?.({
+      hook_event_name: "beforeSubmitPrompt",
+      conversation_id: "chat-title",
+      prompt: "  Fix flaky tests  ",
+    });
+
+    expect(titleGeneration.requestFromPrompt).toHaveBeenCalledTimes(1);
+    expect(titleGeneration.requestFromPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-title",
+        prompt: "Fix flaky tests",
+      }),
+    );
+    expect(
+      (sessionsState.state as Record<string, CursorAgentSessionData>)[
+        "session-title"
+      ]?.title,
+    ).toBe("Generated from hook");
+  });
+
+  it("does not trigger title generation on beforeSubmitPrompt for named sessions", async () => {
+    const sessionsState = createState();
+    seedCursorSession(
+      sessionsState.state as Record<string, CursorAgentSessionData>,
+      "session-named",
+      { title: "Custom Title" },
+    );
+    const titleGeneration = {
+      requestFromPrompt: vi.fn(),
+      forget: vi.fn(),
+    };
+
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      cursorConfigDir: "/tmp/cursor-config",
+      sessionLogFileManager: {
+        create: vi.fn(() => "/tmp/cursor-session-named.ndjson"),
+        cleanup: vi.fn(),
+      },
+      titleGeneration: titleGeneration as unknown as TitleGenerationService,
+    });
+
+    await manager.startLiveSession({
+      sessionId: "session-named",
+      cwd: "/tmp/project",
+      permissionMode: "default",
+      cursorChatId: undefined,
+    });
+
+    activityMonitorSpies.instances[0]?.callbacks.onHookEvent?.({
+      hook_event_name: "beforeSubmitPrompt",
+      conversation_id: "chat-named",
+      prompt: "Do something",
+    });
+
+    expect(titleGeneration.requestFromPrompt).not.toHaveBeenCalled();
   });
 
   it("falls back to terminal-only status when hook monitor is unavailable", async () => {

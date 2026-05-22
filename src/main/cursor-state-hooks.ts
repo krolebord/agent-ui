@@ -224,6 +224,7 @@ function normalizeEvent(payload) {
       typeof payload.is_background_agent === "boolean"
         ? payload.is_background_agent
         : undefined,
+    prompt: typeof payload.prompt === "string" ? payload.prompt : undefined,
   };
 
   if (!normalized.conversation_id && normalized.session_id) {

@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SessionTitleManager } from "../../src/main/session-title-manager";
 import {
   type CodexLocalTerminalSessionData,
   CodexSessionsManager,
 } from "../../src/main/sessions/codex.session";
 import type { SessionServiceState } from "../../src/main/sessions/state";
+import type { TitleGenerationService } from "../../src/main/title-generation-service";
 
 type TrackerState =
   | "running"
@@ -57,10 +57,10 @@ const trackerSpies = vi.hoisted(() => {
     instances: [] as Array<{
       start: ReturnType<typeof vi.fn>;
       stop: ReturnType<typeof vi.fn>;
+      readThreadPrompt: ReturnType<typeof vi.fn>;
       callbacks: {
         onThreadId?: (threadId: string) => void;
         onStatusChange?: (status: TrackerState) => void;
-        onTitleUpdated?: (title: string) => void;
         onError?: (errorMessage: string) => void;
       };
     }>,
@@ -117,10 +117,10 @@ vi.mock("../../src/main/codex-app-server-tracker", () => ({
     const instance = {
       start: vi.fn().mockResolvedValue(undefined),
       stop: vi.fn().mockResolvedValue(undefined),
+      readThreadPrompt: vi.fn().mockResolvedValue(undefined),
       callbacks: {
         onThreadId: options.onThreadId,
         onStatusChange: options.onStatusChange,
-        onTitleUpdated: options.onTitleUpdated,
         onError: options.onError,
       },
     };
@@ -143,14 +143,14 @@ function createSessionsState() {
 
 function createManager(opts?: {
   initialPrompt?: string;
-  titleManager?: SessionTitleManager;
+  titleGeneration?: TitleGenerationService;
   title?: string;
 }) {
   const { state, sessionsState } = createSessionsState();
-  const manager = opts?.titleManager
+  const manager = opts?.titleGeneration
     ? new CodexSessionsManager({
         state: sessionsState,
-        titleManager: opts.titleManager,
+        titleGeneration: opts.titleGeneration,
       })
     : new CodexSessionsManager(sessionsState);
   const sessionId = "session-codex-1";
@@ -375,6 +375,45 @@ describe("CodexSessionsManager", () => {
     expect(session.status).toBe("stopped");
   });
 
+  it("triggers title generation from the codex thread prompt when the thread becomes idle", async () => {
+    const titleGeneration = {
+      requestFromPrompt: vi.fn(),
+      forget: vi.fn(),
+    } as unknown as TitleGenerationService;
+    const { manager, sessionId } = createManager({
+      initialPrompt: undefined,
+      titleGeneration,
+    });
+
+    await manager.startLiveSession({
+      sessionId,
+      cwd: "/tmp",
+      modelReasoningEffort: "high",
+      fastMode: "off",
+      permissionMode: "default",
+      initialPrompt: undefined,
+    });
+
+    const tracker = trackerSpies.instances[0];
+    tracker?.readThreadPrompt.mockResolvedValue("Summarize the repository");
+
+    tracker?.callbacks.onStatusChange?.("running");
+    await Promise.resolve();
+    expect(tracker?.readThreadPrompt).not.toHaveBeenCalled();
+
+    tracker?.callbacks.onStatusChange?.("awaiting_user_response");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(tracker?.readThreadPrompt).toHaveBeenCalledTimes(1);
+    expect(titleGeneration.requestFromPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId,
+        prompt: "Summarize the repository",
+      }),
+    );
+  });
+
   it("uses codex resume when a persisted thread id exists", async () => {
     const { manager, sessionId, state } = createManager({
       initialPrompt: "summarize recent commits",
@@ -409,45 +448,6 @@ describe("CodexSessionsManager", () => {
       "model_reasoning_effort=high",
     ]);
     expect(startCall?.args).not.toContain("'summarize recent commits'");
-  });
-
-  it("updates the default title from tracker notifications", async () => {
-    const { manager, sessionId, state } = createManager({
-      initialPrompt: undefined,
-    });
-
-    await manager.startLiveSession({
-      sessionId,
-      cwd: "/tmp",
-      modelReasoningEffort: "high",
-      fastMode: "off",
-      permissionMode: "default",
-      initialPrompt: undefined,
-    });
-
-    trackerSpies.instances[0]?.callbacks.onTitleUpdated?.("Generated title");
-
-    expect(state[sessionId]?.title).toBe("Generated title");
-  });
-
-  it("does not overwrite a custom title from tracker notifications", async () => {
-    const { manager, sessionId, state } = createManager({
-      initialPrompt: undefined,
-      title: "Already named",
-    });
-
-    await manager.startLiveSession({
-      sessionId,
-      cwd: "/tmp",
-      modelReasoningEffort: "high",
-      fastMode: "off",
-      permissionMode: "default",
-      initialPrompt: undefined,
-    });
-
-    trackerSpies.instances[0]?.callbacks.onTitleUpdated?.("Generated title");
-
-    expect(state[sessionId]?.title).toBe("Already named");
   });
 
   it("does not change status on output events", async () => {

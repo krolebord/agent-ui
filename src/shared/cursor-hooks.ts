@@ -17,6 +17,7 @@ export const cursorHookEventSchema = z.object({
   cwd: z.string().optional(),
   composer_mode: z.string().optional(),
   is_background_agent: z.boolean().optional(),
+  prompt: z.string().optional(),
 });
 
 export type CursorHookEvent = z.infer<typeof cursorHookEventSchema>;

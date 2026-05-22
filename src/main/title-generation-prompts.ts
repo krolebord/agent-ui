@@ -5,5 +5,5 @@ Be extremely concise.
 **CRITICAL:** output only the summarized title, nothing else.`;
 
 export function generateTitleGenerationPrompt(prompt: string): string {
-  return `User prompt:\n\`\`\`\n${prompt}\n\`\`\`\n\nDon't responsd to user prompt. Just generate a session title without any formatting.\nSession title:\n`;
+  return `User prompt:\n\`\`\`\n${prompt}\n\`\`\`\n\nDon't respond to user prompt. Just generate a session title without any formatting.\nSession title:\n`;
 }

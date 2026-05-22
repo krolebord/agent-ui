@@ -60,6 +60,40 @@ describe("CursorActivityMonitor", () => {
     monitor.stopMonitoring();
   });
 
+  it("parses beforeSubmitPrompt events with prompt text", async () => {
+    const filePath = path.join(tempDir, "events.ndjson");
+    const onHookEvent = vi.fn();
+    const monitor = new CursorActivityMonitor({
+      onStatusChange: vi.fn(),
+      onHookEvent,
+    });
+
+    await monitor.startMonitoring({
+      stateFilePath: filePath,
+    });
+
+    await appendRaw(
+      filePath,
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        hook_event_name: "beforeSubmitPrompt",
+        conversation_id: "chat-1",
+        prompt: "Refactor auth module",
+      })}\n`,
+    );
+
+    await vi.waitFor(() => {
+      expect(onHookEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hook_event_name: "beforeSubmitPrompt",
+          prompt: "Refactor auth module",
+        }),
+      );
+    });
+
+    monitor.stopMonitoring();
+  });
+
   it("emits hook events without conversation filtering", async () => {
     const filePath = path.join(tempDir, "events.ndjson");
     const onStatusChange = vi.fn();

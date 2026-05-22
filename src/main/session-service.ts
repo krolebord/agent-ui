@@ -20,7 +20,6 @@ import log from "./logger";
 import { procedure } from "./orpc";
 
 import type { SessionStateFileManager } from "./session-state-file-manager";
-import type { SessionTitleManager } from "./session-title-manager";
 import {
   commonSessionSchema,
   generateUniqueSessionId,
@@ -29,6 +28,7 @@ import {
 import type { SessionServiceState } from "./sessions/state";
 import { TerminalManager } from "./terminal-manager";
 import type { TerminalSessionStatus } from "./terminal-session";
+import type { TitleGenerationService } from "./title-generation-service";
 
 interface SessionRecord {
   terminalId: string;
@@ -40,7 +40,7 @@ interface SessionServiceOptions {
   pluginDir: string | null;
   pluginWarning: string | null;
   terminalManager?: TerminalManager;
-  titleManager: SessionTitleManager;
+  titleGeneration: TitleGenerationService;
   stateFileManager: SessionStateFileManager;
   state: SessionServiceState;
 }
@@ -221,14 +221,14 @@ export class SessionsServiceNew {
 
   private readonly pluginDir: string | null;
   private readonly pluginWarning: string | null;
-  private readonly titleManager: SessionTitleManager;
+  private readonly titleGeneration: TitleGenerationService;
   private readonly stateFileManager: SessionStateFileManager;
   readonly terminalManager: TerminalManager;
 
   constructor(options: SessionServiceOptions) {
     this.pluginDir = options.pluginDir;
     this.pluginWarning = options.pluginWarning;
-    this.titleManager = options.titleManager;
+    this.titleGeneration = options.titleGeneration;
     this.stateFileManager = options.stateFileManager;
     this.sessionsState = options.state;
     this.terminalManager = options.terminalManager ?? new TerminalManager();
@@ -320,7 +320,7 @@ export class SessionsServiceNew {
 
     const prompt = sessionInput.initialPrompt?.trim();
     if (!sessionName && prompt) {
-      this.triggerTitleGeneration(sessionId, prompt);
+      this.requestTitleFromPrompt(sessionId, prompt);
     }
 
     return sessionId;
@@ -487,7 +487,7 @@ export class SessionsServiceNew {
           return;
         }
 
-        this.triggerTitleGeneration(opts.sessionId, prompt);
+        this.requestTitleFromPrompt(opts.sessionId, prompt);
       },
     });
     disposable.addDisposable(() => activityMonitor.stopMonitoring());
@@ -561,7 +561,7 @@ export class SessionsServiceNew {
 
     this.liveSessions.set(opts.sessionId, liveSession);
     disposable.addDisposable(() => this.liveSessions.delete(opts.sessionId));
-    disposable.addDisposable(() => this.titleManager.forget(opts.sessionId));
+    disposable.addDisposable(() => this.titleGeneration.forget(opts.sessionId));
 
     if (!this.terminalManager.getRuntime(opts.sessionId)) {
       await disposable.dispose();
@@ -571,29 +571,21 @@ export class SessionsServiceNew {
     return liveSession;
   }
 
-  private triggerTitleGeneration(sessionId: string, prompt: string) {
+  private requestTitleFromPrompt(sessionId: string, prompt: string) {
     const state = this.sessionsState;
-    this.titleManager.maybeGenerate({
+    const defaultTitle = getDefaultSessionTitle(sessionId);
+    this.titleGeneration.requestFromPrompt({
       sessionId,
       prompt,
-      sessionExists: () => Boolean(state.state[sessionId]),
-      onTitleReady: (title) => {
-        const nextTitle = title.trim();
-        if (!nextTitle) {
-          return;
-        }
-
-        state.updateState((state) => {
-          const session = state[sessionId];
+      defaultTitle,
+      getTitle: () => state.state[sessionId]?.title,
+      setTitle: (title) => {
+        state.updateState((draft) => {
+          const session = draft[sessionId];
           if (!session) {
             return;
           }
-
-          if (session.title !== getDefaultSessionTitle(sessionId)) {
-            return;
-          }
-
-          session.title = nextTitle;
+          session.title = title;
         });
       },
     });
@@ -657,7 +649,7 @@ export class SessionsServiceNew {
       session.title = nextTitle;
     });
 
-    this.titleManager.forget(sessionId);
+    this.titleGeneration.forget(sessionId);
   }
 
   getLiveSession(sessionId: string) {

@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SessionTitleManager } from "../../src/main/session-title-manager";
 import {
   type CodexLocalTerminalSessionData,
   CodexSessionsManager,
 } from "../../src/main/sessions/codex.session";
 import type { SessionServiceState } from "../../src/main/sessions/state";
+import type { TitleGenerationService } from "../../src/main/title-generation-service";
+import {
+  deriveProvisionalTitleFromPrompt,
+  isAutoManagedSessionTitle,
+} from "../../src/shared/title-generation";
 
 function createSessionsState() {
   const state: Record<string, CodexLocalTerminalSessionData> = {};
@@ -18,24 +22,39 @@ function createSessionsState() {
 
 function createManager() {
   const sessionsState = createSessionsState();
-  const titleManager = {
-    maybeGenerate: vi.fn(),
+  const titleGeneration = {
+    requestFromPrompt: vi.fn(),
     forget: vi.fn(),
   };
 
   const manager = new CodexSessionsManager({
     state: sessionsState,
-    titleManager: titleManager as unknown as SessionTitleManager,
+    titleGeneration: titleGeneration as unknown as TitleGenerationService,
   });
 
-  return { manager, sessionsState, titleManager };
+  return { manager, sessionsState, titleGeneration };
+}
+
+function mockTitleGeneration(
+  titleGeneration: { requestFromPrompt: ReturnType<typeof vi.fn> },
+  options?: { generatedTitle?: string },
+) {
+  vi.mocked(titleGeneration.requestFromPrompt).mockImplementation((params) => {
+    const provisional = deriveProvisionalTitleFromPrompt(params.prompt);
+    if (provisional) {
+      params.setTitle(provisional);
+    }
+    if (options?.generatedTitle) {
+      params.setTitle(options.generatedTitle);
+    }
+  });
 }
 
 describe("CodexSessionsManager title generation", () => {
   it("triggers title generation for unnamed sessions with initial prompt", () => {
-    const { manager, sessionsState, titleManager } = createManager();
-    vi.mocked(titleManager.maybeGenerate).mockImplementation((params) => {
-      params.onTitleReady("Generated title");
+    const { manager, sessionsState, titleGeneration } = createManager();
+    mockTitleGeneration(titleGeneration, {
+      generatedTitle: "Generated title",
     });
 
     const sessionId = manager.createSession({
@@ -47,11 +66,12 @@ describe("CodexSessionsManager title generation", () => {
       initialPrompt: "  write release notes  ",
     });
 
-    expect(titleManager.maybeGenerate).toHaveBeenCalledTimes(1);
-    expect(titleManager.maybeGenerate).toHaveBeenCalledWith(
+    expect(titleGeneration.requestFromPrompt).toHaveBeenCalledTimes(1);
+    expect(titleGeneration.requestFromPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId,
         prompt: "write release notes",
+        defaultTitle: "Codex Session",
       }),
     );
 
@@ -62,8 +82,24 @@ describe("CodexSessionsManager title generation", () => {
     }
   });
 
+  it("sets a provisional title from the initial prompt immediately", () => {
+    const { manager, sessionsState, titleGeneration } = createManager();
+    mockTitleGeneration(titleGeneration);
+
+    const sessionId = manager.createSession({
+      cwd: "/tmp",
+      sessionName: undefined,
+      permissionMode: "default",
+      modelReasoningEffort: "high",
+      fastMode: "off",
+      initialPrompt: "write release notes",
+    });
+
+    expect(sessionsState.state[sessionId]?.title).toBe("write release notes");
+  });
+
   it("does not trigger title generation for named sessions", () => {
-    const { manager, titleManager } = createManager();
+    const { manager, titleGeneration } = createManager();
 
     manager.createSession({
       cwd: "/tmp",
@@ -74,11 +110,11 @@ describe("CodexSessionsManager title generation", () => {
       initialPrompt: "write release notes",
     });
 
-    expect(titleManager.maybeGenerate).not.toHaveBeenCalled();
+    expect(titleGeneration.requestFromPrompt).not.toHaveBeenCalled();
   });
 
   it("strips /plan prefix before title generation", () => {
-    const { manager, titleManager } = createManager();
+    const { manager, titleGeneration } = createManager();
 
     const sessionId = manager.createSession({
       cwd: "/tmp",
@@ -89,7 +125,7 @@ describe("CodexSessionsManager title generation", () => {
       initialPrompt: " /plan   draft implementation plan ",
     });
 
-    expect(titleManager.maybeGenerate).toHaveBeenCalledWith(
+    expect(titleGeneration.requestFromPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId,
         prompt: "draft implementation plan",
@@ -98,7 +134,7 @@ describe("CodexSessionsManager title generation", () => {
   });
 
   it("skips title generation when /plan has no body", () => {
-    const { manager, titleManager } = createManager();
+    const { manager, titleGeneration } = createManager();
 
     manager.createSession({
       cwd: "/tmp",
@@ -109,11 +145,11 @@ describe("CodexSessionsManager title generation", () => {
       initialPrompt: "/plan   ",
     });
 
-    expect(titleManager.maybeGenerate).not.toHaveBeenCalled();
+    expect(titleGeneration.requestFromPrompt).not.toHaveBeenCalled();
   });
 
   it("forgets title trigger state when deleting session", async () => {
-    const { manager, titleManager } = createManager();
+    const { manager, titleGeneration } = createManager();
 
     const sessionId = manager.createSession({
       cwd: "/tmp",
@@ -126,16 +162,32 @@ describe("CodexSessionsManager title generation", () => {
 
     await manager.deleteSession(sessionId);
 
-    expect(titleManager.forget).toHaveBeenCalledWith(sessionId);
+    expect(titleGeneration.forget).toHaveBeenCalledWith(sessionId);
   });
 
   it("does not overwrite a manually renamed session when title generation resolves", () => {
-    const { manager, sessionsState, titleManager } = createManager();
-    let onTitleReady: ((title: string) => void) | undefined;
+    const { manager, sessionsState, titleGeneration } = createManager();
+    let applyGeneratedTitle: (() => void) | undefined;
 
-    vi.mocked(titleManager.maybeGenerate).mockImplementation((params) => {
-      onTitleReady = params.onTitleReady;
-    });
+    vi.mocked(titleGeneration.requestFromPrompt).mockImplementation(
+      (params) => {
+        const provisional = deriveProvisionalTitleFromPrompt(params.prompt);
+        if (provisional) {
+          params.setTitle(provisional);
+        }
+        applyGeneratedTitle = () => {
+          if (
+            isAutoManagedSessionTitle(
+              params.getTitle(),
+              params.defaultTitle,
+              params.prompt,
+            )
+          ) {
+            params.setTitle("Generated title");
+          }
+        };
+      },
+    );
 
     const sessionId = manager.createSession({
       cwd: "/tmp",
@@ -147,9 +199,9 @@ describe("CodexSessionsManager title generation", () => {
     });
 
     manager.renameSession(sessionId, "Manually renamed");
-    onTitleReady?.("Generated title");
+    applyGeneratedTitle?.();
 
     expect(sessionsState.state[sessionId]?.title).toBe("Manually renamed");
-    expect(titleManager.forget).toHaveBeenCalledWith(sessionId);
+    expect(titleGeneration.forget).toHaveBeenCalledWith(sessionId);
   });
 });
