@@ -59,6 +59,7 @@ const COMPACT_FILE_DIFF_UNSAFE_CSS = `
 `;
 
 export const COMPACT_FILE_DIFF_OPTIONS = {
+  theme: "github-dark-default",
   hunkSeparators: "line-info-basic",
   unsafeCSS: COMPACT_FILE_DIFF_UNSAFE_CSS,
 } as const satisfies FileDiffOptions<undefined>;
