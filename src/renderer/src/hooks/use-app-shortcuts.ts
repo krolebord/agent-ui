@@ -128,9 +128,6 @@ export function useAppShortcuts(): void {
   const openWorktreeDeleteDialogPath = useWorktreeDeleteDialogStore(
     (state) => state.target?.path,
   );
-  const isDiffReviewPaneOpen = useDiffReviewStore(
-    (state) => state.openedProjectPath !== null,
-  );
   const isDiffReviewCommitDialogOpen = useDiffReviewCommitDialogStore(
     (state) => state.payload !== null,
   );
@@ -142,7 +139,6 @@ export function useAppShortcuts(): void {
     Boolean(openProjectDefaultsDialogCwd) ||
     Boolean(openProjectWorktreeDialogPath) ||
     Boolean(openWorktreeDeleteDialogPath) ||
-    isDiffReviewPaneOpen ||
     isDiffReviewCommitDialogOpen;
 
   useHotkey(
@@ -210,27 +206,19 @@ export function useAppShortcuts(): void {
     { enabled: !dialogsAreOpen },
   );
 
-  const openProjectDiff = useDiffReviewStore((state) => state.openProjectDiff);
-  const closeProjectDiff = useDiffReviewStore(
-    (state) => state.closeProjectDiff,
+  const toggleBottomPaneView = useDiffReviewStore(
+    (state) => state.toggleBottomPaneView,
   );
   useHotkey(
     "Mod+R",
     () => {
-      if (isDiffReviewPaneOpen) {
-        closeProjectDiff();
-        return;
-      }
-
       if (!activeSessionId) return;
       const activeSession = sessions[activeSessionId];
       if (!activeSession) return;
-      openProjectDiff(activeSession.startupConfig.cwd);
+      toggleBottomPaneView(activeSession.startupConfig.cwd);
     },
     {
-      enabled:
-        (!dialogsAreOpen || isDiffReviewPaneOpen) &&
-        !isDiffReviewCommitDialogOpen,
+      enabled: !dialogsAreOpen && !isDiffReviewCommitDialogOpen,
     },
   );
 

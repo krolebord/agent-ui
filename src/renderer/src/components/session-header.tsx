@@ -25,7 +25,10 @@ import {
 import { toast } from "sonner";
 import { create } from "zustand";
 import { combine, persist } from "zustand/middleware";
-import { useDiffReviewStore } from "./diff-review-pane";
+import {
+  useDiffReviewStore,
+  useProjectBottomPaneView,
+} from "./diff-review-pane";
 import {
   ClaudeCodeIcon,
   CodexIcon,
@@ -194,7 +197,12 @@ export function SessionHeader({ session }: { session: Session }) {
   );
   const PreferredAppIcon = preferredAppItem.icon;
 
-  const openDiffPane = useDiffReviewStore((state) => state.openProjectDiff);
+  const projectPath = session.startupConfig.cwd;
+  const bottomPaneView = useProjectBottomPaneView(projectPath);
+  const toggleBottomPaneView = useDiffReviewStore(
+    (state) => state.toggleBottomPaneView,
+  );
+  const BottomPaneIcon = bottomPaneView === "diff" ? FileDiff : TerminalSquare;
 
   return (
     <header className="flex min-h-11 shrink-0 items-center gap-3 border-b border-border/70 px-2 py-1.5">
@@ -235,21 +243,25 @@ export function SessionHeader({ session }: { session: Session }) {
           ) : null}
         </div>
       ) : null}
-      {addedLines || deletedLines ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="shrink-0 text-xs"
-          onClick={() => {
-            if (!activeProject) return;
-            openDiffPane(activeProject.path);
-          }}
-        >
-          <FileDiff className="size-3.5 text-muted-foreground" />
-          <span>Review</span>
-        </Button>
-      ) : null}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="size-8 shrink-0 px-0"
+        onClick={() => toggleBottomPaneView(projectPath)}
+        aria-label={
+          bottomPaneView === "diff"
+            ? "Show project terminals"
+            : "Show uncommitted changes"
+        }
+        title={
+          bottomPaneView === "diff"
+            ? "Project terminals"
+            : "Uncommitted changes"
+        }
+      >
+        <BottomPaneIcon className="size-3.5 text-muted-foreground" />
+      </Button>
       <div className="flex shrink-0 items-center">
         <Button
           type="button"

@@ -1,17 +1,18 @@
 import type { FileDiffMetadata } from "@pierre/diffs/react";
 import { FileDiff } from "@pierre/diffs/react";
+import { COMPACT_FILE_DIFF_OPTIONS } from "@renderer/components/diff-pane-styles";
 import { useDiffReviewCommitDialogStore } from "@renderer/components/diff-review-commit-dialog";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useQuery } from "@tanstack/react-query";
 import {
+  FileDiff as FileDiffIcon,
   FileMinus,
   FilePlus,
   FileText,
   GitCommitHorizontal,
   LoaderCircle,
-  X,
 } from "lucide-react";
 import { createContext, useContext, useMemo, useRef } from "react";
 import { create, createStore, type ExtractState } from "zustand";
@@ -25,21 +26,73 @@ import {
   ResizablePanelGroup,
 } from "./ui/resizable";
 
+export type BottomPaneView = "terminals" | "diff";
+
+function getBottomPaneViewForProject(
+  viewsByProject: Record<string, BottomPaneView>,
+  projectPath: string,
+): BottomPaneView {
+  return viewsByProject[projectPath] ?? "terminals";
+}
+
 export const useDiffReviewStore = create(
   combine(
     {
-      openedProjectPath: null as string | null,
+      bottomPaneViewByProject: {} as Record<string, BottomPaneView>,
     },
-    (set) => ({
-      openProjectDiff: (projectPath: string) => {
-        set({ openedProjectPath: projectPath });
+    (set, get) => ({
+      setBottomPaneView: (
+        projectPath: string,
+        bottomPaneView: BottomPaneView,
+      ) => {
+        set((state) => ({
+          bottomPaneViewByProject: {
+            ...state.bottomPaneViewByProject,
+            [projectPath]: bottomPaneView,
+          },
+        }));
       },
-      closeProjectDiff: () => {
-        set({ openedProjectPath: null });
+      openProjectDiff: (projectPath: string) => {
+        set((state) => ({
+          bottomPaneViewByProject: {
+            ...state.bottomPaneViewByProject,
+            [projectPath]: "diff",
+          },
+        }));
+      },
+      closeProjectDiff: (projectPath: string) => {
+        set((state) => ({
+          bottomPaneViewByProject: {
+            ...state.bottomPaneViewByProject,
+            [projectPath]: "terminals",
+          },
+        }));
+      },
+      toggleBottomPaneView: (projectPath: string) => {
+        const current = getBottomPaneViewForProject(
+          get().bottomPaneViewByProject,
+          projectPath,
+        );
+        set((state) => ({
+          bottomPaneViewByProject: {
+            ...state.bottomPaneViewByProject,
+            [projectPath]: current === "diff" ? "terminals" : "diff",
+          },
+        }));
       },
     }),
   ),
 );
+
+export function useProjectBottomPaneView(
+  projectPath: string | null,
+): BottomPaneView {
+  return useDiffReviewStore((state) =>
+    projectPath
+      ? getBottomPaneViewForProject(state.bottomPaneViewByProject, projectPath)
+      : "terminals",
+  );
+}
 
 function createProjectDiffStore(projectPath: string) {
   return createStore(
@@ -48,7 +101,7 @@ function createProjectDiffStore(projectPath: string) {
         projectPath,
         selectedFilePath: null as string | null,
         confirmedFiles: [] as string[],
-        sidebarSize: 192 as number | string,
+        sidebarSize: 220 as number | string,
       },
       (set) => ({
         selectFile: (filePath: string) => {
@@ -96,20 +149,14 @@ const projectDiffPaneContext = createContext<ProjectDiffStore>(null!);
 
 type ProjectDiffStore = ReturnType<typeof createProjectDiffStore>;
 
-export function ProjectDiffPane() {
-  const openedProjectPath = useDiffReviewStore(
-    (state) => state.openedProjectPath,
-  );
-
+export function ProjectDiffPane({ cwd }: { cwd: string }) {
   const storesRef = useRef<Map<string, ProjectDiffStore>>(new Map());
 
-  if (!openedProjectPath) return null;
-
-  let store = storesRef.current.get(openedProjectPath);
+  let store = storesRef.current.get(cwd);
 
   if (!store) {
-    store = createProjectDiffStore(openedProjectPath);
-    storesRef.current.set(openedProjectPath, store);
+    store = createProjectDiffStore(cwd);
+    storesRef.current.set(cwd, store);
   }
 
   return (
@@ -188,8 +235,10 @@ function FileListItem({
       role="option"
       tabIndex={-1}
       className={cn(
-        "flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left transition-colors outline-none",
-        selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
+        "flex w-full cursor-pointer items-center gap-1.5 px-1.5 py-1 text-left text-sm transition outline-none",
+        selected
+          ? "bg-white/12 text-white"
+          : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
       )}
       onClick={() => selectFile(file.name)}
       onKeyDown={(e) => {
@@ -223,12 +272,12 @@ function FileListItem({
         )}
       />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-xs font-medium">{label}</div>
-        {dir && (
-          <div className="truncate text-xs text-muted-foreground">{dir}</div>
-        )}
+        <div className="truncate text-xs">{label}</div>
+        {dir ? (
+          <div className="truncate text-[10px] text-zinc-500">{dir}</div>
+        ) : null}
       </div>
-      <span className="shrink-0 font-mono text-xs">
+      <span className="shrink-0 font-mono text-[10px]">
         {additions > 0 && (
           <span className="text-emerald-400">+{additions}</span>
         )}
@@ -309,7 +358,7 @@ function ProjectDiffPaneContent() {
     [files, confirmedFiles],
   );
 
-  useHotkey("Escape", () => closeDiffPane(), {
+  useHotkey("Escape", () => closeDiffPane(projectPath), {
     enabled: !commitDialogOpen,
   });
   useHotkey(
@@ -344,140 +393,114 @@ function ProjectDiffPaneContent() {
   if (!files) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
-      {/* Top bar */}
-      <header className="flex shrink-0 items-center gap-3 border-b border-border/70 pl-20 pr-2 py-2">
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">Uncommitted Changes</div>
-          <div className="truncate text-xs text-muted-foreground">
-            {projectPath}
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            className="shrink-0"
-            disabled={!canCommit}
-            onClick={() =>
-              openCommitDialog({
-                projectPath,
-                pathsToCommit,
-                selectedFileCount,
-                onCommitted: clearConfirmations,
-              })
-            }
-          >
-            <GitCommitHorizontal className="size-4" />
-            Commit
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="shrink-0"
-            onClick={closeDiffPane}
-          >
-            <X className="size-4" />
-            <span className="sr-only">Close</span>
-          </Button>
-        </div>
-      </header>
-
-      {/* Body */}
-      <ResizablePanelGroup
-        onLayoutChanged={(e) => {
-          if ("sidebar" in e) {
-            setSidebarSize(`${e.sidebar}`);
-          }
-        }}
-        orientation="horizontal"
-        className="min-h-0 flex-1"
-      >
-        {/* Sidebar */}
-        <ResizablePanel
-          id="sidebar"
-          defaultSize={sidebarSize}
-          minSize={30}
-          maxSize={600}
-        >
-          <aside className="flex h-full flex-col">
-            <div className="flex items-center gap-2 border-b border-border/70 px-3 py-2">
-              <Checkbox
-                id="all-files-checkbox"
-                checked={
-                  allFilesConfirmed
-                    ? true
-                    : someFilesConfirmed
-                      ? "indeterminate"
-                      : false
-                }
-                disabled={!files.length}
-                onCheckedChange={() =>
-                  toggleAllFilesConfirmation(files.map((f) => f.name))
-                }
-                className="shrink-0"
-                aria-label={
-                  allFilesConfirmed
-                    ? "Exclude all changed files from commit"
-                    : "Include all changed files in commit"
-                }
-              />
-              <label
-                htmlFor="all-files-checkbox"
-                className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
-              >
-                {files.length} changed file{files.length === 1 ? "" : "s"}
-              </label>
+    <ResizablePanelGroup
+      onLayoutChanged={(e) => {
+        if ("files-sidebar" in e) {
+          setSidebarSize(`${e["files-sidebar"]}`);
+        }
+      }}
+      orientation="horizontal"
+      className="h-full min-h-0"
+    >
+      <ResizablePanel>
+        <main className="h-full min-w-0 overflow-auto bg-black/10">
+          {isLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <LoaderCircle className="text-muted-foreground size-6 animate-spin" />
             </div>
-            <div
-              className="flex-1 overflow-y-auto py-1"
-              role="listbox"
-              aria-label="Changed files"
+          ) : selectedFile ? (
+            <FileDiff
+              fileDiff={selectedFile}
+              options={COMPACT_FILE_DIFF_OPTIONS}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-muted-foreground text-sm">
+                No uncommitted changes
+              </p>
+            </div>
+          )}
+        </main>
+      </ResizablePanel>
+
+      <ResizableHandle />
+
+      <ResizablePanel id="files-sidebar" defaultSize={sidebarSize}>
+        <aside className="flex h-full flex-col border-l border-border/70 bg-black/15">
+          <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2">
+            <Checkbox
+              id="all-files-checkbox"
+              checked={
+                allFilesConfirmed
+                  ? true
+                  : someFilesConfirmed
+                    ? "indeterminate"
+                    : false
+              }
+              disabled={!files.length}
+              onCheckedChange={() =>
+                toggleAllFilesConfirmation(files.map((f) => f.name))
+              }
+              className="shrink-0"
+              aria-label={
+                allFilesConfirmed
+                  ? "Exclude all changed files from commit"
+                  : "Include all changed files in commit"
+              }
+            />
+            <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <label
+              htmlFor="all-files-checkbox"
+              className="min-w-0 flex-1 truncate text-xs font-medium"
             >
-              {isLoading ? (
-                <div className="flex h-full items-center justify-center">
-                  <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
-                </div>
-              ) : files?.length ? (
-                files.map((file) => (
-                  <FileListItem
-                    key={file.name}
-                    file={file}
-                    selected={!!selectedFile && selectedFile.name === file.name}
-                  />
-                ))
-              ) : (
-                <p className="px-3 py-4 text-xs text-muted-foreground">
-                  No changes
-                </p>
-              )}
-            </div>
-          </aside>
-        </ResizablePanel>
+              {files.length} changed file{files.length === 1 ? "" : "s"}
+            </label>
+          </div>
 
-        <ResizableHandle />
-
-        {/* Diff pane */}
-        <ResizablePanel>
-          <main className="h-full overflow-auto">
+          <div
+            className="min-h-0 flex-1 overflow-y-auto py-1"
+            role="listbox"
+            aria-label="Changed files"
+          >
             {isLoading ? (
               <div className="flex h-full items-center justify-center">
-                <LoaderCircle className="text-muted-foreground size-6 animate-spin" />
+                <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
               </div>
-            ) : selectedFile ? (
-              <FileDiff fileDiff={selectedFile} />
+            ) : files.length ? (
+              files.map((file) => (
+                <FileListItem
+                  key={file.name}
+                  file={file}
+                  selected={!!selectedFile && selectedFile.name === file.name}
+                />
+              ))
             ) : (
-              <div className="flex h-full items-center justify-center">
-                <p className="text-muted-foreground text-sm">
-                  No uncommitted changes
-                </p>
-              </div>
+              <p className="px-2 py-4 text-xs text-zinc-500">No changes</p>
             )}
-          </main>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-    </div>
+          </div>
+
+          <div className="shrink-0 border-t border-border/70 p-2">
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              className="h-7 w-full px-2 text-xs"
+              disabled={!canCommit}
+              onClick={() =>
+                openCommitDialog({
+                  projectPath,
+                  pathsToCommit,
+                  selectedFileCount,
+                  onCommitted: clearConfirmations,
+                })
+              }
+            >
+              <GitCommitHorizontal className="size-3" />
+              Commit
+            </Button>
+          </div>
+        </aside>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

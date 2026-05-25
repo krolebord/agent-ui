@@ -1,5 +1,5 @@
 import { LiveTerminalSurface } from "@renderer/components/live-terminal-surface";
-import { ProjectTerminalPane } from "@renderer/components/project-terminal-pane";
+import { ProjectBottomPane } from "@renderer/components/project-bottom-pane";
 import { SessionHeader } from "@renderer/components/session-header";
 import {
   Collapsible,
@@ -39,7 +39,7 @@ export function SessionPage() {
     return (
       <SessionPageLayout
         topPane={<WelcomePage hasProjects={projectCount > 0} />}
-        bottomPane={<ProjectTerminalPane cwd={null} />}
+        bottomPane={<ProjectBottomPane cwd={null} />}
       />
     );
   }
@@ -49,7 +49,7 @@ export function SessionPage() {
       return (
         <TerminalPage
           session={session}
-          bottomPane={<ProjectTerminalPane cwd={session.startupConfig.cwd} />}
+          bottomPane={<ProjectBottomPane cwd={session.startupConfig.cwd} />}
         />
       );
     case "local-terminal":
@@ -58,14 +58,14 @@ export function SessionPage() {
       return (
         <TerminalPage
           session={session}
-          bottomPane={<ProjectTerminalPane cwd={session.startupConfig.cwd} />}
+          bottomPane={<ProjectBottomPane cwd={session.startupConfig.cwd} />}
         />
       );
     case "cursor-agent":
       return (
         <TerminalPage
           session={session}
-          bottomPane={<ProjectTerminalPane cwd={session.startupConfig.cwd} />}
+          bottomPane={<ProjectBottomPane cwd={session.startupConfig.cwd} />}
         />
       );
     case "worktree-setup":
@@ -95,7 +95,7 @@ function WorktreeSetupSessionPage({
           </div>
         </div>
       }
-      bottomPane={<ProjectTerminalPane cwd={session.startupConfig.cwd} />}
+      bottomPane={<ProjectBottomPane cwd={session.startupConfig.cwd} />}
     />
   );
 }

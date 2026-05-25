@@ -17,7 +17,6 @@ import { Toaster } from "@renderer/components/ui/sonner";
 import { WorktreeDeleteDialog } from "@renderer/components/worktree-delete-dialog";
 import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
 import { useEffect } from "react";
-import { ProjectDiffPane } from "./components/diff-review-pane";
 import { useAppState } from "./components/sync-state-provider";
 import { diffsWorkerFactory } from "./diff-worker";
 import {
@@ -42,28 +41,6 @@ function App() {
 
   return (
     <>
-      <div className="h-screen overflow-hidden">
-        <ResizablePanelGroup orientation="horizontal">
-          <ResizablePanel defaultSize="18" minSize="12" maxSize="35">
-            <SessionSidebar />
-          </ResizablePanel>
-          <ResizableHandle />
-          <ResizablePanel>
-            <main className="flex h-full min-w-0 flex-col bg-black/15">
-              <SessionPage />
-            </main>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
-
-      <ConfirmDialog />
-      <NewSessionDialog />
-      <ProjectDefaultsDialog />
-      <ProjectWorktreeDialog />
-      <WorktreeDeleteDialog />
-      <ProjectDeletionToastListener />
-      <SettingsDialog />
-      <DiffReviewCommitDialog />
       <WorkerPoolContextProvider
         poolOptions={{
           workerFactory: diffsWorkerFactory,
@@ -73,8 +50,29 @@ function App() {
           langs: ["typescript", "javascript", "css", "html"],
         }}
       >
-        <ProjectDiffPane />
+        <div className="h-screen overflow-hidden">
+          <ResizablePanelGroup orientation="horizontal">
+            <ResizablePanel defaultSize="18" minSize="12" maxSize="35">
+              <SessionSidebar />
+            </ResizablePanel>
+            <ResizableHandle />
+            <ResizablePanel>
+              <main className="flex h-full min-w-0 flex-col bg-black/15">
+                <SessionPage />
+              </main>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
       </WorkerPoolContextProvider>
+
+      <ConfirmDialog />
+      <NewSessionDialog />
+      <ProjectDefaultsDialog />
+      <ProjectWorktreeDialog />
+      <WorktreeDeleteDialog />
+      <ProjectDeletionToastListener />
+      <SettingsDialog />
+      <DiffReviewCommitDialog />
       <Toaster closeButton />
     </>
   );
