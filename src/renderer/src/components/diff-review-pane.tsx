@@ -6,11 +6,14 @@ import type {
 import { FileDiff } from "@pierre/diffs/react";
 import { COMPACT_FILE_DIFF_OPTIONS } from "@renderer/components/diff-pane-styles";
 import { useDiffReviewCommitDialogStore } from "@renderer/components/diff-review-commit-dialog";
+import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { useHotkey } from "@tanstack/react-hotkeys";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Check,
+  Copy,
   FileDiff as FileDiffIcon,
   FileMinus,
   FilePlus,
@@ -20,6 +23,7 @@ import {
   MessageSquare,
   MessageSquarePlus,
   Pencil,
+  RefreshCw,
   Trash2,
 } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
@@ -94,6 +98,22 @@ function getFileDiffSignature(file: FileDiffMetadata) {
     return `${file.prevObjectId ?? "0000000"}..${file.newObjectId ?? "0000000"}`;
   }
   return file.hunks.map((hunk) => hunk.hunkSpecs ?? "").join("\n");
+}
+
+function formatReviewCommentsForCopy(comments: DiffReviewComment[]) {
+  return [...comments]
+    .sort((a, b) => {
+      const pathCompare = a.filePath.localeCompare(b.filePath);
+      if (pathCompare !== 0) return pathCompare;
+      if (a.lineNumber !== b.lineNumber) return a.lineNumber - b.lineNumber;
+      return a.createdAt - b.createdAt;
+    })
+    .map((comment) => {
+      const sideLabel = comment.side === "additions" ? "New" : "Old";
+      const staleLabel = comment.stale ? " (outdated)" : "";
+      return `- ${comment.filePath} (${sideLabel} line ${comment.lineNumber})${staleLabel}\n${comment.body}`;
+    })
+    .join("\n\n");
 }
 
 export const useDiffReviewStore = create(
@@ -325,6 +345,22 @@ export const useDiffReviewStore = create(
           commentsByProject: {
             ...state.commentsByProject,
             [projectPath]: nextComments,
+          },
+        }));
+      },
+      discardReview: (projectPath: string) => {
+        set((state) => ({
+          commentsByProject: {
+            ...state.commentsByProject,
+            [projectPath]: [],
+          },
+          commentDraftByProject: {
+            ...state.commentDraftByProject,
+            [projectPath]: null,
+          },
+          editingCommentByProject: {
+            ...state.editingCommentByProject,
+            [projectPath]: null,
           },
         }));
       },
@@ -631,6 +667,62 @@ function CommentDraftForm({
   );
 }
 
+function CommentActions({
+  projectPath,
+  comment,
+}: {
+  projectPath: string;
+  comment: DiffReviewComment;
+}) {
+  const startEditComment = useDiffReviewStore(
+    (state) => state.startEditComment,
+  );
+  const deleteComment = useDiffReviewStore((state) => state.deleteComment);
+  const { copied, copy } = useCopyToClipboard();
+
+  return (
+    <div className="flex shrink-0 items-center gap-0.5">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6 text-zinc-500 hover:text-zinc-100"
+        onClick={() => startEditComment(projectPath, comment.id)}
+        aria-label="Edit comment"
+      >
+        <Pencil className="size-3" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={cn(
+          "size-6",
+          copied
+            ? "text-emerald-400 hover:text-emerald-300"
+            : "text-zinc-500 hover:text-zinc-100",
+        )}
+        onClick={() => {
+          void copy(comment.body);
+        }}
+        aria-label={copied ? "Copied" : "Copy comment"}
+      >
+        {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-6 text-zinc-500 hover:text-rose-300"
+        onClick={() => deleteComment(projectPath, comment.id)}
+        aria-label="Delete comment"
+      >
+        <Trash2 className="size-3" />
+      </Button>
+    </div>
+  );
+}
+
 function CommentAnnotation({
   annotation,
   selectedFile,
@@ -658,9 +750,6 @@ function CommentAnnotation({
   const submitCommentDraft = useDiffReviewStore(
     (state) => state.submitCommentDraft,
   );
-  const startEditComment = useDiffReviewStore(
-    (state) => state.startEditComment,
-  );
   const updateEditCommentDraft = useDiffReviewStore(
     (state) => state.updateEditCommentDraft,
   );
@@ -670,7 +759,6 @@ function CommentAnnotation({
   const submitEditComment = useDiffReviewStore(
     (state) => state.submitEditComment,
   );
-  const deleteComment = useDiffReviewStore((state) => state.deleteComment);
 
   if (metadata.type === "draft") {
     if (!draft) return null;
@@ -715,28 +803,7 @@ function CommentAnnotation({
             {comment.lineNumber}
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6 text-zinc-500 hover:text-zinc-100"
-            onClick={() => startEditComment(projectPath, comment.id)}
-            aria-label="Edit comment"
-          >
-            <Pencil className="size-3" />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="size-6 text-zinc-500 hover:text-rose-300"
-            onClick={() => deleteComment(projectPath, comment.id)}
-            aria-label="Delete comment"
-          >
-            <Trash2 className="size-3" />
-          </Button>
-        </div>
+        <CommentActions projectPath={projectPath} comment={comment} />
       </div>
       <p className="whitespace-pre-wrap text-xs leading-5 text-zinc-100">
         {comment.body}
@@ -750,9 +817,6 @@ function StaleCommentsSection({ comments }: { comments: DiffReviewComment[] }) {
   const editingComment = useDiffReviewStore(
     (state) => state.editingCommentByProject[projectPath] ?? null,
   );
-  const startEditComment = useDiffReviewStore(
-    (state) => state.startEditComment,
-  );
   const updateEditCommentDraft = useDiffReviewStore(
     (state) => state.updateEditCommentDraft,
   );
@@ -762,7 +826,6 @@ function StaleCommentsSection({ comments }: { comments: DiffReviewComment[] }) {
   const submitEditComment = useDiffReviewStore(
     (state) => state.submitEditComment,
   );
-  const deleteComment = useDiffReviewStore((state) => state.deleteComment);
 
   if (comments.length === 0) return null;
 
@@ -796,28 +859,7 @@ function StaleCommentsSection({ comments }: { comments: DiffReviewComment[] }) {
                     {comment.lineNumber}
                   </span>
                 </div>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 text-zinc-500 hover:text-zinc-100"
-                    onClick={() => startEditComment(projectPath, comment.id)}
-                    aria-label="Edit comment"
-                  >
-                    <Pencil className="size-3" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 text-zinc-500 hover:text-rose-300"
-                    onClick={() => deleteComment(projectPath, comment.id)}
-                    aria-label="Delete comment"
-                  >
-                    <Trash2 className="size-3" />
-                  </Button>
-                </div>
+                <CommentActions projectPath={projectPath} comment={comment} />
               </div>
               <p className="whitespace-pre-wrap text-xs leading-5 text-zinc-200">
                 {comment.body}
@@ -846,14 +888,37 @@ function AddCommentGutterButton({ onClick }: { onClick: () => void }) {
 
 function ProjectDiffPaneContent() {
   const closeDiffPane = useDiffReviewStore((state) => state.closeProjectDiff);
+  const queryClient = useQueryClient();
 
   const projectPath = useProjectDiffStore((state) => state.projectPath);
-  const { data: files, isLoading } = useQuery(
+  const {
+    data: files,
+    isLoading,
+    isFetching,
+  } = useQuery(
     orpc.projects.getUncommittedDiff.queryOptions({
       input: { path: projectPath },
       staleTime: 0,
     }),
   );
+  const refreshProjectMutation = useMutation(
+    orpc.projects.refreshProject.mutationOptions(),
+  );
+  const isRefreshing = refreshProjectMutation.isPending || isFetching;
+  const refreshProjectDiff = () => {
+    refreshProjectMutation.mutate(
+      { path: projectPath },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({
+            queryKey: orpc.projects.getUncommittedDiff.queryKey({
+              input: { path: projectPath },
+            }),
+          });
+        },
+      },
+    );
+  };
 
   const selectedFilePath = useProjectDiffStore(
     (state) => state.selectedFilePath,
@@ -884,6 +949,8 @@ function ProjectDiffPaneContent() {
   const refreshStaleComments = useDiffReviewStore(
     (state) => state.refreshStaleComments,
   );
+  const discardReview = useDiffReviewStore((state) => state.discardReview);
+  const { copied: reviewCopied, copy: copyReview } = useCopyToClipboard();
   const openCommitDialog = useDiffReviewCommitDialogStore((s) => s.open);
   const commitDialogOpen = useDiffReviewCommitDialogStore(
     (s) => s.payload !== null,
@@ -919,6 +986,7 @@ function ProjectDiffPaneContent() {
     [files, confirmedFiles],
   );
   const canCommit = pathsToCommit.length > 0;
+  const hasReviewComments = comments.length > 0;
   const selectedFileCount = useMemo(
     () => files?.filter((f) => confirmedFiles.includes(f.name)).length ?? 0,
     [files, confirmedFiles],
@@ -1117,6 +1185,20 @@ function ProjectDiffPaneContent() {
             >
               {files.length} changed file{files.length === 1 ? "" : "s"}
             </label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-5 shrink-0 text-muted-foreground hover:text-zinc-200"
+              disabled={isRefreshing}
+              onClick={refreshProjectDiff}
+              aria-label="Refresh diff"
+              title="Refresh diff"
+            >
+              <RefreshCw
+                className={cn("size-3", isRefreshing && "animate-spin")}
+              />
+            </Button>
           </div>
 
           <div
@@ -1142,7 +1224,40 @@ function ProjectDiffPaneContent() {
             )}
           </div>
 
-          <div className="shrink-0 border-t border-border/70 p-2">
+          <div className="shrink-0 space-y-1 border-t border-border/70 p-1.5">
+            {hasReviewComments ? (
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-auto min-h-6 min-w-0 flex-1 basis-[calc(50%-0.125rem)] gap-1 px-1 py-1 text-[11px] whitespace-normal"
+                  onClick={() => discardReview(projectPath)}
+                >
+                  <Trash2 className="size-2.5 shrink-0" />
+                  Discard review
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "h-auto min-h-6 min-w-0 flex-1 basis-[calc(50%-0.125rem)] gap-1 px-1 py-1 text-[11px] whitespace-normal",
+                    reviewCopied && "border-emerald-500/40 text-emerald-400",
+                  )}
+                  onClick={() => {
+                    void copyReview(formatReviewCommentsForCopy(comments));
+                  }}
+                >
+                  {reviewCopied ? (
+                    <Check className="size-2.5 shrink-0" />
+                  ) : (
+                    <Copy className="size-2.5 shrink-0" />
+                  )}
+                  Copy review
+                </Button>
+              </div>
+            ) : null}
             <Button
               type="button"
               variant="default"
