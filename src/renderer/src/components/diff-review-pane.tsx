@@ -940,7 +940,6 @@ function AddCommentGutterButton({ onClick }: { onClick: () => void }) {
 }
 
 function ProjectDiffPaneContent() {
-  const closeDiffPane = useDiffReviewStore((state) => state.closeProjectDiff);
   const queryClient = useQueryClient();
 
   const projectPath = useProjectDiffStore((state) => state.projectPath);
@@ -1137,9 +1136,6 @@ function ProjectDiffPaneContent() {
     refreshStaleComments(projectPath, files);
   }, [files, isLoading, projectPath, refreshStaleComments]);
 
-  useHotkey("Escape", () => closeDiffPane(projectPath), {
-    enabled: !commitDialogOpen && !commentEditorOpen,
-  });
   useHotkey(
     "ArrowUp",
     () => {
