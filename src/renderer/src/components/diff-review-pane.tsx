@@ -42,8 +42,10 @@ type DiffReviewComment = {
   filePath: string;
   side: AnnotationSide;
   lineNumber: number;
+  fileSignature: string;
   body: string;
   createdAt: number;
+  stale: boolean;
 };
 
 type DiffReviewCommentDraft = {
@@ -85,6 +87,13 @@ function getCommentsForProject(
   projectPath: string,
 ) {
   return commentsByProject[projectPath] ?? EMPTY_COMMENTS;
+}
+
+function getFileDiffSignature(file: FileDiffMetadata) {
+  if (file.prevObjectId || file.newObjectId) {
+    return `${file.prevObjectId ?? "0000000"}..${file.newObjectId ?? "0000000"}`;
+  }
+  return file.hunks.map((hunk) => hunk.hunkSpecs ?? "").join("\n");
 }
 
 export const useDiffReviewStore = create(
@@ -184,7 +193,7 @@ export const useDiffReviewStore = create(
           },
         }));
       },
-      submitCommentDraft: (projectPath: string) => {
+      submitCommentDraft: (projectPath: string, fileSignature: string) => {
         const draft = get().commentDraftByProject[projectPath];
         const body = draft?.body.trim();
         if (!draft || !body) return;
@@ -198,8 +207,10 @@ export const useDiffReviewStore = create(
                 filePath: draft.filePath,
                 side: draft.side,
                 lineNumber: draft.lineNumber,
+                fileSignature,
                 body,
                 createdAt: Date.now(),
+                stale: false,
               },
             ],
           },
@@ -284,6 +295,36 @@ export const useDiffReviewStore = create(
               commentId
                 ? null
                 : state.editingCommentByProject[projectPath],
+          },
+        }));
+      },
+      refreshStaleComments: (
+        projectPath: string,
+        files: FileDiffMetadata[],
+      ) => {
+        const signatureByPath = new Map(
+          files.map((file) => [file.name, getFileDiffSignature(file)]),
+        );
+        const comments = getCommentsForProject(
+          get().commentsByProject,
+          projectPath,
+        );
+        const nextComments = comments.map((comment) => {
+          const fileSignature = signatureByPath.get(comment.filePath);
+          const stale =
+            !fileSignature || fileSignature !== comment.fileSignature;
+          return comment.stale === stale ? comment : { ...comment, stale };
+        });
+        if (
+          nextComments.every((comment, index) => comment === comments[index])
+        ) {
+          return;
+        }
+
+        set((state) => ({
+          commentsByProject: {
+            ...state.commentsByProject,
+            [projectPath]: nextComments,
           },
         }));
       },
@@ -592,8 +633,10 @@ function CommentDraftForm({
 
 function CommentAnnotation({
   annotation,
+  selectedFile,
 }: {
   annotation: DiffLineAnnotation<DiffReviewAnnotationMetadata>;
+  selectedFile: FileDiffMetadata;
 }) {
   const metadata = annotation.metadata;
   const projectPath = useProjectDiffStore((state) => state.projectPath);
@@ -631,12 +674,15 @@ function CommentAnnotation({
 
   if (metadata.type === "draft") {
     if (!draft) return null;
+    const submitDraft = () => {
+      submitCommentDraft(projectPath, getFileDiffSignature(selectedFile));
+    };
     return (
       <CommentDraftForm
         body={draft.body}
         onBodyChange={(body) => updateCommentDraft(projectPath, body)}
         onCancel={() => cancelCommentDraft(projectPath)}
-        onSubmit={() => submitCommentDraft(projectPath)}
+        onSubmit={submitDraft}
         submitLabel="Comment"
         placeholder="Leave a comment"
       />
@@ -699,6 +745,91 @@ function CommentAnnotation({
   );
 }
 
+function StaleCommentsSection({ comments }: { comments: DiffReviewComment[] }) {
+  const projectPath = useProjectDiffStore((state) => state.projectPath);
+  const editingComment = useDiffReviewStore(
+    (state) => state.editingCommentByProject[projectPath] ?? null,
+  );
+  const startEditComment = useDiffReviewStore(
+    (state) => state.startEditComment,
+  );
+  const updateEditCommentDraft = useDiffReviewStore(
+    (state) => state.updateEditCommentDraft,
+  );
+  const cancelEditComment = useDiffReviewStore(
+    (state) => state.cancelEditComment,
+  );
+  const submitEditComment = useDiffReviewStore(
+    (state) => state.submitEditComment,
+  );
+  const deleteComment = useDiffReviewStore((state) => state.deleteComment);
+
+  if (comments.length === 0) return null;
+
+  return (
+    <section className="border-b border-border/70 bg-zinc-950/80 px-3 py-2">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-zinc-400">
+        <MessageSquare className="size-3 text-zinc-500" />
+        Outdated comments
+      </div>
+      <div className="space-y-1.5">
+        {comments.map((comment) =>
+          editingComment?.commentId === comment.id ? (
+            <CommentDraftForm
+              key={comment.id}
+              body={editingComment.body}
+              onBodyChange={(body) => updateEditCommentDraft(projectPath, body)}
+              onCancel={() => cancelEditComment(projectPath)}
+              onSubmit={() => submitEditComment(projectPath)}
+              submitLabel="Save"
+              placeholder="Edit comment"
+            />
+          ) : (
+            <div
+              key={comment.id}
+              className="rounded-md border border-zinc-800 bg-zinc-950/95 p-2"
+            >
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className="min-w-0 text-[11px] text-zinc-500">
+                  <span className="truncate">
+                    {comment.side === "additions" ? "New" : "Old"} line{" "}
+                    {comment.lineNumber}
+                  </span>
+                </div>
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-zinc-500 hover:text-zinc-100"
+                    onClick={() => startEditComment(projectPath, comment.id)}
+                    aria-label="Edit comment"
+                  >
+                    <Pencil className="size-3" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-6 text-zinc-500 hover:text-rose-300"
+                    onClick={() => deleteComment(projectPath, comment.id)}
+                    aria-label="Delete comment"
+                  >
+                    <Trash2 className="size-3" />
+                  </Button>
+                </div>
+              </div>
+              <p className="whitespace-pre-wrap text-xs leading-5 text-zinc-200">
+                {comment.body}
+              </p>
+            </div>
+          ),
+        )}
+      </div>
+    </section>
+  );
+}
+
 function AddCommentGutterButton({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -750,6 +881,9 @@ function ProjectDiffPaneContent() {
   const startCommentDraft = useDiffReviewStore(
     (state) => state.startCommentDraft,
   );
+  const refreshStaleComments = useDiffReviewStore(
+    (state) => state.refreshStaleComments,
+  );
   const openCommitDialog = useDiffReviewCommitDialogStore((s) => s.open);
   const commitDialogOpen = useDiffReviewCommitDialogStore(
     (s) => s.payload !== null,
@@ -800,7 +934,9 @@ function ProjectDiffPaneContent() {
     if (!selectedFile) return [];
     const annotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[] =
       comments
-        .filter((comment) => comment.filePath === selectedFile.name)
+        .filter(
+          (comment) => comment.filePath === selectedFile.name && !comment.stale,
+        )
         .map((comment) => ({
           side: comment.side,
           lineNumber: comment.lineNumber,
@@ -817,6 +953,12 @@ function ProjectDiffPaneContent() {
 
     return annotations;
   }, [comments, commentDraft, selectedFile]);
+  const staleCommentsForSelectedFile = useMemo(() => {
+    if (!selectedFile) return [];
+    return comments.filter(
+      (comment) => comment.filePath === selectedFile.name && comment.stale,
+    );
+  }, [comments, selectedFile]);
   const commentEditorOpen = Boolean(commentDraft || editingComment);
   const diffOptions = useMemo(
     () => ({
@@ -842,6 +984,11 @@ function ProjectDiffPaneContent() {
     }),
     [projectPath, selectFile, selectedFile, startCommentDraft],
   );
+
+  useEffect(() => {
+    if (isLoading || !files) return;
+    refreshStaleComments(projectPath, files);
+  }, [files, isLoading, projectPath, refreshStaleComments]);
 
   useHotkey("Escape", () => closeDiffPane(projectPath), {
     enabled: !commitDialogOpen && !commentEditorOpen,
@@ -899,29 +1046,35 @@ function ProjectDiffPaneContent() {
               <LoaderCircle className="text-muted-foreground size-6 animate-spin" />
             </div>
           ) : selectedFile ? (
-            <FileDiff
-              fileDiff={selectedFile}
-              options={diffOptions}
-              lineAnnotations={lineAnnotations}
-              renderAnnotation={(annotation) => (
-                <CommentAnnotation annotation={annotation} />
-              )}
-              renderGutterUtility={(getHoveredLine) => (
-                <AddCommentGutterButton
-                  onClick={() => {
-                    const hoveredLine = getHoveredLine();
-                    if (!selectedFile || !hoveredLine) return;
-                    selectFile(selectedFile.name);
-                    startCommentDraft(
-                      projectPath,
-                      selectedFile.name,
-                      hoveredLine.side,
-                      hoveredLine.lineNumber,
-                    );
-                  }}
-                />
-              )}
-            />
+            <>
+              <StaleCommentsSection comments={staleCommentsForSelectedFile} />
+              <FileDiff
+                fileDiff={selectedFile}
+                options={diffOptions}
+                lineAnnotations={lineAnnotations}
+                renderAnnotation={(annotation) => (
+                  <CommentAnnotation
+                    annotation={annotation}
+                    selectedFile={selectedFile}
+                  />
+                )}
+                renderGutterUtility={(getHoveredLine) => (
+                  <AddCommentGutterButton
+                    onClick={() => {
+                      const hoveredLine = getHoveredLine();
+                      if (!selectedFile || !hoveredLine) return;
+                      selectFile(selectedFile.name);
+                      startCommentDraft(
+                        projectPath,
+                        selectedFile.name,
+                        hoveredLine.side,
+                        hoveredLine.lineNumber,
+                      );
+                    }}
+                  />
+                )}
+              />
+            </>
           ) : (
             <div className="flex h-full items-center justify-center">
               <p className="text-muted-foreground text-sm">
