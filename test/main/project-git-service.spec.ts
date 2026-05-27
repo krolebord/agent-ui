@@ -4,6 +4,8 @@ const simpleGitFactoryMock = vi.hoisted(() => vi.fn());
 const checkIsRepoMock = vi.hoisted(() => vi.fn());
 const branchLocalMock = vi.hoisted(() => vi.fn());
 const rawMock = vi.hoisted(() => vi.fn());
+const addMock = vi.hoisted(() => vi.fn());
+const commitMock = vi.hoisted(() => vi.fn());
 const copyFileMock = vi.hoisted(() => vi.fn());
 const mkdtempMock = vi.hoisted(() => vi.fn());
 const readdirMock = vi.hoisted(() => vi.fn());
@@ -55,6 +57,9 @@ describe("ProjectGitService", () => {
       const git = {
         checkIsRepo: () => checkIsRepoMock(projectPath),
         branchLocal: () => branchLocalMock(projectPath),
+        add: (paths: string | string[]) => addMock(projectPath, paths),
+        commit: (message: string | string[], paths?: string[]) =>
+          commitMock(projectPath, message, paths),
         raw: (args: string[]) => {
           const envSnapshot = { ...envVars };
           if (Object.keys(envSnapshot).length === 0) {
@@ -448,6 +453,41 @@ describe("ProjectGitService", () => {
       recursive: true,
       force: true,
     });
+  });
+
+  it("stages paths before committing selected changes", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main", branches: {} });
+    addMock.mockResolvedValue(undefined);
+    commitMock.mockResolvedValue(undefined);
+
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({ path: "/repo-one", collapsed: false });
+    });
+
+    const service = new ProjectGitService(projectsState);
+    await service.commitSelectedChanges("/repo-one", {
+      paths: [
+        "src/hooks/use-copy-to-clipboard.ts",
+        "src/components/diff-review-pane.tsx",
+      ],
+      subject: "Add copy hook",
+      description: "Extract clipboard helper.",
+    });
+
+    expect(addMock).toHaveBeenCalledWith("/repo-one", [
+      "src/hooks/use-copy-to-clipboard.ts",
+      "src/components/diff-review-pane.tsx",
+    ]);
+    expect(commitMock).toHaveBeenCalledWith(
+      "/repo-one",
+      ["Add copy hook", "Extract clipboard helper."],
+      [
+        "src/hooks/use-copy-to-clipboard.ts",
+        "src/components/diff-review-pane.tsx",
+      ],
+    );
   });
 
   it("returns the uncommitted diff using a temporary index", async () => {

@@ -549,9 +549,10 @@ export class ProjectGitService {
   }
 
   /**
-   * Commits working-tree changes for the given paths only. Other staged
-   * changes stay staged and are not included in this commit (git pathspec
-   * commit semantics).
+   * Stages and commits working-tree changes for the given paths only. Other
+   * staged changes stay staged and are not included in this commit (git
+   * pathspec commit semantics). Paths must be staged first so untracked files
+   * are included — `git commit <path>` alone only works for tracked files.
    */
   async commitSelectedChanges(
     projectPath: string,
@@ -583,6 +584,7 @@ export class ProjectGitService {
     const message = description ? [subject, description] : subject;
 
     try {
+      await git.add(paths);
       await git.commit(message, paths);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Git commit failed.";
