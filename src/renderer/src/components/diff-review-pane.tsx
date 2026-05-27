@@ -1,4 +1,8 @@
-import type { FileDiffMetadata } from "@pierre/diffs/react";
+import type {
+  AnnotationSide,
+  DiffLineAnnotation,
+  FileDiffMetadata,
+} from "@pierre/diffs/react";
 import { FileDiff } from "@pierre/diffs/react";
 import { COMPACT_FILE_DIFF_OPTIONS } from "@renderer/components/diff-pane-styles";
 import { useDiffReviewCommitDialogStore } from "@renderer/components/diff-review-commit-dialog";
@@ -13,8 +17,12 @@ import {
   FileText,
   GitCommitHorizontal,
   LoaderCircle,
+  MessageSquare,
+  MessageSquarePlus,
+  Pencil,
+  Trash2,
 } from "lucide-react";
-import { createContext, useContext, useMemo, useRef } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 import { create, createStore, type ExtractState } from "zustand";
 import { combine } from "zustand/middleware";
 import { useStore } from "zustand/react";
@@ -25,8 +33,45 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "./ui/resizable";
+import { Textarea } from "./ui/textarea";
 
 export type BottomPaneView = "terminals" | "diff";
+
+type DiffReviewComment = {
+  id: string;
+  filePath: string;
+  side: AnnotationSide;
+  lineNumber: number;
+  body: string;
+  createdAt: number;
+};
+
+type DiffReviewCommentDraft = {
+  filePath: string;
+  side: AnnotationSide;
+  lineNumber: number;
+  body: string;
+};
+
+type DiffReviewCommentEditDraft = {
+  commentId: string;
+  body: string;
+};
+
+type DiffReviewAnnotationMetadata =
+  | {
+      type: "comment";
+      commentId: string;
+    }
+  | {
+      type: "draft";
+    };
+
+function createCommentId() {
+  return `comment-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const EMPTY_COMMENTS: DiffReviewComment[] = [];
 
 function getBottomPaneViewForProject(
   viewsByProject: Record<string, BottomPaneView>,
@@ -35,10 +80,26 @@ function getBottomPaneViewForProject(
   return viewsByProject[projectPath] ?? "terminals";
 }
 
+function getCommentsForProject(
+  commentsByProject: Record<string, DiffReviewComment[]>,
+  projectPath: string,
+) {
+  return commentsByProject[projectPath] ?? EMPTY_COMMENTS;
+}
+
 export const useDiffReviewStore = create(
   combine(
     {
       bottomPaneViewByProject: {} as Record<string, BottomPaneView>,
+      commentsByProject: {} as Record<string, DiffReviewComment[]>,
+      commentDraftByProject: {} as Record<
+        string,
+        DiffReviewCommentDraft | null
+      >,
+      editingCommentByProject: {} as Record<
+        string,
+        DiffReviewCommentEditDraft | null
+      >,
     },
     (set, get) => ({
       setBottomPaneView: (
@@ -77,6 +138,152 @@ export const useDiffReviewStore = create(
           bottomPaneViewByProject: {
             ...state.bottomPaneViewByProject,
             [projectPath]: current === "diff" ? "terminals" : "diff",
+          },
+        }));
+      },
+      startCommentDraft: (
+        projectPath: string,
+        filePath: string,
+        side: AnnotationSide,
+        lineNumber: number,
+      ) => {
+        const current = get().commentDraftByProject[projectPath];
+        set((state) => ({
+          editingCommentByProject: {
+            ...state.editingCommentByProject,
+            [projectPath]: null,
+          },
+          commentDraftByProject: {
+            ...state.commentDraftByProject,
+            [projectPath]:
+              current &&
+              current.filePath === filePath &&
+              current.side === side &&
+              current.lineNumber === lineNumber
+                ? current
+                : { filePath, side, lineNumber, body: "" },
+          },
+        }));
+      },
+      updateCommentDraft: (projectPath: string, body: string) => {
+        set((state) => {
+          const draft = state.commentDraftByProject[projectPath];
+          return {
+            commentDraftByProject: {
+              ...state.commentDraftByProject,
+              [projectPath]: draft ? { ...draft, body } : draft,
+            },
+          };
+        });
+      },
+      cancelCommentDraft: (projectPath: string) => {
+        set((state) => ({
+          commentDraftByProject: {
+            ...state.commentDraftByProject,
+            [projectPath]: null,
+          },
+        }));
+      },
+      submitCommentDraft: (projectPath: string) => {
+        const draft = get().commentDraftByProject[projectPath];
+        const body = draft?.body.trim();
+        if (!draft || !body) return;
+        set((state) => ({
+          commentsByProject: {
+            ...state.commentsByProject,
+            [projectPath]: [
+              ...getCommentsForProject(state.commentsByProject, projectPath),
+              {
+                id: createCommentId(),
+                filePath: draft.filePath,
+                side: draft.side,
+                lineNumber: draft.lineNumber,
+                body,
+                createdAt: Date.now(),
+              },
+            ],
+          },
+          commentDraftByProject: {
+            ...state.commentDraftByProject,
+            [projectPath]: null,
+          },
+        }));
+      },
+      startEditComment: (projectPath: string, commentId: string) => {
+        const comment = getCommentsForProject(
+          get().commentsByProject,
+          projectPath,
+        ).find((item) => item.id === commentId);
+        if (!comment) return;
+        set((state) => ({
+          commentDraftByProject: {
+            ...state.commentDraftByProject,
+            [projectPath]: null,
+          },
+          editingCommentByProject: {
+            ...state.editingCommentByProject,
+            [projectPath]: {
+              commentId,
+              body: comment.body,
+            },
+          },
+        }));
+      },
+      updateEditCommentDraft: (projectPath: string, body: string) => {
+        set((state) => {
+          const edit = state.editingCommentByProject[projectPath];
+          return {
+            editingCommentByProject: {
+              ...state.editingCommentByProject,
+              [projectPath]: edit ? { ...edit, body } : edit,
+            },
+          };
+        });
+      },
+      cancelEditComment: (projectPath: string) => {
+        set((state) => ({
+          editingCommentByProject: {
+            ...state.editingCommentByProject,
+            [projectPath]: null,
+          },
+        }));
+      },
+      submitEditComment: (projectPath: string) => {
+        const edit = get().editingCommentByProject[projectPath];
+        const body = edit?.body.trim();
+        if (!edit || !body) return;
+        set((state) => ({
+          commentsByProject: {
+            ...state.commentsByProject,
+            [projectPath]: getCommentsForProject(
+              state.commentsByProject,
+              projectPath,
+            ).map((comment) =>
+              comment.id === edit.commentId ? { ...comment, body } : comment,
+            ),
+          },
+          editingCommentByProject: {
+            ...state.editingCommentByProject,
+            [projectPath]: null,
+          },
+        }));
+      },
+      deleteComment: (projectPath: string, commentId: string) => {
+        set((state) => ({
+          commentsByProject: {
+            ...state.commentsByProject,
+            [projectPath]: getCommentsForProject(
+              state.commentsByProject,
+              projectPath,
+            ).filter((comment) => comment.id !== commentId),
+          },
+          editingCommentByProject: {
+            ...state.editingCommentByProject,
+            [projectPath]:
+              state.editingCommentByProject[projectPath]?.commentId ===
+              commentId
+                ? null
+                : state.editingCommentByProject[projectPath],
           },
         }));
       },
@@ -202,9 +409,11 @@ function gitPathsForConfirmedFiles(
 function FileListItem({
   file,
   selected,
+  commentCount,
 }: {
   file: FileDiffMetadata;
   selected: boolean;
+  commentCount: number;
 }) {
   const confirmed = useProjectDiffStore((s) =>
     s.confirmedFiles.includes(file.name),
@@ -289,7 +498,218 @@ function FileListItem({
           </span>
         )}
       </span>
+      {commentCount > 0 ? (
+        <span
+          className="flex h-4 shrink-0 items-center gap-0.5 rounded-sm bg-sky-500/15 px-1 text-[10px] text-sky-300"
+          title={`${commentCount} comment${commentCount === 1 ? "" : "s"}`}
+        >
+          <MessageSquare className="size-2.5" />
+          {commentCount}
+        </span>
+      ) : null}
     </div>
+  );
+}
+
+function CommentDraftForm({
+  body,
+  onBodyChange,
+  onCancel,
+  onSubmit,
+  submitLabel,
+  placeholder,
+}: {
+  body: string;
+  onBodyChange: (body: string) => void;
+  onCancel: () => void;
+  onSubmit: () => void;
+  submitLabel: string;
+  placeholder: string;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const initialSelectionEndRef = useRef(body.length);
+
+  useEffect(() => {
+    const handle = window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        initialSelectionEndRef.current,
+        initialSelectionEndRef.current,
+      );
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, []);
+
+  return (
+    <form
+      className="mx-2 my-1 max-w-3xl rounded-md border border-sky-500/40 bg-zinc-950/95 p-2 shadow-lg"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+    >
+      <Textarea
+        ref={textareaRef}
+        value={body}
+        onChange={(event) => onBodyChange(event.currentTarget.value)}
+        placeholder={placeholder}
+        className="min-h-20 resize-y border-zinc-700 bg-zinc-900/80 text-xs"
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+            return;
+          }
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            onSubmit();
+          }
+        }}
+      />
+      <div className="mt-2 flex justify-end gap-1.5">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          disabled={!body.trim()}
+        >
+          {submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function CommentAnnotation({
+  annotation,
+}: {
+  annotation: DiffLineAnnotation<DiffReviewAnnotationMetadata>;
+}) {
+  const metadata = annotation.metadata;
+  const projectPath = useProjectDiffStore((state) => state.projectPath);
+  const comments = useDiffReviewStore((state) =>
+    getCommentsForProject(state.commentsByProject, projectPath),
+  );
+  const draft = useDiffReviewStore(
+    (state) => state.commentDraftByProject[projectPath] ?? null,
+  );
+  const editingComment = useDiffReviewStore(
+    (state) => state.editingCommentByProject[projectPath] ?? null,
+  );
+  const updateCommentDraft = useDiffReviewStore(
+    (state) => state.updateCommentDraft,
+  );
+  const cancelCommentDraft = useDiffReviewStore(
+    (state) => state.cancelCommentDraft,
+  );
+  const submitCommentDraft = useDiffReviewStore(
+    (state) => state.submitCommentDraft,
+  );
+  const startEditComment = useDiffReviewStore(
+    (state) => state.startEditComment,
+  );
+  const updateEditCommentDraft = useDiffReviewStore(
+    (state) => state.updateEditCommentDraft,
+  );
+  const cancelEditComment = useDiffReviewStore(
+    (state) => state.cancelEditComment,
+  );
+  const submitEditComment = useDiffReviewStore(
+    (state) => state.submitEditComment,
+  );
+  const deleteComment = useDiffReviewStore((state) => state.deleteComment);
+
+  if (metadata.type === "draft") {
+    if (!draft) return null;
+    return (
+      <CommentDraftForm
+        body={draft.body}
+        onBodyChange={(body) => updateCommentDraft(projectPath, body)}
+        onCancel={() => cancelCommentDraft(projectPath)}
+        onSubmit={() => submitCommentDraft(projectPath)}
+        submitLabel="Comment"
+        placeholder="Leave a comment"
+      />
+    );
+  }
+
+  const comment = comments.find((item) => item.id === metadata.commentId);
+  if (!comment) return null;
+
+  if (editingComment?.commentId === comment.id) {
+    return (
+      <CommentDraftForm
+        body={editingComment.body}
+        onBodyChange={(body) => updateEditCommentDraft(projectPath, body)}
+        onCancel={() => cancelEditComment(projectPath)}
+        onSubmit={() => submitEditComment(projectPath)}
+        submitLabel="Save"
+        placeholder="Edit comment"
+      />
+    );
+  }
+
+  return (
+    <div className="mx-2 my-1 max-w-3xl rounded-md border border-border/80 bg-zinc-950/95 p-2 shadow-lg">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-zinc-400">
+          <MessageSquare className="size-3 text-sky-300" />
+          <span className="truncate">
+            {comment.side === "additions" ? "New" : "Old"} line{" "}
+            {comment.lineNumber}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6 text-zinc-500 hover:text-zinc-100"
+            onClick={() => startEditComment(projectPath, comment.id)}
+            aria-label="Edit comment"
+          >
+            <Pencil className="size-3" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-6 text-zinc-500 hover:text-rose-300"
+            onClick={() => deleteComment(projectPath, comment.id)}
+            aria-label="Delete comment"
+          >
+            <Trash2 className="size-3" />
+          </Button>
+        </div>
+      </div>
+      <p className="whitespace-pre-wrap text-xs leading-5 text-zinc-100">
+        {comment.body}
+      </p>
+    </div>
+  );
+}
+
+function AddCommentGutterButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="relative z-20 ml-6 flex size-5 items-center justify-center rounded-sm border border-sky-300/70 bg-sky-600 text-white shadow-lg ring-1 ring-black/70 hover:bg-sky-500"
+      aria-label="Add comment"
+      title="Add comment"
+      onClick={onClick}
+    >
+      <MessageSquarePlus className="size-3" />
+    </button>
   );
 }
 
@@ -317,6 +737,18 @@ function ProjectDiffPaneContent() {
   );
   const clearConfirmations = useProjectDiffStore(
     (state) => state.clearConfirmations,
+  );
+  const comments = useDiffReviewStore((state) =>
+    getCommentsForProject(state.commentsByProject, projectPath),
+  );
+  const commentDraft = useDiffReviewStore(
+    (state) => state.commentDraftByProject[projectPath] ?? null,
+  );
+  const editingComment = useDiffReviewStore(
+    (state) => state.editingCommentByProject[projectPath] ?? null,
+  );
+  const startCommentDraft = useDiffReviewStore(
+    (state) => state.startCommentDraft,
   );
   const openCommitDialog = useDiffReviewCommitDialogStore((s) => s.open);
   const commitDialogOpen = useDiffReviewCommitDialogStore(
@@ -357,9 +789,62 @@ function ProjectDiffPaneContent() {
     () => files?.filter((f) => confirmedFiles.includes(f.name)).length ?? 0,
     [files, confirmedFiles],
   );
+  const commentCountsByFile = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const comment of comments) {
+      counts[comment.filePath] = (counts[comment.filePath] ?? 0) + 1;
+    }
+    return counts;
+  }, [comments]);
+  const lineAnnotations = useMemo(() => {
+    if (!selectedFile) return [];
+    const annotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[] =
+      comments
+        .filter((comment) => comment.filePath === selectedFile.name)
+        .map((comment) => ({
+          side: comment.side,
+          lineNumber: comment.lineNumber,
+          metadata: { type: "comment", commentId: comment.id },
+        }));
+
+    if (commentDraft?.filePath === selectedFile.name) {
+      annotations.push({
+        side: commentDraft.side,
+        lineNumber: commentDraft.lineNumber,
+        metadata: { type: "draft" },
+      });
+    }
+
+    return annotations;
+  }, [comments, commentDraft, selectedFile]);
+  const commentEditorOpen = Boolean(commentDraft || editingComment);
+  const diffOptions = useMemo(
+    () => ({
+      ...COMPACT_FILE_DIFF_OPTIONS,
+      enableGutterUtility: true,
+      lineHoverHighlight: "both" as const,
+      onLineNumberClick: ({
+        annotationSide,
+        lineNumber,
+      }: {
+        annotationSide: AnnotationSide;
+        lineNumber: number;
+      }) => {
+        if (!selectedFile) return;
+        selectFile(selectedFile.name);
+        startCommentDraft(
+          projectPath,
+          selectedFile.name,
+          annotationSide,
+          lineNumber,
+        );
+      },
+    }),
+    [projectPath, selectFile, selectedFile, startCommentDraft],
+  );
 
   useHotkey("Escape", () => closeDiffPane(projectPath), {
-    enabled: !commitDialogOpen,
+    enabled: !commitDialogOpen && !commentEditorOpen,
   });
   useHotkey(
     "ArrowUp",
@@ -368,7 +853,7 @@ function ProjectDiffPaneContent() {
       const newIndex = (selectedFileIndex - 1 + files.length) % files.length;
       selectFile(files[newIndex].name);
     },
-    { enabled: !commitDialogOpen },
+    { enabled: !commitDialogOpen && !commentEditorOpen },
   );
   useHotkey(
     "ArrowDown",
@@ -377,7 +862,7 @@ function ProjectDiffPaneContent() {
       const newIndex = (selectedFileIndex + 1) % files.length;
       selectFile(files[newIndex].name);
     },
-    { enabled: !commitDialogOpen },
+    { enabled: !commitDialogOpen && !commentEditorOpen },
   );
   useHotkey(
     "Space",
@@ -386,7 +871,12 @@ function ProjectDiffPaneContent() {
       toggleFileConfirmation(selectedFile.name);
     },
     {
-      enabled: Boolean(!commitDialogOpen && files?.length && selectedFile),
+      enabled: Boolean(
+        !commitDialogOpen &&
+          !commentEditorOpen &&
+          files?.length &&
+          selectedFile,
+      ),
     },
   );
 
@@ -411,7 +901,26 @@ function ProjectDiffPaneContent() {
           ) : selectedFile ? (
             <FileDiff
               fileDiff={selectedFile}
-              options={COMPACT_FILE_DIFF_OPTIONS}
+              options={diffOptions}
+              lineAnnotations={lineAnnotations}
+              renderAnnotation={(annotation) => (
+                <CommentAnnotation annotation={annotation} />
+              )}
+              renderGutterUtility={(getHoveredLine) => (
+                <AddCommentGutterButton
+                  onClick={() => {
+                    const hoveredLine = getHoveredLine();
+                    if (!selectedFile || !hoveredLine) return;
+                    selectFile(selectedFile.name);
+                    startCommentDraft(
+                      projectPath,
+                      selectedFile.name,
+                      hoveredLine.side,
+                      hoveredLine.lineNumber,
+                    );
+                  }}
+                />
+              )}
             />
           ) : (
             <div className="flex h-full items-center justify-center">
@@ -472,6 +981,7 @@ function ProjectDiffPaneContent() {
                   key={file.name}
                   file={file}
                   selected={!!selectedFile && selectedFile.name === file.name}
+                  commentCount={commentCountsByFile[file.name] ?? 0}
                 />
               ))
             ) : (
