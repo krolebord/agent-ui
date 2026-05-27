@@ -490,6 +490,124 @@ describe("ProjectGitService", () => {
     );
   });
 
+  it("discards a staged new file by resetting it and deleting it", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main", branches: {} });
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "ls-tree") {
+        return "";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--verify") {
+        return "0123456789abcdef\n";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--git-path") {
+        return ".git/index\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(defineProjectState());
+    await service.discardChanges("/repo-one", ["new-file.ts"]);
+
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+      "ls-tree",
+      "-r",
+      "--name-only",
+      "-z",
+      "HEAD",
+      "--",
+      "new-file.ts",
+    ]);
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+      "reset",
+      "-q",
+      "HEAD",
+      "--",
+      "new-file.ts",
+    ]);
+    expect(rawMock).not.toHaveBeenCalledWith("/repo-one", [
+      "checkout",
+      "HEAD",
+      "--",
+      "new-file.ts",
+    ]);
+    expect(rmMock).toHaveBeenCalledWith("/repo-one/new-file.ts", {
+      force: true,
+      recursive: true,
+    });
+  });
+
+  it("discards a staged rename by restoring the old path and deleting the new path", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main", branches: {} });
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "ls-tree") {
+        return "old-file.ts\0";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--verify") {
+        return "0123456789abcdef\n";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--git-path") {
+        return ".git/index\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(defineProjectState());
+    await service.discardChanges("/repo-one", ["old-file.ts", "new-file.ts"]);
+
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+      "reset",
+      "-q",
+      "HEAD",
+      "--",
+      "old-file.ts",
+      "new-file.ts",
+    ]);
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+      "checkout",
+      "HEAD",
+      "--",
+      "old-file.ts",
+    ]);
+    expect(rmMock).toHaveBeenCalledWith("/repo-one/new-file.ts", {
+      force: true,
+      recursive: true,
+    });
+  });
+
+  it("discards a new file before the first commit", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main", branches: {} });
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "rev-parse" && args[1] === "--verify") {
+        throw new Error("Needed a single revision");
+      }
+      if (args[0] === "ls-tree") {
+        return "";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--git-path") {
+        return ".git/index\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(defineProjectState());
+    await service.discardChanges("/repo-one", ["new-file.ts"]);
+
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+      "reset",
+      "-q",
+      "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+      "--",
+      "new-file.ts",
+    ]);
+    expect(rmMock).toHaveBeenCalledWith("/repo-one/new-file.ts", {
+      force: true,
+      recursive: true,
+    });
+  });
+
   it("returns the uncommitted diff using a temporary index", async () => {
     checkIsRepoMock.mockResolvedValue(true);
     rawMock.mockImplementation(

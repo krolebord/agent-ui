@@ -4,8 +4,15 @@ import type {
   FileDiffMetadata,
 } from "@pierre/diffs/react";
 import { FileDiff } from "@pierre/diffs/react";
+import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
 import { COMPACT_FILE_DIFF_OPTIONS } from "@renderer/components/diff-pane-styles";
 import { useDiffReviewCommitDialogStore } from "@renderer/components/diff-review-commit-dialog";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@renderer/components/ui/context-menu";
 import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -495,10 +502,40 @@ function FileListItem({
   const confirmed = useProjectDiffStore((s) =>
     s.confirmedFiles.includes(file.name),
   );
+  const projectPath = useProjectDiffStore((s) => s.projectPath);
   const selectFile = useProjectDiffStore((s) => s.selectFile);
   const toggleFileConfirmation = useProjectDiffStore(
     (s) => s.toggleFileConfirmation,
   );
+
+  const queryClient = useQueryClient();
+  const confirm = useConfirmDialogStore((s) => s.confirm);
+  const discardMutation = useMutation(
+    orpc.projects.discardChanges.mutationOptions(),
+  );
+
+  const requestDiscard = () => {
+    const filePaths = file.prevName ? [file.prevName, file.name] : [file.name];
+    const description =
+      file.type === "new"
+        ? `"${file.name}" is a new file and will be permanently deleted. This cannot be undone.`
+        : file.type === "deleted"
+          ? `"${file.name}" will be restored to its last committed version. This cannot be undone.`
+          : `Changes to "${file.name}" will be reverted to the last commit. This cannot be undone.`;
+    confirm({
+      title: "Discard changes?",
+      description,
+      confirmLabel: "Discard",
+      onConfirm: async () => {
+        await discardMutation.mutateAsync({ path: projectPath, filePaths });
+        await queryClient.invalidateQueries({
+          queryKey: orpc.projects.getUncommittedDiff.queryKey({
+            input: { path: projectPath },
+          }),
+        });
+      },
+    });
+  };
 
   const Icon = fileTypeIcon(file);
   const { additions, deletions } = useMemo(
@@ -517,74 +554,90 @@ function FileListItem({
     : null;
 
   return (
-    <div
-      role="option"
-      tabIndex={-1}
-      className={cn(
-        "flex w-full cursor-pointer items-center gap-1.5 px-1.5 py-1 text-left text-sm transition outline-none",
-        selected
-          ? "bg-white/12 text-white"
-          : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
-      )}
-      onClick={() => selectFile(file.name)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          selectFile(file.name);
-        }
-      }}
-      aria-selected={selected}
-    >
-      <Checkbox
-        checked={confirmed}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => e.stopPropagation()}
-        onCheckedChange={() => toggleFileConfirmation(file.name)}
-        className="shrink-0"
-        aria-label={
-          confirmed
-            ? "Included in commit — press Space to exclude"
-            : "Excluded from commit — press Space to include"
-        }
-      />
-      <Icon
-        className={cn(
-          "size-3.5 shrink-0",
-          file.type === "new" && "text-emerald-400",
-          file.type === "deleted" && "text-rose-400",
-          file.type !== "new" &&
-            file.type !== "deleted" &&
-            "text-muted-foreground",
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-xs">{label}</div>
-        {dir ? (
-          <div className="truncate text-[10px] text-zinc-500">{dir}</div>
-        ) : null}
-      </div>
-      <span className="shrink-0 font-mono text-[10px]">
-        {additions > 0 && (
-          <span className="text-emerald-400">+{additions}</span>
-        )}
-        {deletions > 0 && (
-          <span
-            className={additions > 0 ? "ml-1 text-rose-400" : "text-rose-400"}
-          >
-            -{deletions}
-          </span>
-        )}
-      </span>
-      {commentCount > 0 ? (
-        <span
-          className="flex h-4 shrink-0 items-center gap-0.5 rounded-sm bg-sky-500/15 px-1 text-[10px] text-sky-300"
-          title={`${commentCount} comment${commentCount === 1 ? "" : "s"}`}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          role="option"
+          tabIndex={-1}
+          className={cn(
+            "flex w-full cursor-pointer items-center gap-1.5 px-1.5 py-1 text-left text-sm transition outline-none",
+            selected
+              ? "bg-white/12 text-white"
+              : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
+          )}
+          onClick={() => selectFile(file.name)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              selectFile(file.name);
+            }
+          }}
+          aria-selected={selected}
         >
-          <MessageSquare className="size-2.5" />
-          {commentCount}
-        </span>
-      ) : null}
-    </div>
+          <Checkbox
+            checked={confirmed}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onCheckedChange={() => toggleFileConfirmation(file.name)}
+            className="shrink-0"
+            aria-label={
+              confirmed
+                ? "Included in commit — press Space to exclude"
+                : "Excluded from commit — press Space to include"
+            }
+          />
+          <Icon
+            className={cn(
+              "size-3.5 shrink-0",
+              file.type === "new" && "text-emerald-400",
+              file.type === "deleted" && "text-rose-400",
+              file.type !== "new" &&
+                file.type !== "deleted" &&
+                "text-muted-foreground",
+            )}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xs">{label}</div>
+            {dir ? (
+              <div className="truncate text-[10px] text-zinc-500">{dir}</div>
+            ) : null}
+          </div>
+          <span className="shrink-0 font-mono text-[10px]">
+            {additions > 0 && (
+              <span className="text-emerald-400">+{additions}</span>
+            )}
+            {deletions > 0 && (
+              <span
+                className={
+                  additions > 0 ? "ml-1 text-rose-400" : "text-rose-400"
+                }
+              >
+                -{deletions}
+              </span>
+            )}
+          </span>
+          {commentCount > 0 ? (
+            <span
+              className="flex h-4 shrink-0 items-center gap-0.5 rounded-sm bg-sky-500/15 px-1 text-[10px] text-sky-300"
+              title={`${commentCount} comment${commentCount === 1 ? "" : "s"}`}
+            >
+              <MessageSquare className="size-2.5" />
+              {commentCount}
+            </span>
+          ) : null}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem
+          variant="destructive"
+          onSelect={requestDiscard}
+          disabled={discardMutation.isPending}
+        >
+          <Trash2 className="size-3.5" />
+          Discard changes
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -904,6 +957,10 @@ function ProjectDiffPaneContent() {
   const refreshProjectMutation = useMutation(
     orpc.projects.refreshProject.mutationOptions(),
   );
+  const confirm = useConfirmDialogStore((s) => s.confirm);
+  const discardAllMutation = useMutation(
+    orpc.projects.discardChanges.mutationOptions(),
+  );
   const isRefreshing = refreshProjectMutation.isPending || isFetching;
   const refreshProjectDiff = () => {
     refreshProjectMutation.mutate(
@@ -1028,6 +1085,28 @@ function ProjectDiffPaneContent() {
     );
   }, [comments, selectedFile]);
   const commentEditorOpen = Boolean(commentDraft || editingComment);
+  const requestDiscardAll = () => {
+    if (!files || files.length === 0) return;
+    const filePaths = gitPathsForConfirmedFiles(
+      files,
+      files.map((file) => file.name),
+    );
+    confirm({
+      title: "Discard all pending changes?",
+      description: `All changes in ${files.length} changed file${files.length === 1 ? "" : "s"} will be discarded. New files will be permanently deleted. Modified files will be reverted to the last commit. This cannot be undone.`,
+      confirmLabel: "Discard all",
+      onConfirm: async () => {
+        await discardAllMutation.mutateAsync({ path: projectPath, filePaths });
+        clearConfirmations();
+        discardReview(projectPath);
+        await queryClient.invalidateQueries({
+          queryKey: orpc.projects.getUncommittedDiff.queryKey({
+            input: { path: projectPath },
+          }),
+        });
+      },
+    });
+  };
   const diffOptions = useMemo(
     () => ({
       ...COMPACT_FILE_DIFF_OPTIONS,
@@ -1157,72 +1236,92 @@ function ProjectDiffPaneContent() {
 
       <ResizablePanel id="files-sidebar" defaultSize={sidebarSize}>
         <aside className="flex h-full flex-col border-l border-border/70 bg-black/15">
-          <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2">
-            <Checkbox
-              id="all-files-checkbox"
-              checked={
-                allFilesConfirmed
-                  ? true
-                  : someFilesConfirmed
-                    ? "indeterminate"
-                    : false
-              }
-              disabled={!files.length}
-              onCheckedChange={() =>
-                toggleAllFilesConfirmation(files.map((f) => f.name))
-              }
-              className="shrink-0"
-              aria-label={
-                allFilesConfirmed
-                  ? "Exclude all changed files from commit"
-                  : "Include all changed files in commit"
-              }
-            />
-            <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground" />
-            <label
-              htmlFor="all-files-checkbox"
-              className="min-w-0 flex-1 truncate text-xs font-medium"
-            >
-              {files.length} changed file{files.length === 1 ? "" : "s"}
-            </label>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-5 shrink-0 text-muted-foreground hover:text-zinc-200"
-              disabled={isRefreshing}
-              onClick={refreshProjectDiff}
-              aria-label="Refresh diff"
-              title="Refresh diff"
-            >
-              <RefreshCw
-                className={cn("size-3", isRefreshing && "animate-spin")}
-              />
-            </Button>
-          </div>
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2">
+                  <Checkbox
+                    id="all-files-checkbox"
+                    checked={
+                      allFilesConfirmed
+                        ? true
+                        : someFilesConfirmed
+                          ? "indeterminate"
+                          : false
+                    }
+                    disabled={!files.length}
+                    onCheckedChange={() =>
+                      toggleAllFilesConfirmation(files.map((f) => f.name))
+                    }
+                    className="shrink-0"
+                    aria-label={
+                      allFilesConfirmed
+                        ? "Exclude all changed files from commit"
+                        : "Include all changed files in commit"
+                    }
+                  />
+                  <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <label
+                    htmlFor="all-files-checkbox"
+                    className="min-w-0 flex-1 truncate text-xs font-medium"
+                  >
+                    {files.length} changed file{files.length === 1 ? "" : "s"}
+                  </label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-5 shrink-0 text-muted-foreground hover:text-zinc-200"
+                    disabled={isRefreshing}
+                    onClick={refreshProjectDiff}
+                    aria-label="Refresh diff"
+                    title="Refresh diff"
+                  >
+                    <RefreshCw
+                      className={cn("size-3", isRefreshing && "animate-spin")}
+                    />
+                  </Button>
+                </div>
 
-          <div
-            className="min-h-0 flex-1 overflow-y-auto py-1"
-            role="listbox"
-            aria-label="Changed files"
-          >
-            {isLoading ? (
-              <div className="flex h-full items-center justify-center">
-                <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
+                <div
+                  className="min-h-0 flex-1 overflow-y-auto py-1"
+                  role="listbox"
+                  aria-label="Changed files"
+                >
+                  {isLoading ? (
+                    <div className="flex h-full items-center justify-center">
+                      <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
+                    </div>
+                  ) : files.length ? (
+                    files.map((file) => (
+                      <FileListItem
+                        key={file.name}
+                        file={file}
+                        selected={
+                          !!selectedFile && selectedFile.name === file.name
+                        }
+                        commentCount={commentCountsByFile[file.name] ?? 0}
+                      />
+                    ))
+                  ) : (
+                    <p className="px-2 py-4 text-xs text-zinc-500">
+                      No changes
+                    </p>
+                  )}
+                </div>
               </div>
-            ) : files.length ? (
-              files.map((file) => (
-                <FileListItem
-                  key={file.name}
-                  file={file}
-                  selected={!!selectedFile && selectedFile.name === file.name}
-                  commentCount={commentCountsByFile[file.name] ?? 0}
-                />
-              ))
-            ) : (
-              <p className="px-2 py-4 text-xs text-zinc-500">No changes</p>
-            )}
-          </div>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem
+                variant="destructive"
+                onSelect={requestDiscardAll}
+                disabled={!files.length || discardAllMutation.isPending}
+              >
+                <Trash2 className="size-3.5" />
+                Discard all pending changes
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
 
           <div className="shrink-0 space-y-1 border-t border-border/70 p-1.5">
             {hasReviewComments ? (

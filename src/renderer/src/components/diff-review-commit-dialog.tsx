@@ -12,7 +12,7 @@ import { Label } from "@renderer/components/ui/label";
 import { Textarea } from "@renderer/components/ui/textarea";
 import { orpc } from "@renderer/orpc-client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { LoaderCircle } from "lucide-react";
+import { AlertCircle, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
@@ -30,6 +30,7 @@ export const useDiffReviewCommitDialogStore = create(
       payload: null as DiffReviewCommitDialogPayload | null,
       subject: "",
       description: "",
+      errorMessage: null as string | null,
     },
     (set) => ({
       open: (payload: DiffReviewCommitDialogPayload) =>
@@ -37,15 +38,19 @@ export const useDiffReviewCommitDialogStore = create(
           payload,
           subject: "",
           description: "",
+          errorMessage: null,
         }),
       close: () =>
         set({
           payload: null,
           subject: "",
           description: "",
+          errorMessage: null,
         }),
-      setSubject: (subject: string) => set({ subject }),
-      setDescription: (description: string) => set({ description }),
+      setSubject: (subject: string) => set({ subject, errorMessage: null }),
+      setDescription: (description: string) =>
+        set({ description, errorMessage: null }),
+      setErrorMessage: (errorMessage: string | null) => set({ errorMessage }),
     }),
   ),
 );
@@ -54,10 +59,14 @@ export function DiffReviewCommitDialog() {
   const payload = useDiffReviewCommitDialogStore((s) => s.payload);
   const subject = useDiffReviewCommitDialogStore((s) => s.subject);
   const description = useDiffReviewCommitDialogStore((s) => s.description);
+  const errorMessage = useDiffReviewCommitDialogStore((s) => s.errorMessage);
   const close = useDiffReviewCommitDialogStore((s) => s.close);
   const setSubject = useDiffReviewCommitDialogStore((s) => s.setSubject);
   const setDescription = useDiffReviewCommitDialogStore(
     (s) => s.setDescription,
+  );
+  const setErrorMessage = useDiffReviewCommitDialogStore(
+    (s) => s.setErrorMessage,
   );
 
   const queryClient = useQueryClient();
@@ -87,8 +96,11 @@ export function DiffReviewCommitDialog() {
       close();
     },
     onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : "Commit failed";
-      toast.error(message);
+      const message =
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : "Commit failed.";
+      setErrorMessage(message);
     },
   });
 
@@ -100,6 +112,7 @@ export function DiffReviewCommitDialog() {
     if (!payload || !subjectTrimmed || !canCommit || commitMutation.isPending) {
       return;
     }
+    setErrorMessage(null);
     const descriptionTrimmed = description.trim();
     commitMutation.mutate({
       projectPath: payload.projectPath,
@@ -164,6 +177,14 @@ export function DiffReviewCommitDialog() {
               rows={4}
             />
           </div>
+          {errorMessage ? (
+            <div className="flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-sans">
+                {errorMessage}
+              </pre>
+            </div>
+          ) : null}
           <DialogFooter>
             <Button
               type="button"

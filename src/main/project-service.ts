@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { type FileDiffMetadata, parsePatchFiles } from "@pierre/diffs";
 import z from "zod";
 import type { ClaudeProject } from "../shared/claude-types";
@@ -320,11 +321,31 @@ export const projectsRouter = {
     .handler(async ({ input, context }) => {
       const path = normalizeProjectPath(input.path);
       assertProjectPathInteractionAllowed(path, context);
-      await context.projectGitService.commitSelectedChanges(path, {
-        paths: input.filePaths,
-        subject: input.subject,
-        description: input.description,
-      });
+      try {
+        await context.projectGitService.commitSelectedChanges(path, {
+          paths: input.filePaths,
+          subject: input.subject,
+          description: input.description,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Git commit failed.";
+        throw new ORPCError("BAD_REQUEST", { message });
+      }
+    }),
+  discardChanges: procedure
+    .input(
+      z.object({
+        path: projectPathSchema,
+        filePaths: z.array(z.string().trim().min(1)).min(1),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const path = normalizeProjectPath(input.path);
+      assertProjectPathInteractionAllowed(path, context);
+      await context.projectGitService.discardChanges(path, input.filePaths);
     }),
   createWorktreeProject: procedure
     .input(

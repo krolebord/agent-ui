@@ -594,6 +594,70 @@ export class ProjectGitService {
     await this.refreshProject(projectPath);
   }
 
+  /**
+   * Discards working-tree changes for the given paths. Untracked (new) files
+   * are deleted from disk; tracked files that were modified or deleted are
+   * restored from HEAD. This is irreversible.
+   */
+  async discardChanges(projectPath: string, paths: string[]): Promise<void> {
+    const git = simpleGit(projectPath);
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const uniquePaths = [
+      ...new Set(paths.map((p) => p.trim()).filter(Boolean)),
+    ];
+    if (uniquePaths.length === 0) {
+      throw new Error("No files selected to discard.");
+    }
+
+    const diffBaseRef = await resolveDiffBaseRef(git);
+    const headOutput = await git.raw([
+      "ls-tree",
+      "-r",
+      "--name-only",
+      "-z",
+      diffBaseRef,
+      "--",
+      ...uniquePaths,
+    ]);
+    const pathsInHead = new Set(headOutput.split("\0").filter(Boolean));
+    const restorePaths = uniquePaths.filter((p) => pathsInHead.has(p));
+    const deletePaths = uniquePaths.filter((p) => !pathsInHead.has(p));
+
+    try {
+      await git.raw(["reset", "-q", diffBaseRef, "--", ...uniquePaths]);
+      if (restorePaths.length > 0) {
+        await git.raw(["checkout", diffBaseRef, "--", ...restorePaths]);
+      }
+      const projectRoot = path.resolve(projectPath);
+      await Promise.all(
+        deletePaths.map((relativePath) => {
+          const targetPath = path.resolve(projectRoot, relativePath);
+          if (
+            targetPath !== projectRoot &&
+            !targetPath.startsWith(`${projectRoot}${path.sep}`)
+          ) {
+            throw new Error(
+              `Refusing to delete path outside project: ${relativePath}`,
+            );
+          }
+          return rm(targetPath, {
+            force: true,
+            recursive: true,
+          });
+        }),
+      );
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Discard failed.";
+      throw new Error(msg);
+    }
+
+    await this.refreshProject(projectPath);
+  }
+
   async getWorktreeCreationData(projectPath: string): Promise<{
     currentBranch: string;
     localBranches: string[];
