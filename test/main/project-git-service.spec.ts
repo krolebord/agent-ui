@@ -58,8 +58,11 @@ describe("ProjectGitService", () => {
         checkIsRepo: () => checkIsRepoMock(projectPath),
         branchLocal: () => branchLocalMock(projectPath),
         add: (paths: string | string[]) => addMock(projectPath, paths),
-        commit: (message: string | string[], paths?: string[]) =>
-          commitMock(projectPath, message, paths),
+        commit: (
+          message: string | string[],
+          paths?: string[],
+          options?: Record<string, unknown>,
+        ) => commitMock(projectPath, message, paths, options),
         raw: (args: string[]) => {
           const envSnapshot = { ...envVars };
           if (Object.keys(envSnapshot).length === 0) {
@@ -487,6 +490,54 @@ describe("ProjectGitService", () => {
         "src/hooks/use-copy-to-clipboard.ts",
         "src/components/diff-review-pane.tsx",
       ],
+      undefined,
+    );
+  });
+
+  it("reads the latest commit diff for selected paths", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "show") {
+        return "diff --git a/file.ts b/file.ts\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(defineProjectState());
+    const diff = await service.getLastCommitDiff("/repo-one", ["file.ts"]);
+
+    expect(diff).toBe("diff --git a/file.ts b/file.ts");
+    expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+      "show",
+      "--pretty=format:",
+      "--no-color",
+      "HEAD",
+      "--",
+      "file.ts",
+    ]);
+  });
+
+  it("amends the latest commit message", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main", branches: {} });
+    commitMock.mockResolvedValue(undefined);
+
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({ path: "/repo-one", collapsed: false });
+    });
+
+    const service = new ProjectGitService(projectsState);
+    await service.amendLastCommitMessage("/repo-one", {
+      subject: "Final subject",
+      description: "Final body.",
+    });
+
+    expect(commitMock).toHaveBeenCalledWith(
+      "/repo-one",
+      ["Final subject", "Final body."],
+      [],
+      { "--amend": null },
     );
   });
 

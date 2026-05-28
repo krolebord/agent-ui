@@ -626,6 +626,71 @@ export class ProjectGitService {
     await this.refreshProject(projectPath);
   }
 
+  async getLastCommitDiff(
+    projectPath: string,
+    paths: string[],
+  ): Promise<string | null> {
+    const git = simpleGit(projectPath);
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const uniquePaths = [
+      ...new Set(paths.map((p) => p.trim()).filter(Boolean)),
+    ];
+    if (uniquePaths.length === 0) {
+      return null;
+    }
+
+    try {
+      const diff = await git.raw([
+        "show",
+        "--pretty=format:",
+        "--no-color",
+        "HEAD",
+        "--",
+        ...uniquePaths,
+      ]);
+      const trimmed = diff.trim();
+      return trimmed || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async amendLastCommitMessage(
+    projectPath: string,
+    input: {
+      subject: string;
+      description?: string;
+    },
+  ): Promise<void> {
+    const git = simpleGit(projectPath);
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const subject = input.subject.trim();
+    if (!subject) {
+      throw new Error("Commit message is required.");
+    }
+
+    const description = input.description?.trim();
+    const message = description ? [subject, description] : subject;
+
+    try {
+      await git.commit(message, [], { "--amend": null });
+    } catch (error) {
+      const msg =
+        error instanceof Error ? error.message : "Failed to amend commit.";
+      throw new Error(msg);
+    }
+
+    await this.refreshProject(projectPath);
+  }
+
   /**
    * Discards working-tree changes for the given paths. Untracked (new) files
    * are deleted from disk; tracked files that were modified or deleted are

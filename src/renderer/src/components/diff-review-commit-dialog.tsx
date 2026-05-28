@@ -85,6 +85,8 @@ export function DiffReviewCommitDialog() {
       })
       .then(() => {
         onCommitted?.();
+      })
+      .finally(() => {
         void queryClient.invalidateQueries({
           queryKey: orpc.projects.getUncommittedDiff.queryKey({
             input: { path: projectPath },

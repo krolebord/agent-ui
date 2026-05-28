@@ -2,6 +2,10 @@ import { ORPCError } from "@orpc/server";
 import { type FileDiffMetadata, parsePatchFiles } from "@pierre/diffs";
 import z from "zod";
 import type { ClaudeProject } from "../shared/claude-types";
+import {
+  autogenerateCommitPlaceholderSubject,
+  formatCommittedWithPlaceholderNote,
+} from "../shared/commit-message-generation";
 import { defineServiceState } from "../shared/service-state";
 import { generateCommitMessage } from "./commit-message-generation";
 import type { Services } from "./create-services";
@@ -323,34 +327,77 @@ export const projectsRouter = {
       const path = normalizeProjectPath(input.path);
       assertProjectPathInteractionAllowed(path, context);
 
-      let subject = input.subject?.trim() ?? "";
-      let description = input.description?.trim();
+      const subject = input.subject?.trim() ?? "";
+      const description = input.description?.trim();
 
       if (!subject) {
-        const diff = await context.projectGitService.getSelectedChangesDiff(
-          path,
-          input.filePaths,
-        );
-        if (!diff) {
+        try {
+          await context.projectGitService.commitSelectedChanges(path, {
+            paths: input.filePaths,
+            subject: autogenerateCommitPlaceholderSubject,
+          });
+        } catch (error) {
+          const message =
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : "Git commit failed.";
+          throw new ORPCError("BAD_REQUEST", { message });
+        }
+
+        const placeholderNote = formatCommittedWithPlaceholderNote();
+
+        try {
+          const diff = await context.projectGitService.getLastCommitDiff(
+            path,
+            input.filePaths,
+          );
+          if (!diff) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: `Failed to generate commit message. ${placeholderNote}`,
+            });
+          }
+
+          const generated = await generateCommitMessage(
+            context.appSettingsState.state.titleGeneration,
+            diff,
+          );
+          if (!generated?.subject.trim()) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: `Failed to generate commit message. ${placeholderNote}`,
+            });
+          }
+
+          const finalSubject = generated.subject.trim();
+          const finalDescription = description ?? generated.description?.trim();
+
+          try {
+            await context.projectGitService.amendLastCommitMessage(path, {
+              subject: finalSubject,
+              description: finalDescription,
+            });
+          } catch (error) {
+            const detail =
+              error instanceof Error && error.message.trim()
+                ? error.message
+                : "Failed to update commit message.";
+            throw new ORPCError("BAD_REQUEST", {
+              message: `${detail} ${placeholderNote}`,
+            });
+          }
+        } catch (error) {
+          if (error instanceof ORPCError) {
+            throw error;
+          }
+          const detail =
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : "Failed to generate commit message.";
           throw new ORPCError("BAD_REQUEST", {
-            message: "No changes to commit.",
+            message: `${detail} ${placeholderNote}`,
           });
         }
 
-        const generated = await generateCommitMessage(
-          context.appSettingsState.state.titleGeneration,
-          diff,
-        );
-        if (!generated?.subject.trim()) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "Failed to generate commit message.",
-          });
-        }
-
-        subject = generated.subject.trim();
-        if (!description && generated.description?.trim()) {
-          description = generated.description.trim();
-        }
+        return;
       }
 
       try {
