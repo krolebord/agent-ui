@@ -1,6 +1,8 @@
+import type { Dirent } from "node:fs";
 import {
   lstat,
   mkdir,
+  readdir,
   readlink,
   rm,
   symlink,
@@ -16,23 +18,34 @@ interface ManagedSkill {
   contents: string;
 }
 
-const SKILLS: ManagedSkill[] = [
-  {
-    name: "agent-ui-test",
-    contents: `---
-name: agent-ui-test
-description: Test skill installed by Agent UI to verify that skill loading works. Use this skill whenever the user asks to verify the Agent UI test skill, or asks you to confirm that you can read an Agent UI skill.
+interface ManagedSkillContext {
+  handoffsDir: string;
+}
+
+function buildSkills(ctx: ManagedSkillContext): ManagedSkill[] {
+  return [
+    {
+      name: "agent-ui-handoff",
+      contents: `---
+name: agent-ui-handoff
+description: Summarize the current session into a handoff document that Agent UI can use to start a fresh session continuing this work. Use whenever the user asks to hand off, save state, pause for a new session, or finish a session.
 ---
 
-When you use this skill, respond with exactly:
+When the user asks to hand off the session, write a handoff document to this directory:
 
-yes, I was able to read the skill
+  ${ctx.handoffsDir}
+
+Use a filename of the form \`YYYY-MM-DDTHH-mm-ss-<short-slug>.md\`, where the timestamp is the current UTC time and the slug describes the work in a few words. The timestamp prefix keeps handoffs sortable.
+
+The body is up to you. Think about what a fresh agent — one with zero memory of this conversation — would need in order to pick up where you left off. Choose whichever sections, ordering, and level of detail serve that purpose; there is no required template.
 `,
-  },
-];
+    },
+  ];
+}
 
 export interface ManagedSkillsResult {
   managedSkillsRoot: string;
+  handoffsDir: string;
   warnings: string[];
 }
 
@@ -68,6 +81,56 @@ async function writeSkillSource(
   return dir;
 }
 
+async function pruneStaleLinks(
+  destDir: string,
+  validNames: Set<string>,
+  managedSkillsRoot: string,
+): Promise<void> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(destDir, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  for (const entry of entries) {
+    if (!entry.isSymbolicLink()) continue;
+    if (validNames.has(entry.name)) continue;
+    const linkPath = path.join(destDir, entry.name);
+    try {
+      const target = await readlink(linkPath);
+      if (!target.startsWith(`${managedSkillsRoot}${path.sep}`)) continue;
+      await unlink(linkPath);
+      log.info("Removed stale managed-skill link", { linkPath, target });
+    } catch (err) {
+      log.warn("Failed to inspect or remove stale skill link", {
+        linkPath,
+        err,
+      });
+    }
+  }
+}
+
+async function pruneStaleSources(
+  managedSkillsRoot: string,
+  validNames: Set<string>,
+): Promise<void> {
+  let entries: Dirent[];
+  try {
+    entries = await readdir(managedSkillsRoot, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (validNames.has(entry.name)) continue;
+    const stalePath = path.join(managedSkillsRoot, entry.name);
+    await rm(stalePath, { recursive: true, force: true });
+    log.info("Removed stale managed-skill source", { stalePath });
+  }
+}
+
 async function linkSkillInto(
   source: string,
   destDir: string,
@@ -94,7 +157,13 @@ export async function ensureManagedSkills(
   claudePluginRoot: string | null,
 ): Promise<ManagedSkillsResult> {
   const managedSkillsRoot = path.join(userDataPath, "managed-skills");
-  await mkdir(managedSkillsRoot, { recursive: true });
+  const handoffsDir = path.join(userDataPath, "handoffs");
+  await Promise.all([
+    mkdir(managedSkillsRoot, { recursive: true }),
+    mkdir(handoffsDir, { recursive: true }),
+  ]);
+
+  const skills = buildSkills({ handoffsDir });
 
   const warnings: string[] = [];
   const codexSkillsDir = path.join(homedir(), ".codex", "skills");
@@ -103,7 +172,7 @@ export async function ensureManagedSkills(
     ? path.join(claudePluginRoot, "skills")
     : null;
 
-  for (const skill of SKILLS) {
+  for (const skill of skills) {
     const source = await writeSkillSource(managedSkillsRoot, skill);
 
     if (claudeSkillsDir) {
@@ -131,11 +200,20 @@ export async function ensureManagedSkills(
     );
   }
 
+  const validNames = new Set(skills.map((s) => s.name));
+  await pruneStaleSources(managedSkillsRoot, validNames);
+  if (claudeSkillsDir) {
+    await pruneStaleLinks(claudeSkillsDir, validNames, managedSkillsRoot);
+  }
+  await pruneStaleLinks(codexSkillsDir, validNames, managedSkillsRoot);
+  await pruneStaleLinks(cursorSkillsDir, validNames, managedSkillsRoot);
+
   log.info("Managed skills installed", {
     managedSkillsRoot,
-    skills: SKILLS.map((s) => s.name),
+    handoffsDir,
+    skills: skills.map((s) => s.name),
     warnings,
   });
 
-  return { managedSkillsRoot, warnings };
+  return { managedSkillsRoot, handoffsDir, warnings };
 }
