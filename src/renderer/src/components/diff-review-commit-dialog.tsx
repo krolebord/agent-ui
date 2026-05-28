@@ -10,10 +10,9 @@ import {
 import { Input } from "@renderer/components/ui/input";
 import { Label } from "@renderer/components/ui/label";
 import { Textarea } from "@renderer/components/ui/textarea";
-import { createClickableErrorToastResult } from "@renderer/lib/clickable-error-toast";
+import { runCommitWithProgress } from "@renderer/lib/run-commit-with-progress";
 import { orpc } from "@renderer/orpc-client";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 
@@ -76,29 +75,28 @@ export function DiffReviewCommitDialog() {
 
     close();
 
-    const commitPromise = orpc.projects.commitSelectedChanges
-      .call({
+    const invalidateDiff = () =>
+      void queryClient.invalidateQueries({
+        queryKey: orpc.projects.getUncommittedDiff.queryKey({
+          input: { path: projectPath },
+        }),
+      });
+
+    void runCommitWithProgress(
+      {
         path: projectPath,
         filePaths: pathsToCommit,
         subject: subjectTrimmed || undefined,
         description: descriptionTrimmed || undefined,
-      })
-      .then(() => {
-        onCommitted?.();
-      })
-      .finally(() => {
-        void queryClient.invalidateQueries({
-          queryKey: orpc.projects.getUncommittedDiff.queryKey({
-            input: { path: projectPath },
-          }),
-        });
-      });
-
-    toast.promise(commitPromise, {
-      loading: "Creating commit…",
-      success: "Commit created",
-      error: (err) =>
-        createClickableErrorToastResult(err, "Commit failed", "Commit failed."),
+      },
+      {
+        onCommitted: () => {
+          onCommitted?.();
+          invalidateDiff();
+        },
+      },
+    ).catch(() => {
+      invalidateDiff();
     });
   };
 

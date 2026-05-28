@@ -14,3 +14,9 @@ export function formatCommittedWithPlaceholderNote(
 ): string {
   return `The changes were committed with the temporary message "${placeholderSubject}".`;
 }
+
+export type CommitProgressEvent =
+  | { stage: "committing" }
+  | { stage: "committed" }
+  | { stage: "generating" }
+  | { stage: "done" };

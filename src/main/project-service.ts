@@ -4,6 +4,7 @@ import z from "zod";
 import type { ClaudeProject } from "../shared/claude-types";
 import {
   autogenerateCommitPlaceholderSubject,
+  type CommitProgressEvent,
   formatCommittedWithPlaceholderNote,
 } from "../shared/commit-message-generation";
 import { defineServiceState } from "../shared/service-state";
@@ -323,12 +324,14 @@ export const projectsRouter = {
         description: z.string().trim().optional(),
       }),
     )
-    .handler(async ({ input, context }) => {
+    .handler(async function* ({ input, context }) {
       const path = normalizeProjectPath(input.path);
       assertProjectPathInteractionAllowed(path, context);
 
       const subject = input.subject?.trim() ?? "";
       const description = input.description?.trim();
+
+      yield { stage: "committing" } satisfies CommitProgressEvent;
 
       if (!subject) {
         try {
@@ -344,7 +347,11 @@ export const projectsRouter = {
           throw new ORPCError("BAD_REQUEST", { message });
         }
 
+        yield { stage: "committed" } satisfies CommitProgressEvent;
+
         const placeholderNote = formatCommittedWithPlaceholderNote();
+
+        yield { stage: "generating" } satisfies CommitProgressEvent;
 
         try {
           const diff = await context.projectGitService.getLastCommitDiff(
@@ -397,6 +404,7 @@ export const projectsRouter = {
           });
         }
 
+        yield { stage: "done" } satisfies CommitProgressEvent;
         return;
       }
 
@@ -413,6 +421,9 @@ export const projectsRouter = {
             : "Git commit failed.";
         throw new ORPCError("BAD_REQUEST", { message });
       }
+
+      yield { stage: "committed" } satisfies CommitProgressEvent;
+      yield { stage: "done" } satisfies CommitProgressEvent;
     }),
   discardChanges: procedure
     .input(
