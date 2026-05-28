@@ -264,12 +264,12 @@ function TitleGenerationSettings() {
       <div className="mb-2 flex items-center gap-2">
         <Type className="size-3.5 text-muted-foreground" />
         <div className="text-xs font-medium text-muted-foreground">
-          Session titles
+          LLM generation
         </div>
       </div>
       <div className="space-y-3">
         <div className="space-y-2">
-          <Label className="text-sm font-medium">Provider</Label>
+          <Label className="text-sm font-medium">LLM provider</Label>
           <Select
             value={titleGeneration.provider}
             onValueChange={(value) => {
@@ -290,6 +290,9 @@ function TitleGenerationSettings() {
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Used to autogenerate session titles and commit messages.
+          </p>
         </div>
         <div className="space-y-2">
           <Label className="text-sm font-medium">Model</Label>
@@ -313,10 +316,6 @@ function TitleGenerationSettings() {
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
-            Used to auto-generate titles for unnamed sessions from the first
-            prompt
-          </p>
         </div>
       </div>
     </div>
