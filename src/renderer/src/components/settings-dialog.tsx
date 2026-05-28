@@ -69,6 +69,7 @@ export function SettingsDialog() {
           <OpenLogFolder />
           <OpenStatePluginFolder />
           <OpenSessionFilesFolder />
+          <OpenHandoffsFolder />
 
           <div className="py-2.5">
             <div className="mb-2 flex items-center gap-2">
@@ -180,6 +181,20 @@ function OpenSessionFilesFolder() {
     <OpenFolderItem
       label="Session files"
       description="Open the folder containing session state files"
+      isPending={isPending}
+      onOpen={() => mutate(undefined)}
+    />
+  );
+}
+
+function OpenHandoffsFolder() {
+  const { mutate, isPending } = useMutation(
+    orpc.fs.openHandoffsFolder.mutationOptions(),
+  );
+  return (
+    <OpenFolderItem
+      label="Handoffs"
+      description="Open the folder containing session handoff documents"
       isPending={isPending}
       onOpen={() => mutate(undefined)}
     />

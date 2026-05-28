@@ -121,6 +121,10 @@ export const fsRouter = {
     const stateDir = path.join(app.getPath("userData"), "claude-state");
     await shell.openPath(stateDir);
   }),
+  openHandoffsFolder: procedure.handler(async () => {
+    const handoffsDir = path.join(app.getPath("userData"), "handoffs");
+    await shell.openPath(handoffsDir);
+  }),
   openDevTools: procedure.handler(async ({ context }) => {
     const mainWindow = context.getMainWindow();
     if (mainWindow) {
