@@ -31,6 +31,7 @@ export const useDiffReviewCommitDialogStore = create(
       subject: "",
       description: "",
       errorMessage: null as string | null,
+      isGeneratingMessage: false,
     },
     (set) => ({
       open: (payload: DiffReviewCommitDialogPayload) =>
@@ -39,6 +40,7 @@ export const useDiffReviewCommitDialogStore = create(
           subject: "",
           description: "",
           errorMessage: null,
+          isGeneratingMessage: false,
         }),
       close: () =>
         set({
@@ -46,11 +48,14 @@ export const useDiffReviewCommitDialogStore = create(
           subject: "",
           description: "",
           errorMessage: null,
+          isGeneratingMessage: false,
         }),
       setSubject: (subject: string) => set({ subject, errorMessage: null }),
       setDescription: (description: string) =>
         set({ description, errorMessage: null }),
       setErrorMessage: (errorMessage: string | null) => set({ errorMessage }),
+      setIsGeneratingMessage: (isGeneratingMessage: boolean) =>
+        set({ isGeneratingMessage }),
     }),
   ),
 );
@@ -60,6 +65,9 @@ export function DiffReviewCommitDialog() {
   const subject = useDiffReviewCommitDialogStore((s) => s.subject);
   const description = useDiffReviewCommitDialogStore((s) => s.description);
   const errorMessage = useDiffReviewCommitDialogStore((s) => s.errorMessage);
+  const isGeneratingMessage = useDiffReviewCommitDialogStore(
+    (s) => s.isGeneratingMessage,
+  );
   const close = useDiffReviewCommitDialogStore((s) => s.close);
   const setSubject = useDiffReviewCommitDialogStore((s) => s.setSubject);
   const setDescription = useDiffReviewCommitDialogStore(
@@ -68,8 +76,43 @@ export function DiffReviewCommitDialog() {
   const setErrorMessage = useDiffReviewCommitDialogStore(
     (s) => s.setErrorMessage,
   );
+  const setIsGeneratingMessage = useDiffReviewCommitDialogStore(
+    (s) => s.setIsGeneratingMessage,
+  );
 
   const queryClient = useQueryClient();
+
+  const generateMessageMutation = useMutation({
+    mutationFn: (vars: { projectPath: string; filePaths: string[] }) =>
+      orpc.projects.generateCommitMessage.call({
+        path: vars.projectPath,
+        filePaths: vars.filePaths,
+      }),
+    onMutate: () => {
+      setIsGeneratingMessage(true);
+    },
+    onSuccess: (data) => {
+      const currentSubject = useDiffReviewCommitDialogStore.getState().subject;
+      const currentDescription =
+        useDiffReviewCommitDialogStore.getState().description;
+      if (!currentSubject.trim() && data.subject) {
+        setSubject(data.subject);
+      }
+      if (!currentDescription.trim() && data.description) {
+        setDescription(data.description);
+      }
+    },
+    onSettled: () => {
+      setIsGeneratingMessage(false);
+    },
+    onError: (err: unknown) => {
+      const message =
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : "Failed to generate commit message.";
+      setErrorMessage(message);
+    },
+  });
 
   const commitMutation = useMutation({
     mutationFn: (vars: {
@@ -107,12 +150,28 @@ export function DiffReviewCommitDialog() {
   const open = Boolean(payload);
   const canCommit = (payload?.pathsToCommit.length ?? 0) > 0;
   const subjectTrimmed = subject.trim();
+  const fieldsDisabled = commitMutation.isPending || isGeneratingMessage;
 
   const submitCommit = () => {
-    if (!payload || !subjectTrimmed || !canCommit || commitMutation.isPending) {
+    if (
+      !payload ||
+      !canCommit ||
+      commitMutation.isPending ||
+      isGeneratingMessage
+    ) {
       return;
     }
+
     setErrorMessage(null);
+
+    if (!subjectTrimmed) {
+      generateMessageMutation.mutate({
+        projectPath: payload.projectPath,
+        filePaths: payload.pathsToCommit,
+      });
+      return;
+    }
+
     const descriptionTrimmed = description.trim();
     commitMutation.mutate({
       projectPath: payload.projectPath,
@@ -128,7 +187,7 @@ export function DiffReviewCommitDialog() {
       open={open}
       onOpenChange={(next) => {
         if (!next) {
-          if (!commitMutation.isPending) {
+          if (!commitMutation.isPending && !isGeneratingMessage) {
             close();
           }
         }
@@ -160,11 +219,19 @@ export function DiffReviewCommitDialog() {
               id="commit-subject"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="Summary"
+              placeholder={
+                isGeneratingMessage
+                  ? "Generating commit message…"
+                  : "Leave empty to autogenerate"
+              }
               autoFocus
-              disabled={commitMutation.isPending}
+              disabled={fieldsDisabled}
               aria-required
             />
+            <p className="text-xs text-muted-foreground">
+              Leave the summary empty to autogenerate a message from the
+              selected diff.
+            </p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="commit-description">Description (optional)</Label>
@@ -172,8 +239,12 @@ export function DiffReviewCommitDialog() {
               id="commit-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="More detailed explanation…"
-              disabled={commitMutation.isPending}
+              placeholder={
+                isGeneratingMessage
+                  ? "Generating commit message…"
+                  : "More detailed explanation…"
+              }
+              disabled={fieldsDisabled}
               rows={4}
             />
           </div>
@@ -190,14 +261,14 @@ export function DiffReviewCommitDialog() {
               type="button"
               variant="outline"
               onClick={() => close()}
-              disabled={commitMutation.isPending}
+              disabled={commitMutation.isPending || isGeneratingMessage}
             >
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={
-                !canCommit || !subjectTrimmed || commitMutation.isPending
+                !canCommit || commitMutation.isPending || isGeneratingMessage
               }
             >
               {commitMutation.isPending ? (
@@ -205,8 +276,15 @@ export function DiffReviewCommitDialog() {
                   <LoaderCircle className="size-4 animate-spin" />
                   Committing…
                 </>
-              ) : (
+              ) : isGeneratingMessage ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Generating…
+                </>
+              ) : subjectTrimmed ? (
                 "Commit"
+              ) : (
+                "Generate message"
               )}
             </Button>
           </DialogFooter>

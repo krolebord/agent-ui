@@ -528,6 +528,27 @@ export class ProjectGitService {
   }
 
   async getUncommittedDiff(projectPath: string): Promise<string | null> {
+    return this.getChangesDiff(projectPath);
+  }
+
+  async getSelectedChangesDiff(
+    projectPath: string,
+    paths: string[],
+  ): Promise<string | null> {
+    const uniquePaths = [
+      ...new Set(paths.map((p) => p.trim()).filter(Boolean)),
+    ];
+    if (uniquePaths.length === 0) {
+      return null;
+    }
+
+    return this.getChangesDiff(projectPath, uniquePaths);
+  }
+
+  private async getChangesDiff(
+    projectPath: string,
+    paths?: string[],
+  ): Promise<string | null> {
     try {
       const git = simpleGit(projectPath);
       const isRepo = await git.checkIsRepo();
@@ -537,6 +558,17 @@ export class ProjectGitService {
         git,
         projectPath,
         async (tempGit) => {
+          if (paths) {
+            await tempGit.raw(["add", "-A", "--", ...paths]);
+            return await tempGit.raw([
+              "diff",
+              "--cached",
+              diffBaseRef,
+              "--",
+              ...paths,
+            ]);
+          }
+
           await tempGit.raw(["add", "-A"]);
           return await tempGit.raw(["diff", "--cached", diffBaseRef]);
         },

@@ -6,22 +6,20 @@ vi.mock("nano-spawn", () => ({
   default: spawnMock,
 }));
 
-import { generateCursorTitle } from "../../../../src/main/title-generation/providers/cursor";
+import { createCursorProvider } from "../../../src/main/llm-providers/cursor";
 
-describe("generateCursorTitle", () => {
+describe("createCursorProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it("runs cursor agent with the configured model", async () => {
-    spawnMock.mockResolvedValue({ output: "Refactor auth flow" });
+    spawnMock.mockResolvedValue({ output: "Generated text" });
 
-    const result = await generateCursorTitle(
-      "Fix auth + add tests",
-      "composer-2-fast",
-    );
+    const provider = createCursorProvider("composer-2-fast");
+    const result = await provider.complete("Summarize this prompt");
 
-    expect(result).toBe("Refactor auth flow");
+    expect(result).toBe("Generated text");
     expect(spawnMock).toHaveBeenCalledWith(
       "cursor",
       [
@@ -32,7 +30,7 @@ describe("generateCursorTitle", () => {
         "composer-2-fast",
         "--mode",
         "ask",
-        expect.stringContaining("Fix auth + add tests"),
+        "Summarize this prompt",
       ],
       {
         preferLocal: true,
@@ -42,12 +40,11 @@ describe("generateCursorTitle", () => {
     );
   });
 
-  it("returns first non-empty output line", async () => {
-    spawnMock.mockResolvedValue({
-      output: "\n\n  Build release plan  \nextra",
-    });
+  it("returns trimmed output", async () => {
+    spawnMock.mockResolvedValue({ output: "\n\n  Build release plan  \n" });
 
-    const result = await generateCursorTitle("anything", "composer-2");
+    const provider = createCursorProvider("composer-2");
+    const result = await provider.complete("anything");
 
     expect(result).toBe("Build release plan");
   });
@@ -55,7 +52,8 @@ describe("generateCursorTitle", () => {
   it("returns null when output is empty", async () => {
     spawnMock.mockResolvedValue({ output: "   \n" });
 
-    const result = await generateCursorTitle("anything", "composer-2");
+    const provider = createCursorProvider("composer-2");
+    const result = await provider.complete("anything");
 
     expect(result).toBeNull();
   });
@@ -63,7 +61,8 @@ describe("generateCursorTitle", () => {
   it("returns null when spawn fails", async () => {
     spawnMock.mockRejectedValue(new Error("boom"));
 
-    const result = await generateCursorTitle("anything", "composer-2");
+    const provider = createCursorProvider("composer-2");
+    const result = await provider.complete("anything");
 
     expect(result).toBeNull();
   });

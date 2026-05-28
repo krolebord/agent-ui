@@ -3,6 +3,7 @@ import { type FileDiffMetadata, parsePatchFiles } from "@pierre/diffs";
 import z from "zod";
 import type { ClaudeProject } from "../shared/claude-types";
 import { defineServiceState } from "../shared/service-state";
+import { generateCommitMessage } from "./commit-message-generation";
 import type { Services } from "./create-services";
 import log from "./logger";
 import { procedure } from "./orpc";
@@ -334,6 +335,37 @@ export const projectsRouter = {
             : "Git commit failed.";
         throw new ORPCError("BAD_REQUEST", { message });
       }
+    }),
+  generateCommitMessage: procedure
+    .input(
+      z.object({
+        path: projectPathSchema,
+        filePaths: z.array(z.string().trim().min(1)).min(1),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const path = normalizeProjectPath(input.path);
+      assertProjectPathInteractionAllowed(path, context);
+      const diff = await context.projectGitService.getSelectedChangesDiff(
+        path,
+        input.filePaths,
+      );
+      if (!diff) {
+        return { subject: null, description: null };
+      }
+
+      const generated = await generateCommitMessage(
+        context.appSettingsState.state.titleGeneration,
+        diff,
+      );
+      if (!generated) {
+        return { subject: null, description: null };
+      }
+
+      return {
+        subject: generated.subject,
+        description: generated.description ?? null,
+      };
     }),
   discardChanges: procedure
     .input(
