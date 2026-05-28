@@ -22,8 +22,8 @@ type ClaudeUsageData = {
   seven_day_sonnet: { utilization: number; resets_at: string | null } | null;
   extra_usage: {
     is_enabled: boolean;
-    monthly_limit: number;
-    used_credits: number;
+    monthly_limit: number | null;
+    used_credits: number | null;
     utilization: number | null;
   } | null;
 };
@@ -416,8 +416,8 @@ export function UsagePanel() {
           })}
           {usage.extra_usage?.is_enabled
             ? (() => {
-                const used = usage.extra_usage.used_credits / 100;
-                const limit = usage.extra_usage.monthly_limit / 100;
+                const used = (usage.extra_usage.used_credits ?? 0) / 100;
+                const limit = (usage.extra_usage.monthly_limit ?? 0) / 100;
                 const pct = Math.round(usage.extra_usage.utilization ?? 0);
                 return (
                   <div className="space-y-0.5">

@@ -21,8 +21,8 @@ const UsageBucketSchema = z
 const ExtraUsageSchema = z
   .object({
     is_enabled: z.boolean(),
-    monthly_limit: z.number(),
-    used_credits: z.number(),
+    monthly_limit: z.number().nullable(),
+    used_credits: z.number().nullable(),
     utilization: z.number().nullable(),
   })
   .nullable();
