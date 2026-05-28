@@ -10,9 +10,9 @@ import {
 import { Input } from "@renderer/components/ui/input";
 import { Label } from "@renderer/components/ui/label";
 import { Textarea } from "@renderer/components/ui/textarea";
+import { createClickableErrorToastResult } from "@renderer/lib/clickable-error-toast";
 import { orpc } from "@renderer/orpc-client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, LoaderCircle } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
@@ -30,8 +30,6 @@ export const useDiffReviewCommitDialogStore = create(
       payload: null as DiffReviewCommitDialogPayload | null,
       subject: "",
       description: "",
-      errorMessage: null as string | null,
-      isGeneratingMessage: false,
     },
     (set) => ({
       open: (payload: DiffReviewCommitDialogPayload) =>
@@ -39,23 +37,15 @@ export const useDiffReviewCommitDialogStore = create(
           payload,
           subject: "",
           description: "",
-          errorMessage: null,
-          isGeneratingMessage: false,
         }),
       close: () =>
         set({
           payload: null,
           subject: "",
           description: "",
-          errorMessage: null,
-          isGeneratingMessage: false,
         }),
-      setSubject: (subject: string) => set({ subject, errorMessage: null }),
-      setDescription: (description: string) =>
-        set({ description, errorMessage: null }),
-      setErrorMessage: (errorMessage: string | null) => set({ errorMessage }),
-      setIsGeneratingMessage: (isGeneratingMessage: boolean) =>
-        set({ isGeneratingMessage }),
+      setSubject: (subject: string) => set({ subject }),
+      setDescription: (description: string) => set({ description }),
     }),
   ),
 );
@@ -64,121 +54,49 @@ export function DiffReviewCommitDialog() {
   const payload = useDiffReviewCommitDialogStore((s) => s.payload);
   const subject = useDiffReviewCommitDialogStore((s) => s.subject);
   const description = useDiffReviewCommitDialogStore((s) => s.description);
-  const errorMessage = useDiffReviewCommitDialogStore((s) => s.errorMessage);
-  const isGeneratingMessage = useDiffReviewCommitDialogStore(
-    (s) => s.isGeneratingMessage,
-  );
   const close = useDiffReviewCommitDialogStore((s) => s.close);
   const setSubject = useDiffReviewCommitDialogStore((s) => s.setSubject);
   const setDescription = useDiffReviewCommitDialogStore(
     (s) => s.setDescription,
   );
-  const setErrorMessage = useDiffReviewCommitDialogStore(
-    (s) => s.setErrorMessage,
-  );
-  const setIsGeneratingMessage = useDiffReviewCommitDialogStore(
-    (s) => s.setIsGeneratingMessage,
-  );
 
   const queryClient = useQueryClient();
 
-  const generateMessageMutation = useMutation({
-    mutationFn: (vars: { projectPath: string; filePaths: string[] }) =>
-      orpc.projects.generateCommitMessage.call({
-        path: vars.projectPath,
-        filePaths: vars.filePaths,
-      }),
-    onMutate: () => {
-      setIsGeneratingMessage(true);
-    },
-    onSuccess: (data) => {
-      const currentSubject = useDiffReviewCommitDialogStore.getState().subject;
-      const currentDescription =
-        useDiffReviewCommitDialogStore.getState().description;
-      if (!currentSubject.trim() && data.subject) {
-        setSubject(data.subject);
-      }
-      if (!currentDescription.trim() && data.description) {
-        setDescription(data.description);
-      }
-    },
-    onSettled: () => {
-      setIsGeneratingMessage(false);
-    },
-    onError: (err: unknown) => {
-      const message =
-        err instanceof Error && err.message.trim()
-          ? err.message
-          : "Failed to generate commit message.";
-      setErrorMessage(message);
-    },
-  });
-
-  const commitMutation = useMutation({
-    mutationFn: (vars: {
-      projectPath: string;
-      filePaths: string[];
-      subject: string;
-      description: string | undefined;
-      onCommitted?: () => void;
-    }) =>
-      orpc.projects.commitSelectedChanges.call({
-        path: vars.projectPath,
-        filePaths: vars.filePaths,
-        subject: vars.subject,
-        description: vars.description,
-      }),
-    onSuccess: (_data, vars) => {
-      vars.onCommitted?.();
-      void queryClient.invalidateQueries({
-        queryKey: orpc.projects.getUncommittedDiff.queryKey({
-          input: { path: vars.projectPath },
-        }),
-      });
-      toast.success("Commit created");
-      close();
-    },
-    onError: (err: unknown) => {
-      const message =
-        err instanceof Error && err.message.trim()
-          ? err.message
-          : "Commit failed.";
-      setErrorMessage(message);
-    },
-  });
-
   const open = Boolean(payload);
   const canCommit = (payload?.pathsToCommit.length ?? 0) > 0;
-  const subjectTrimmed = subject.trim();
-  const fieldsDisabled = commitMutation.isPending || isGeneratingMessage;
 
   const submitCommit = () => {
-    if (
-      !payload ||
-      !canCommit ||
-      commitMutation.isPending ||
-      isGeneratingMessage
-    ) {
+    if (!payload || !canCommit) {
       return;
     }
 
-    setErrorMessage(null);
-
-    if (!subjectTrimmed) {
-      generateMessageMutation.mutate({
-        projectPath: payload.projectPath,
-        filePaths: payload.pathsToCommit,
-      });
-      return;
-    }
-
+    const subjectTrimmed = subject.trim();
     const descriptionTrimmed = description.trim();
-    commitMutation.mutate({
-      projectPath: payload.projectPath,
-      filePaths: payload.pathsToCommit,
-      subject: subjectTrimmed,
-      description: descriptionTrimmed ? descriptionTrimmed : undefined,
-      onCommitted: payload.onCommitted,
+    const { projectPath, pathsToCommit, onCommitted } = payload;
+
+    close();
+
+    const commitPromise = orpc.projects.commitSelectedChanges
+      .call({
+        path: projectPath,
+        filePaths: pathsToCommit,
+        subject: subjectTrimmed || undefined,
+        description: descriptionTrimmed || undefined,
+      })
+      .then(() => {
+        onCommitted?.();
+        void queryClient.invalidateQueries({
+          queryKey: orpc.projects.getUncommittedDiff.queryKey({
+            input: { path: projectPath },
+          }),
+        });
+      });
+
+    toast.promise(commitPromise, {
+      loading: "Creating commit…",
+      success: "Commit created",
+      error: (err) =>
+        createClickableErrorToastResult(err, "Commit failed", "Commit failed."),
     });
   };
 
@@ -187,9 +105,7 @@ export function DiffReviewCommitDialog() {
       open={open}
       onOpenChange={(next) => {
         if (!next) {
-          if (!commitMutation.isPending && !isGeneratingMessage) {
-            close();
-          }
+          close();
         }
       }}
     >
@@ -219,18 +135,12 @@ export function DiffReviewCommitDialog() {
               id="commit-subject"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder={
-                isGeneratingMessage
-                  ? "Generating commit message…"
-                  : "Leave empty to autogenerate"
-              }
+              placeholder="Leave empty to autogenerate"
               autoFocus
-              disabled={fieldsDisabled}
-              aria-required
             />
             <p className="text-xs text-muted-foreground">
               Leave the summary empty to autogenerate a message from the
-              selected diff.
+              selected diff when you commit.
             </p>
           </div>
           <div className="grid gap-2">
@@ -239,53 +149,16 @@ export function DiffReviewCommitDialog() {
               id="commit-description"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder={
-                isGeneratingMessage
-                  ? "Generating commit message…"
-                  : "More detailed explanation…"
-              }
-              disabled={fieldsDisabled}
+              placeholder="More detailed explanation…"
               rows={4}
             />
           </div>
-          {errorMessage ? (
-            <div className="flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
-              <AlertCircle className="mt-0.5 size-4 shrink-0" />
-              <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-sans">
-                {errorMessage}
-              </pre>
-            </div>
-          ) : null}
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => close()}
-              disabled={commitMutation.isPending || isGeneratingMessage}
-            >
+            <Button type="button" variant="outline" onClick={() => close()}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              disabled={
-                !canCommit || commitMutation.isPending || isGeneratingMessage
-              }
-            >
-              {commitMutation.isPending ? (
-                <>
-                  <LoaderCircle className="size-4 animate-spin" />
-                  Committing…
-                </>
-              ) : isGeneratingMessage ? (
-                <>
-                  <LoaderCircle className="size-4 animate-spin" />
-                  Generating…
-                </>
-              ) : subjectTrimmed ? (
-                "Commit"
-              ) : (
-                "Generate message"
-              )}
+            <Button type="submit" disabled={!canCommit}>
+              Commit
             </Button>
           </DialogFooter>
         </form>

@@ -315,18 +315,49 @@ export const projectsRouter = {
       z.object({
         path: projectPathSchema,
         filePaths: z.array(z.string().trim().min(1)).min(1),
-        subject: z.string().trim().min(1),
-        description: z.string().optional(),
+        subject: z.string().trim().optional(),
+        description: z.string().trim().optional(),
       }),
     )
     .handler(async ({ input, context }) => {
       const path = normalizeProjectPath(input.path);
       assertProjectPathInteractionAllowed(path, context);
+
+      let subject = input.subject?.trim() ?? "";
+      let description = input.description?.trim();
+
+      if (!subject) {
+        const diff = await context.projectGitService.getSelectedChangesDiff(
+          path,
+          input.filePaths,
+        );
+        if (!diff) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "No changes to commit.",
+          });
+        }
+
+        const generated = await generateCommitMessage(
+          context.appSettingsState.state.titleGeneration,
+          diff,
+        );
+        if (!generated?.subject.trim()) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "Failed to generate commit message.",
+          });
+        }
+
+        subject = generated.subject.trim();
+        if (!description && generated.description?.trim()) {
+          description = generated.description.trim();
+        }
+      }
+
       try {
         await context.projectGitService.commitSelectedChanges(path, {
           paths: input.filePaths,
-          subject: input.subject,
-          description: input.description,
+          subject,
+          description,
         });
       } catch (error) {
         const message =
@@ -335,37 +366,6 @@ export const projectsRouter = {
             : "Git commit failed.";
         throw new ORPCError("BAD_REQUEST", { message });
       }
-    }),
-  generateCommitMessage: procedure
-    .input(
-      z.object({
-        path: projectPathSchema,
-        filePaths: z.array(z.string().trim().min(1)).min(1),
-      }),
-    )
-    .handler(async ({ input, context }) => {
-      const path = normalizeProjectPath(input.path);
-      assertProjectPathInteractionAllowed(path, context);
-      const diff = await context.projectGitService.getSelectedChangesDiff(
-        path,
-        input.filePaths,
-      );
-      if (!diff) {
-        return { subject: null, description: null };
-      }
-
-      const generated = await generateCommitMessage(
-        context.appSettingsState.state.titleGeneration,
-        diff,
-      );
-      if (!generated) {
-        return { subject: null, description: null };
-      }
-
-      return {
-        subject: generated.subject,
-        description: generated.description ?? null,
-      };
     }),
   discardChanges: procedure
     .input(
