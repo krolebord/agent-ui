@@ -8,6 +8,7 @@ import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { DesktopIntegrationManager } from "./desktop-integration-manager";
 import log from "./logger";
+import { ensureManagedSkills } from "./managed-skills";
 import { PersistenceOrchestrator } from "./persistence-orchestrator";
 import { ProjectGitService } from "./project-git-service";
 import {
@@ -123,6 +124,12 @@ export async function createServices(options: CreateServicesOptions) {
     initializeManagedCursorHooks(userDataPath),
     initializeShellIntegration(userDataPath),
   ]);
+
+  try {
+    await ensureManagedSkills(userDataPath, managedPluginDir);
+  } catch (error) {
+    log.error("Managed skills setup failed", error);
+  }
 
   const stateFileManager = new SessionStateFileManager(userDataPath);
   const cursorSessionLogFileManager = new CursorSessionLogFileManager(
