@@ -1,4 +1,9 @@
 import {
+  type HandoffEntryDisplay,
+  HandoffPicker,
+  useHandoffSelection,
+} from "@renderer/components/handoff-picker";
+import {
   CodexPermissionModeToggleGroup,
   PermissionModeToggleGroup,
 } from "@renderer/components/permission-mode-toggle-group";
@@ -203,6 +208,8 @@ export function NewSessionDialog() {
   const [sessionType, setSessionType] = useState<LastSessionType>("claude");
   const [initialPrompt, setInitialPrompt] = useState("");
   const [sessionName, setSessionName] = useState("");
+  const [selectedHandoff, setSelectedHandoff] =
+    useState<HandoffEntryDisplay | null>(null);
   const [claudeOptions, setClaudeOptions] = useState<LastClaudeSessionOptions>(
     resolveClaudeSessionOptions(undefined),
   );
@@ -228,6 +235,7 @@ export function NewSessionDialog() {
     setSessionType(storedLastSessionOptions.lastSessionType ?? "claude");
     setInitialPrompt("");
     setSessionName("");
+    setSelectedHandoff(null);
     setClaudeOptions(
       resolveClaudeSessionOptions(storedLastSessionOptions.claude),
     );
@@ -347,6 +355,8 @@ export function NewSessionDialog() {
             setInitialPrompt={setInitialPrompt}
             sessionName={sessionName}
             setSessionName={setSessionName}
+            selectedHandoff={selectedHandoff}
+            setSelectedHandoff={setSelectedHandoff}
             options={claudeOptions}
             setOptions={setClaudeOptions}
             onClose={persistAndClose}
@@ -358,6 +368,8 @@ export function NewSessionDialog() {
             setInitialPrompt={setInitialPrompt}
             sessionName={sessionName}
             setSessionName={setSessionName}
+            selectedHandoff={selectedHandoff}
+            setSelectedHandoff={setSelectedHandoff}
             options={codexOptions}
             setOptions={setCodexOptions}
             onClose={persistAndClose}
@@ -369,6 +381,8 @@ export function NewSessionDialog() {
             setInitialPrompt={setInitialPrompt}
             sessionName={sessionName}
             setSessionName={setSessionName}
+            selectedHandoff={selectedHandoff}
+            setSelectedHandoff={setSelectedHandoff}
             options={cursorOptions}
             setOptions={setCursorOptions}
             onClose={persistAndClose}
@@ -385,6 +399,8 @@ interface SessionFormProps<TOptions> {
   setInitialPrompt: (value: string) => void;
   sessionName: string;
   setSessionName: (value: string) => void;
+  selectedHandoff: HandoffEntryDisplay | null;
+  setSelectedHandoff: (value: HandoffEntryDisplay | null) => void;
   options: TOptions;
   setOptions: (value: TOptions | ((current: TOptions) => TOptions)) => void;
   onClose: () => void;
@@ -396,10 +412,18 @@ function LocalClaudeSessionForm({
   setInitialPrompt,
   sessionName,
   setSessionName,
+  selectedHandoff,
+  setSelectedHandoff,
   options,
   setOptions,
   onClose,
 }: SessionFormProps<LastClaudeSessionOptions>) {
+  const onHandoffChange = useHandoffSelection({
+    initialPrompt,
+    setInitialPrompt,
+    selectedHandoff,
+    setSelectedHandoff,
+  });
   const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -494,6 +518,15 @@ function LocalClaudeSessionForm({
           setOptions((current) => ({ ...current, permissionMode: value }));
         }}
       />
+
+      <div className="space-y-2">
+        <Label>Continue from handoff (optional)</Label>
+        <HandoffPicker
+          value={selectedHandoff}
+          onChange={onHandoffChange}
+          disabled={isPending}
+        />
+      </div>
 
       <div className="flex items-end gap-3">
         <div className="min-w-0 flex-1 space-y-2">
@@ -679,10 +712,18 @@ function CodexSessionForm({
   setInitialPrompt,
   sessionName,
   setSessionName,
+  selectedHandoff,
+  setSelectedHandoff,
   options,
   setOptions,
   onClose,
 }: SessionFormProps<LastCodexSessionOptions>) {
+  const onHandoffChange = useHandoffSelection({
+    initialPrompt,
+    setInitialPrompt,
+    selectedHandoff,
+    setSelectedHandoff,
+  });
   const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -776,6 +817,15 @@ function CodexSessionForm({
           setOptions((current) => ({ ...current, permissionMode: value }));
         }}
       />
+
+      <div className="space-y-2">
+        <Label>Continue from handoff (optional)</Label>
+        <HandoffPicker
+          value={selectedHandoff}
+          onChange={onHandoffChange}
+          disabled={isPending}
+        />
+      </div>
 
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-2">
@@ -927,6 +977,8 @@ function CursorAgentSessionForm({
   setInitialPrompt,
   sessionName,
   setSessionName,
+  selectedHandoff,
+  setSelectedHandoff,
   options,
   setOptions,
   onClose,
@@ -934,6 +986,12 @@ function CursorAgentSessionForm({
   const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const mode = toCursorAgentMode(options.mode);
+  const onHandoffChange = useHandoffSelection({
+    initialPrompt,
+    setInitialPrompt,
+    selectedHandoff,
+    setSelectedHandoff,
+  });
 
   useHotkey(
     cycleCursorModeHotkey,
@@ -1062,6 +1120,15 @@ function CursorAgentSessionForm({
             </ToggleGroupItem>
           ))}
         </ToggleGroup>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Continue from handoff (optional)</Label>
+        <HandoffPicker
+          value={selectedHandoff}
+          onChange={onHandoffChange}
+          disabled={isPending}
+        />
       </div>
 
       <div className="flex items-start gap-3">
