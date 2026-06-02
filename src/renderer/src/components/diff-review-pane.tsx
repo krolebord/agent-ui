@@ -499,14 +499,19 @@ function FileListItem({
   selected: boolean;
   commentCount: number;
 }) {
+  const store = useContext(projectDiffPaneContext);
   const confirmed = useProjectDiffStore((s) =>
     s.confirmedFiles.includes(file.name),
+  );
+  const hasSelectedFiles = useProjectDiffStore(
+    (s) => s.confirmedFiles.length > 0,
   );
   const projectPath = useProjectDiffStore((s) => s.projectPath);
   const selectFile = useProjectDiffStore((s) => s.selectFile);
   const toggleFileConfirmation = useProjectDiffStore(
     (s) => s.toggleFileConfirmation,
   );
+  const clearConfirmations = useProjectDiffStore((s) => s.clearConfirmations);
 
   const queryClient = useQueryClient();
   const confirm = useConfirmDialogStore((s) => s.confirm);
@@ -528,6 +533,35 @@ function FileListItem({
       confirmLabel: "Discard",
       onConfirm: async () => {
         await discardMutation.mutateAsync({ path: projectPath, filePaths });
+        await queryClient.invalidateQueries({
+          queryKey: orpc.projects.getUncommittedDiff.queryKey({
+            input: { path: projectPath },
+          }),
+        });
+      },
+    });
+  };
+
+  const requestDiscardSelected = () => {
+    const { confirmedFiles } = store.getState();
+    const files = queryClient.getQueryData(
+      orpc.projects.getUncommittedDiff.queryKey({
+        input: { path: projectPath },
+      }),
+    );
+    if (!files) return;
+    const selectedFileCount = files.filter((f) =>
+      confirmedFiles.includes(f.name),
+    ).length;
+    if (selectedFileCount === 0) return;
+    const filePaths = gitPathsForConfirmedFiles(files, confirmedFiles);
+    confirm({
+      title: "Discard changes in selected files?",
+      description: `All changes in ${selectedFileCount} selected file${selectedFileCount === 1 ? "" : "s"} will be discarded. New files will be permanently deleted. Modified files will be reverted to the last commit. This cannot be undone.`,
+      confirmLabel: "Discard",
+      onConfirm: async () => {
+        await discardMutation.mutateAsync({ path: projectPath, filePaths });
+        clearConfirmations();
         await queryClient.invalidateQueries({
           queryKey: orpc.projects.getUncommittedDiff.queryKey({
             input: { path: projectPath },
@@ -635,6 +669,14 @@ function FileListItem({
         >
           <Trash2 className="size-3.5" />
           Discard changes
+        </ContextMenuItem>
+        <ContextMenuItem
+          variant="destructive"
+          onSelect={requestDiscardSelected}
+          disabled={!hasSelectedFiles || discardMutation.isPending}
+        >
+          <Trash2 className="size-3.5" />
+          Discard selected files
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
