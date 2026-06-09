@@ -74,6 +74,50 @@ function isSessionActive(session: Session): boolean {
   return session.status !== "stopped";
 }
 
+function projectHasRunningTerminal(
+  projectTerminals: Record<
+    string,
+    { terminals: Record<string, { status: string }> }
+  >,
+  projectPath: string,
+): boolean {
+  const workspace = projectTerminals[projectPath];
+  if (!workspace) return false;
+  return Object.values(workspace.terminals).some(
+    (terminal) => terminal.status === "running",
+  );
+}
+
+function ProjectActiveSessionsPill({
+  projectPath,
+  sessions,
+}: {
+  projectPath: string;
+  sessions: Session[];
+}) {
+  const activeSessionCount = sessions.filter(isSessionActive).length;
+  const hasRunningTerminal = useAppState((state) =>
+    projectHasRunningTerminal(state.projectTerminals, projectPath),
+  );
+
+  if (activeSessionCount === 0 && !hasRunningTerminal) {
+    return null;
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-flex min-w-[1.125rem] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-medium tabular-nums leading-4",
+        hasRunningTerminal
+          ? "bg-emerald-500/20 text-emerald-400"
+          : "bg-zinc-700/60 text-zinc-400",
+      )}
+    >
+      {activeSessionCount}
+    </span>
+  );
+}
+
 async function stopSession(session: Session): Promise<void> {
   switch (session.type) {
     case "claude-local-terminal":
@@ -311,6 +355,10 @@ export function SessionSidebar() {
                         )}
                       />
                       <span className="truncate">{group.displayName}</span>
+                      <ProjectActiveSessionsPill
+                        projectPath={group.path}
+                        sessions={group.sessions}
+                      />
                     </button>
                   </div>
                   {!group.collapsed ? (
@@ -364,13 +412,6 @@ function SortableProjectGroup({
   const secondaryLine = projectMeta.filter(Boolean).join(" • ");
   const hasAwaitingUserInput = groupHasAwaitingUserInput(group);
   const activeSessions = group.sessions.filter(isSessionActive);
-  const hasRunningTerminal = useAppState((state) => {
-    const workspace = state.projectTerminals[group.path];
-    if (!workspace) return false;
-    return Object.values(workspace.terminals).some(
-      (t) => t.status === "running",
-    );
-  });
 
   const refreshGitMutation = useMutation(
     orpc.projects.refreshProject.mutationOptions(),
@@ -451,9 +492,10 @@ function SortableProjectGroup({
                 />
               )}
               <span className="truncate">{group.displayName}</span>
-              {hasRunningTerminal && (
-                <span className="size-1.5 shrink-0 rounded-full bg-emerald-400" />
-              )}
+              <ProjectActiveSessionsPill
+                projectPath={group.path}
+                sessions={group.sessions}
+              />
             </span>
             {secondaryLine ? (
               <span className="mt-0.5 flex items-center gap-1 text-xs text-zinc-400">
