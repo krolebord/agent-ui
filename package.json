@@ -1,6 +1,6 @@
 {
   "name": "agent-ui",
-  "version": "0.21.1",
+  "version": "0.21.2",
   "private": true,
   "author": "krolebord",
   "description": "Simple orchestrator for CLI agents",
