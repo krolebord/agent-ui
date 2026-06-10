@@ -47,6 +47,27 @@ export interface GitUpstreamDiffStats {
   behindCommits: number;
 }
 
+export interface GitHistoryCommit {
+  hash: string;
+  parentHashes: string[];
+  subject: string;
+  body: string;
+  authorName: string;
+  authorEmail: string;
+  /** Author date in strict ISO 8601 (`git log --format=%aI`) */
+  authorDate: string;
+  /** Ref decorations for this commit, e.g. "HEAD -> main", "tag: v1.0.0" */
+  refs: string[];
+  /** True when the commit is not reachable from the configured upstream */
+  unpushed: boolean;
+}
+
+export interface GitHistoryPage {
+  commits: GitHistoryCommit[];
+  /** Hash of the last returned commit; pass back as cursor to fetch older commits */
+  nextCursor: string | null;
+}
+
 export type ProjectDeletionToastKind = "warning" | "error";
 
 export interface ProjectDeletionToast {

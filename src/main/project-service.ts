@@ -106,6 +106,10 @@ export const defineProjectStatePersistence = (state: ProjectState) =>
 
 const projectPathSchema = z.string().trim().min(1);
 const gitBranchSchema = z.string().trim().min(1);
+const gitCommitHashSchema = z
+  .string()
+  .trim()
+  .regex(/^[0-9a-f]{4,64}$/i, "Invalid commit hash");
 
 async function deleteProjectSessionsForPath(
   sessionsById: Record<string, Session>,
@@ -314,6 +318,45 @@ export const projectsRouter = {
       if (!diff) return [] as FileDiffMetadata[];
       const files = parsePatchFiles(diff).flatMap((p) => p.files);
       return files;
+    }),
+  getCommitHistory: procedure
+    .input(
+      z.object({
+        path: projectPathSchema,
+        cursor: gitCommitHashSchema.optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      return context.projectGitService.getCommitHistory(
+        normalizeProjectPath(input.path),
+        {
+          cursor: input.cursor,
+          limit: input.limit ?? 30,
+        },
+      );
+    }),
+  getCommitDiff: procedure
+    .input(
+      z.object({
+        path: projectPathSchema,
+        commitHash: gitCommitHashSchema,
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const diff = await context.projectGitService.getCommitDiff(
+        normalizeProjectPath(input.path),
+        input.commitHash,
+      );
+      if (!diff) return [] as FileDiffMetadata[];
+      return parsePatchFiles(diff).flatMap((p) => p.files);
+    }),
+  pushToRemote: procedure
+    .input(z.object({ path: projectPathSchema }))
+    .handler(async ({ input, context }) => {
+      const path = normalizeProjectPath(input.path);
+      assertProjectPathInteractionAllowed(path, context);
+      await context.projectGitService.pushToRemote(path);
     }),
   commitSelectedChanges: procedure
     .input(

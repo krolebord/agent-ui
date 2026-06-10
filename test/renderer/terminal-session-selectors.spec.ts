@@ -34,6 +34,30 @@ describe("buildProjectSessionGroups", () => {
     ]);
   });
 
+  it("exposes upstream ahead/behind stats for projects", () => {
+    const groups = buildProjectSessionGroups({
+      projects: [
+        {
+          path: "/workspace/app",
+          collapsed: false,
+          gitBranch: "main",
+          gitUpstreamDiffStats: {
+            upstreamBranch: "origin/main",
+            aheadCommits: 3,
+            behindCommits: 1,
+          },
+        },
+      ],
+      sessionsById: {},
+    });
+
+    expect(groups[0]?.gitUpstreamDiffStats).toEqual({
+      upstreamBranch: "origin/main",
+      aheadCommits: 3,
+      behindCommits: 1,
+    });
+  });
+
   it("prefers alias display names and exposes worktree origin names", () => {
     const groups = buildProjectSessionGroups({
       projects: [

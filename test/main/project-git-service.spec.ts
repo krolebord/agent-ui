@@ -6,6 +6,7 @@ const branchLocalMock = vi.hoisted(() => vi.fn());
 const rawMock = vi.hoisted(() => vi.fn());
 const addMock = vi.hoisted(() => vi.fn());
 const commitMock = vi.hoisted(() => vi.fn());
+const pushMock = vi.hoisted(() => vi.fn());
 const copyFileMock = vi.hoisted(() => vi.fn());
 const mkdtempMock = vi.hoisted(() => vi.fn());
 const readdirMock = vi.hoisted(() => vi.fn());
@@ -63,6 +64,7 @@ describe("ProjectGitService", () => {
           paths?: string[],
           options?: Record<string, unknown>,
         ) => commitMock(projectPath, message, paths, options),
+        push: (options?: string[]) => pushMock(projectPath, options),
         raw: (args: string[]) => {
           const envSnapshot = { ...envVars };
           if (Object.keys(envSnapshot).length === 0) {
@@ -1338,5 +1340,479 @@ describe("ProjectGitService", () => {
     expect(
       projectsState.state.some((p) => p.path === "/repo-one-blank-lines"),
     ).toBe(true);
+  });
+
+  describe("getCommitHistory", () => {
+    const FIELD = "\x1f";
+    const RECORD = "\x1e";
+    const GIT_LOG_FORMAT =
+      "%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%D%x1f%s%x1f%b%x1e";
+
+    const hashA = "a".repeat(40);
+    const hashB = "b".repeat(40);
+    const hashC = "c".repeat(40);
+
+    function logRecord(input: {
+      hash: string;
+      parents?: string;
+      authorName?: string;
+      authorEmail?: string;
+      authorDate?: string;
+      refs?: string;
+      subject?: string;
+      body?: string;
+    }): string {
+      return (
+        [
+          input.hash,
+          input.parents ?? "",
+          input.authorName ?? "krolebord",
+          input.authorEmail ?? "krolebord@example.com",
+          input.authorDate ?? "2026-06-10T12:00:00+00:00",
+          input.refs ?? "",
+          input.subject ?? "Commit subject",
+          input.body ?? "",
+        ].join(FIELD) + RECORD
+      );
+    }
+
+    it("returns an empty page when the path is not a git repo", async () => {
+      checkIsRepoMock.mockResolvedValue(false);
+
+      const service = new ProjectGitService(defineProjectState());
+      const page = await service.getCommitHistory("/plain-dir", { limit: 30 });
+
+      expect(page).toEqual({ commits: [], nextCursor: null });
+      expect(rawMock).not.toHaveBeenCalled();
+    });
+
+    it("returns an empty page when the repo has no commits yet", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            throw new Error("Needed a single revision");
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const page = await service.getCommitHistory("/repo-one", { limit: 30 });
+
+      expect(page).toEqual({ commits: [], nextCursor: null });
+      expect(rawMock).not.toHaveBeenCalledWith(
+        "/repo-one",
+        expect.arrayContaining(["log"]),
+      );
+    });
+
+    it("returns parsed commits and a cursor when more history is available", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return `${hashA}\n`;
+          }
+          if (args[0] === "log") {
+            return [
+              logRecord({
+                hash: hashA,
+                parents: hashB,
+                refs: "HEAD -> main, tag: v1.2.3, origin/main",
+                subject: "Latest commit",
+                body: "First line.\n\nSecond line.",
+              }),
+              logRecord({
+                hash: hashB,
+                parents: hashC,
+                subject: "Middle commit",
+              }),
+              logRecord({ hash: hashC, subject: "Extra commit" }),
+            ].join("\n");
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const page = await service.getCommitHistory("/repo-one", { limit: 2 });
+
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "log",
+        `--format=${GIT_LOG_FORMAT}`,
+        "--max-count=3",
+        "HEAD",
+      ]);
+      expect(page.commits).toEqual([
+        {
+          hash: hashA,
+          parentHashes: [hashB],
+          authorName: "krolebord",
+          authorEmail: "krolebord@example.com",
+          authorDate: "2026-06-10T12:00:00+00:00",
+          refs: ["HEAD -> main", "tag: v1.2.3", "origin/main"],
+          subject: "Latest commit",
+          body: "First line.\n\nSecond line.",
+          unpushed: false,
+        },
+        {
+          hash: hashB,
+          parentHashes: [hashC],
+          authorName: "krolebord",
+          authorEmail: "krolebord@example.com",
+          authorDate: "2026-06-10T12:00:00+00:00",
+          refs: [],
+          subject: "Middle commit",
+          body: "",
+          unpushed: false,
+        },
+      ]);
+      expect(page.nextCursor).toBe(hashB);
+    });
+
+    it("returns no cursor when the history fits within the limit", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return `${hashA}\n`;
+          }
+          if (args[0] === "log") {
+            return logRecord({ hash: hashA, subject: "Only commit" });
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const page = await service.getCommitHistory("/repo-one", { limit: 30 });
+
+      expect(page.commits).toHaveLength(1);
+      expect(page.commits[0]?.parentHashes).toEqual([]);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it("continues from a cursor and skips the cursor commit itself", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return `${hashA}\n`;
+          }
+          if (args[0] === "log") {
+            return logRecord({ hash: hashC, subject: "Older commit" });
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const page = await service.getCommitHistory("/repo-one", {
+        cursor: hashB,
+        limit: 30,
+      });
+
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "log",
+        `--format=${GIT_LOG_FORMAT}`,
+        "--max-count=31",
+        "--skip=1",
+        hashB,
+      ]);
+      expect(page.commits.map((commit) => commit.hash)).toEqual([hashC]);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it("marks commits ahead of the upstream as unpushed", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return `${hashA}\n`;
+          }
+          if (args[0] === "rev-list" && args[1] === "@{upstream}..HEAD") {
+            return `${hashA}\n`;
+          }
+          if (args[0] === "log") {
+            return [
+              logRecord({ hash: hashA, subject: "Local only" }),
+              logRecord({ hash: hashB, subject: "Already pushed" }),
+            ].join("\n");
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const page = await service.getCommitHistory("/repo-one", { limit: 30 });
+
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "rev-list",
+        "@{upstream}..HEAD",
+      ]);
+      expect(
+        page.commits.map(({ hash, unpushed }) => ({ hash, unpushed })),
+      ).toEqual([
+        { hash: hashA, unpushed: true },
+        { hash: hashB, unpushed: false },
+      ]);
+    });
+
+    it("treats all commits as pushed when no upstream is configured", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return `${hashA}\n`;
+          }
+          if (args[0] === "rev-list" && args[1] === "@{upstream}..HEAD") {
+            throw new Error("no upstream configured");
+          }
+          if (args[0] === "log") {
+            return logRecord({ hash: hashA, subject: "Local commit" });
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const page = await service.getCommitHistory("/repo-one", { limit: 30 });
+
+      expect(page.commits.map((commit) => commit.unpushed)).toEqual([false]);
+    });
+
+    it("rejects an invalid cursor", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(
+        service.getCommitHistory("/repo-one", {
+          cursor: "not-a-hash; rm -rf /",
+          limit: 30,
+        }),
+      ).rejects.toThrow("Invalid commit hash.");
+      expect(rawMock).not.toHaveBeenCalledWith(
+        "/repo-one",
+        expect.arrayContaining(["log"]),
+      );
+    });
+  });
+
+  describe("pushToRemote", () => {
+    it("pushes to the configured upstream", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      branchLocalMock.mockResolvedValue({ current: "main" });
+      pushMock.mockResolvedValue(undefined);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref" && args[1] === "--short") {
+            return "main\n";
+          }
+          if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
+            return "origin/main\n";
+          }
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return "0123456789abcdef\n";
+          }
+          if (args[0] === "rev-parse" && args[1] === "--git-path") {
+            return ".git/index\n";
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      await service.pushToRemote("/repo-one");
+
+      expect(pushMock).toHaveBeenCalledWith("/repo-one", undefined);
+    });
+
+    it("publishes the branch when no upstream is configured", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      branchLocalMock.mockResolvedValue({ current: "feature/new-ui" });
+      pushMock.mockResolvedValue(undefined);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref" && args[1] === "--short") {
+            return "feature/new-ui\n";
+          }
+          if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
+            throw new Error("no upstream configured");
+          }
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return "0123456789abcdef\n";
+          }
+          if (args[0] === "rev-parse" && args[1] === "--git-path") {
+            return ".git/index\n";
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      await service.pushToRemote("/repo-one");
+
+      expect(pushMock).toHaveBeenCalledWith("/repo-one", [
+        "--set-upstream",
+        "origin",
+        "feature/new-ui",
+      ]);
+    });
+
+    it("rejects pushing from a detached HEAD", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref") {
+            throw new Error("ref HEAD is not a symbolic ref");
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pushToRemote("/repo-one")).rejects.toThrow(
+        "Cannot push from a detached HEAD.",
+      );
+      expect(pushMock).not.toHaveBeenCalled();
+    });
+
+    it("surfaces push failures", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      pushMock.mockRejectedValue(new Error("remote: permission denied"));
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref" && args[1] === "--short") {
+            return "main\n";
+          }
+          if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
+            return "origin/main\n";
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pushToRemote("/repo-one")).rejects.toThrow(
+        "remote: permission denied",
+      );
+    });
+
+    it("throws when the project is not a git repository", async () => {
+      checkIsRepoMock.mockResolvedValue(false);
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pushToRemote("/plain-dir")).rejects.toThrow(
+        "Project is not a Git repository.",
+      );
+      expect(pushMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getCommitDiff", () => {
+    const commitHash = "d".repeat(40);
+    const parentHash = "e".repeat(40);
+
+    it("diffs a commit against its first parent", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (
+            args[0] === "rev-parse" &&
+            args[1] === "--verify" &&
+            args[2] === `${commitHash}^`
+          ) {
+            return `${parentHash}\n`;
+          }
+          if (args[0] === "diff") {
+            return "diff --git a/file.ts b/file.ts\n";
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const diff = await service.getCommitDiff("/repo-one", commitHash);
+
+      expect(diff).toBe("diff --git a/file.ts b/file.ts");
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "diff",
+        "--no-color",
+        parentHash,
+        commitHash,
+      ]);
+    });
+
+    it("falls back to the empty tree for root commits", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            throw new Error("Needed a single revision");
+          }
+          if (args[0] === "diff") {
+            return "diff --git a/file.ts b/file.ts\n";
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const diff = await service.getCommitDiff("/repo-one", commitHash);
+
+      expect(diff).toBe("diff --git a/file.ts b/file.ts");
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "diff",
+        "--no-color",
+        "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+        commitHash,
+      ]);
+    });
+
+    it("returns null when the commit has no changes", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return `${parentHash}\n`;
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const diff = await service.getCommitDiff("/repo-one", commitHash);
+
+      expect(diff).toBeNull();
+    });
+
+    it("rejects invalid commit hashes", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(
+        service.getCommitDiff("/repo-one", "HEAD; rm -rf /"),
+      ).rejects.toThrow("Invalid commit hash.");
+      expect(rawMock).not.toHaveBeenCalledWith(
+        "/repo-one",
+        expect.arrayContaining(["diff"]),
+      );
+    });
+
+    it("throws when the project is not a git repository", async () => {
+      checkIsRepoMock.mockResolvedValue(false);
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(
+        service.getCommitDiff("/plain-dir", commitHash),
+      ).rejects.toThrow("Project is not a Git repository.");
+    });
   });
 });

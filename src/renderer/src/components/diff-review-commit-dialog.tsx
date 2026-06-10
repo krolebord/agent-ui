@@ -75,11 +75,17 @@ export function DiffReviewCommitDialog() {
 
     close();
 
-    const invalidateDiff = () =>
+    const invalidateDiff = () => {
       void queryClient.invalidateQueries({
         queryKey: orpc.projects.getUncommittedDiff.queryKey({
           input: { path: projectPath },
         }),
+      });
+      invalidateHistory();
+    };
+    const invalidateHistory = () =>
+      void queryClient.invalidateQueries({
+        queryKey: orpc.projects.getCommitHistory.key(),
       });
 
     void runCommitWithProgress(
@@ -95,9 +101,15 @@ export function DiffReviewCommitDialog() {
           invalidateDiff();
         },
       },
-    ).catch(() => {
-      invalidateDiff();
-    });
+    )
+      .then(() => {
+        // Auto-generated messages amend the commit after `committed`, which
+        // changes the hash — refresh history again once the run finishes.
+        invalidateHistory();
+      })
+      .catch(() => {
+        invalidateDiff();
+      });
   };
 
   return (

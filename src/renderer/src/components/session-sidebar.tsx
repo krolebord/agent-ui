@@ -410,6 +410,14 @@ function SortableProjectGroup({
     projectMeta.push(`from ${group.worktreeOriginName}`);
   }
   const secondaryLine = projectMeta.filter(Boolean).join(" • ");
+  const aheadCommits =
+    group.gitUpstreamDiffStats && group.gitUpstreamDiffStats.aheadCommits > 0
+      ? group.gitUpstreamDiffStats.aheadCommits
+      : undefined;
+  const behindCommits =
+    group.gitUpstreamDiffStats && group.gitUpstreamDiffStats.behindCommits > 0
+      ? group.gitUpstreamDiffStats.behindCommits
+      : undefined;
   const hasAwaitingUserInput = groupHasAwaitingUserInput(group);
   const activeSessions = group.sessions.filter(isSessionActive);
 
@@ -504,6 +512,23 @@ function SortableProjectGroup({
                 ) : (
                   <GitBranch className="size-3 shrink-0" />
                 )}
+                {aheadCommits || behindCommits ? (
+                  <span
+                    className="shrink-0 font-mono text-[10px] text-zinc-400"
+                    title={
+                      group.gitUpstreamDiffStats
+                        ? `${aheadCommits ?? 0} ahead, ${behindCommits ?? 0} behind ${group.gitUpstreamDiffStats.upstreamBranch}`
+                        : undefined
+                    }
+                  >
+                    {aheadCommits ? <span>↑{aheadCommits}</span> : null}
+                    {behindCommits ? (
+                      <span className={aheadCommits ? "ml-1" : undefined}>
+                        ↓{behindCommits}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
                 <span className="truncate">{secondaryLine}</span>
               </span>
             ) : null}

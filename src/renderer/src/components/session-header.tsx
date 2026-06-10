@@ -1,4 +1,5 @@
 import type { Session } from "@main/sessions/state";
+import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import {
   type OpenInAppTarget,
@@ -11,6 +12,7 @@ import {
   FolderOpen,
   GitFork,
   Github,
+  History,
   TerminalSquare,
 } from "lucide-react";
 import {
@@ -26,6 +28,7 @@ import { toast } from "sonner";
 import { create } from "zustand";
 import { combine, persist } from "zustand/middleware";
 import {
+  type BottomPaneView,
   useDiffReviewStore,
   useProjectBottomPaneView,
 } from "./diff-review-pane";
@@ -57,6 +60,16 @@ const sessionTypeConfig: Record<
   "cursor-agent": { icon: CursorAgentIcon },
   "worktree-setup": { icon: GitFork },
 };
+
+const bottomPaneViewItems: Array<{
+  view: BottomPaneView;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
+  label: string;
+}> = [
+  { view: "terminals", icon: TerminalSquare, label: "Project terminals" },
+  { view: "diff", icon: FileDiff, label: "Uncommitted changes" },
+  { view: "history", icon: History, label: "Commit history" },
+];
 
 const openInAppItems: Array<{
   app: OpenInAppTarget;
@@ -199,10 +212,9 @@ export function SessionHeader({ session }: { session: Session }) {
 
   const projectPath = session.startupConfig.cwd;
   const bottomPaneView = useProjectBottomPaneView(projectPath);
-  const toggleBottomPaneView = useDiffReviewStore(
-    (state) => state.toggleBottomPaneView,
+  const setBottomPaneView = useDiffReviewStore(
+    (state) => state.setBottomPaneView,
   );
-  const BottomPaneIcon = bottomPaneView === "diff" ? FileDiff : TerminalSquare;
 
   return (
     <header className="flex min-h-11 shrink-0 items-center gap-3 border-b border-border/70 px-2 py-1.5">
@@ -243,25 +255,38 @@ export function SessionHeader({ session }: { session: Session }) {
           ) : null}
         </div>
       ) : null}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="size-8 shrink-0 px-0"
-        onClick={() => toggleBottomPaneView(projectPath)}
-        aria-label={
-          bottomPaneView === "diff"
-            ? "Show project terminals"
-            : "Show uncommitted changes"
-        }
-        title={
-          bottomPaneView === "diff"
-            ? "Project terminals"
-            : "Uncommitted changes"
-        }
-      >
-        <BottomPaneIcon className="size-3.5 text-muted-foreground" />
-      </Button>
+      <div className="flex shrink-0 items-center">
+        {bottomPaneViewItems.map(({ view, icon: ViewIcon, label }, index) => (
+          <Button
+            key={view}
+            type="button"
+            variant="outline"
+            size="sm"
+            className={cn(
+              "size-8 shrink-0 px-0",
+              index === 0
+                ? "rounded-r-none"
+                : index === bottomPaneViewItems.length - 1
+                  ? "rounded-l-none border-l-0"
+                  : "rounded-none border-l-0",
+              bottomPaneView === view && "bg-accent",
+            )}
+            onClick={() => setBottomPaneView(projectPath, view)}
+            aria-label={label}
+            aria-pressed={bottomPaneView === view}
+            title={label}
+          >
+            <ViewIcon
+              className={cn(
+                "size-3.5",
+                bottomPaneView === view
+                  ? "text-foreground"
+                  : "text-muted-foreground",
+              )}
+            />
+          </Button>
+        ))}
+      </div>
       <div className="flex shrink-0 items-center">
         <Button
           type="button"

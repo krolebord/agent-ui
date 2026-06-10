@@ -8,6 +8,10 @@ import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
 import { COMPACT_FILE_DIFF_OPTIONS } from "@renderer/components/diff-pane-styles";
 import { useDiffReviewCommitDialogStore } from "@renderer/components/diff-review-commit-dialog";
 import {
+  DiffViewModeToggle,
+  useDiffViewMode,
+} from "@renderer/components/diff-view-mode";
+import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -46,7 +50,7 @@ import {
 } from "./ui/resizable";
 import { Textarea } from "./ui/textarea";
 
-export type BottomPaneView = "terminals" | "diff";
+export type BottomPaneView = "terminals" | "diff" | "history";
 
 type DiffReviewComment = {
   id: string;
@@ -170,10 +174,16 @@ export const useDiffReviewStore = create(
           get().bottomPaneViewByProject,
           projectPath,
         );
+        const nextView: BottomPaneView =
+          current === "terminals"
+            ? "diff"
+            : current === "diff"
+              ? "history"
+              : "terminals";
         set((state) => ({
           bottomPaneViewByProject: {
             ...state.bottomPaneViewByProject,
-            [projectPath]: current === "diff" ? "terminals" : "diff",
+            [projectPath]: nextView,
           },
         }));
       },
@@ -1148,9 +1158,11 @@ function ProjectDiffPaneContent() {
       },
     });
   };
+  const diffViewMode = useDiffViewMode();
   const diffOptions = useMemo(
     () => ({
       ...COMPACT_FILE_DIFF_OPTIONS,
+      diffStyle: diffViewMode,
       enableGutterUtility: true,
       lineHoverHighlight: "both" as const,
       onLineNumberClick: ({
@@ -1170,7 +1182,7 @@ function ProjectDiffPaneContent() {
         );
       },
     }),
-    [projectPath, selectFile, selectedFile, startCommentDraft],
+    [diffViewMode, projectPath, selectFile, selectedFile, startCommentDraft],
   );
 
   useEffect(() => {
@@ -1305,6 +1317,7 @@ function ProjectDiffPaneContent() {
                   >
                     {files.length} changed file{files.length === 1 ? "" : "s"}
                   </label>
+                  <DiffViewModeToggle />
                   <Button
                     type="button"
                     variant="ghost"

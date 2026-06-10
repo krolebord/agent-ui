@@ -4,6 +4,8 @@ import path from "node:path";
 import type {
   ClaudeProject,
   GitDiffStats,
+  GitHistoryCommit,
+  GitHistoryPage,
   GitUpstreamDiffStats,
 } from "@shared/claude-types";
 import { buildSuggestedWorktreePath } from "@shared/project-worktree";
@@ -20,6 +22,87 @@ import { withThrottledAsyncRunner } from "./throttle-runner";
 const EMPTY_GIT_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const GIT_PROJECT_REFRESH_THROTTLE_MS = 3_000;
 const gitIndexPathCache = new Map<string, string>();
+
+const GIT_LOG_FIELD_SEPARATOR = "\x1f";
+const GIT_LOG_RECORD_SEPARATOR = "\x1e";
+const GIT_LOG_HISTORY_FORMAT = `${["%H", "%P", "%an", "%ae", "%aI", "%D", "%s", "%b"].join("%x1f")}%x1e`;
+// 40 hex chars for SHA-1, 64 for SHA-256 repos; prefixes allowed for cursors
+const GIT_COMMIT_HASH_PATTERN = /^[0-9a-f]{4,64}$/i;
+
+function assertValidCommitHash(hash: string): void {
+  if (!GIT_COMMIT_HASH_PATTERN.test(hash)) {
+    throw new Error("Invalid commit hash.");
+  }
+}
+
+function parseCommitHistoryOutput(
+  output: string,
+): Omit<GitHistoryCommit, "unpushed">[] {
+  const commits: Omit<GitHistoryCommit, "unpushed">[] = [];
+
+  for (const record of output.split(GIT_LOG_RECORD_SEPARATOR)) {
+    const trimmedRecord = record.trim();
+    if (!trimmedRecord) {
+      continue;
+    }
+
+    const fields = trimmedRecord.split(GIT_LOG_FIELD_SEPARATOR);
+    if (fields.length < 8) {
+      continue;
+    }
+
+    const [
+      hash,
+      parents,
+      authorName,
+      authorEmail,
+      authorDate,
+      refs,
+      subject,
+      ...bodyParts
+    ] = fields;
+    if (!hash) {
+      continue;
+    }
+
+    commits.push({
+      hash,
+      parentHashes: parents.split(/\s+/).filter(Boolean),
+      authorName,
+      authorEmail,
+      authorDate,
+      refs: refs
+        .split(",")
+        .map((ref) => ref.trim())
+        .filter(Boolean),
+      subject: subject.trim(),
+      body: bodyParts.join(GIT_LOG_FIELD_SEPARATOR).trim(),
+    });
+  }
+
+  return commits;
+}
+
+/**
+ * Hashes of commits not yet pushed to the configured upstream. Returns null
+ * when there is no upstream (or HEAD is detached), so callers can tell
+ * "everything is pushed" apart from "there is nothing to compare against".
+ */
+async function resolveUnpushedCommitHashes(
+  git: ReturnType<typeof simpleGit>,
+): Promise<Set<string> | null> {
+  try {
+    const output = await git.raw(["rev-list", "@{upstream}..HEAD"]);
+    return new Set(
+      output
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    );
+  } catch {
+    return null;
+  }
+}
 
 type ProjectGitMetadata = Pick<
   ClaudeProject,
@@ -624,6 +707,147 @@ export class ProjectGitService {
     }
 
     await this.refreshProject(projectPath);
+  }
+
+  /**
+   * Lists commits reachable from HEAD (or from the cursor commit), newest
+   * first. Cursor-based: a page continues from the cursor commit itself, so
+   * results stay stable even when new commits land on top.
+   */
+  async getCommitHistory(
+    projectPath: string,
+    input: {
+      cursor?: string;
+      limit: number;
+    },
+  ): Promise<GitHistoryPage> {
+    const emptyPage: GitHistoryPage = { commits: [], nextCursor: null };
+
+    const git = simpleGit(projectPath);
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      return emptyPage;
+    }
+
+    try {
+      await git.raw(["rev-parse", "--verify", "HEAD"]);
+    } catch {
+      return emptyPage;
+    }
+
+    const cursor = input.cursor?.trim();
+    if (cursor) {
+      assertValidCommitHash(cursor);
+    }
+
+    const logArgs = [
+      "log",
+      `--format=${GIT_LOG_HISTORY_FORMAT}`,
+      `--max-count=${input.limit + 1}`,
+    ];
+    if (cursor) {
+      logArgs.push("--skip=1", cursor);
+    } else {
+      logArgs.push("HEAD");
+    }
+
+    const [output, unpushedHashes] = await Promise.all([
+      git.raw(logArgs),
+      resolveUnpushedCommitHashes(git),
+    ]);
+    const entries = parseCommitHistoryOutput(output);
+    const hasMore = entries.length > input.limit;
+    const trimmedEntries = hasMore ? entries.slice(0, input.limit) : entries;
+    const commits = trimmedEntries.map((entry) => ({
+      ...entry,
+      unpushed: unpushedHashes?.has(entry.hash) ?? false,
+    }));
+    const lastCommit = commits.at(-1);
+
+    return {
+      commits,
+      nextCursor: hasMore && lastCommit ? lastCommit.hash : null,
+    };
+  }
+
+  /**
+   * Pushes the current branch to its upstream, or publishes it to origin
+   * (`--set-upstream`) when no upstream is configured. Terminal credential
+   * prompts are disabled so a missing credential fails fast instead of
+   * hanging the main process.
+   */
+  async pushToRemote(projectPath: string): Promise<void> {
+    const git = simpleGit(projectPath).env({
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+    });
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const branch = (
+      await git.raw(["symbolic-ref", "--short", "HEAD"]).catch(() => "")
+    ).trim();
+    if (!branch) {
+      throw new Error("Cannot push from a detached HEAD.");
+    }
+
+    let hasUpstream = true;
+    try {
+      await git.raw([
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "@{upstream}",
+      ]);
+    } catch {
+      hasUpstream = false;
+    }
+
+    try {
+      if (hasUpstream) {
+        await git.push();
+      } else {
+        await git.push(["--set-upstream", "origin", branch]);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Git push failed.";
+      throw new Error(msg);
+    }
+
+    await this.refreshProject(projectPath);
+  }
+
+  /**
+   * Diff of a single commit against its first parent (so merge commits show
+   * their effective changes); root commits diff against the empty tree.
+   */
+  async getCommitDiff(
+    projectPath: string,
+    commitHash: string,
+  ): Promise<string | null> {
+    const git = simpleGit(projectPath);
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const hash = commitHash.trim();
+    assertValidCommitHash(hash);
+
+    let parentRef: string;
+    try {
+      parentRef =
+        (await git.raw(["rev-parse", "--verify", `${hash}^`])).trim() ||
+        EMPTY_GIT_TREE_HASH;
+    } catch {
+      parentRef = EMPTY_GIT_TREE_HASH;
+    }
+
+    const diff = await git.raw(["diff", "--no-color", parentRef, hash]);
+    const trimmed = diff.trim();
+    return trimmed || null;
   }
 
   async getLastCommitDiff(

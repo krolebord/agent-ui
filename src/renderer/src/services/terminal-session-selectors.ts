@@ -1,5 +1,9 @@
 import type { Session } from "@main/sessions/state";
-import type { ClaudeModel, ClaudeProject } from "@shared/claude-types";
+import type {
+  ClaudeModel,
+  ClaudeProject,
+  GitUpstreamDiffStats,
+} from "@shared/claude-types";
 
 export interface ProjectSessionGroup {
   path: string;
@@ -7,6 +11,7 @@ export interface ProjectSessionGroup {
   collapsed: boolean;
   fromProjectList: boolean;
   gitBranch?: string;
+  gitUpstreamDiffStats?: GitUpstreamDiffStats;
   isWorktree: boolean;
   worktreeOriginName?: string;
   interactionDisabled: boolean;
@@ -149,6 +154,7 @@ export function buildProjectSessionGroups(
       collapsed: project.collapsed,
       fromProjectList: true,
       gitBranch: project.gitBranch,
+      gitUpstreamDiffStats: project.gitUpstreamDiffStats,
       isWorktree: Boolean(project.worktreeOriginPath),
       worktreeOriginName: project.worktreeOriginPath
         ? getProjectNameFromPath(project.worktreeOriginPath)
