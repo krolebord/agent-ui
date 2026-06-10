@@ -10,8 +10,6 @@ export const cursorModels: CursorModel[] = [
   { label: "Auto", value: "auto" },
   { label: "Composer 2.5 Fast", value: "composer-2.5-fast" },
   { label: "Composer 2.5", value: "composer-2.5" },
-  { label: "Composer 2 Fast", value: "composer-2-fast" },
-  { label: "Composer 2", value: "composer-2" },
   { label: "Kimi K2.5", value: "kimi-k2.5" },
   { label: "Grok Build 0.1", value: "grok-build-0.1" },
   { label: "Grok 4.3", value: "grok-4.3" },
@@ -93,6 +91,59 @@ export const cursorModels: CursorModel[] = [
   { label: "Gemini 3.5 Flash", value: "gemini-3.5-flash" },
   { label: "Gemini 3.1 Pro", value: "gemini-3.1-pro" },
   { label: "Gemini 3 Flash", value: "gemini-3-flash" },
+  { label: "Claude Opus 4 8 Xhigh Fast", value: "claude-opus-4-8-xhigh-fast" },
+  { label: "Claude Opus 4 8 Xhigh", value: "claude-opus-4-8-xhigh" },
+  {
+    label: "Claude Opus 4 8 Thinking Xhigh Fast",
+    value: "claude-opus-4-8-thinking-xhigh-fast",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking Xhigh",
+    value: "claude-opus-4-8-thinking-xhigh",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking Medium Fast",
+    value: "claude-opus-4-8-thinking-medium-fast",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking Medium",
+    value: "claude-opus-4-8-thinking-medium",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking Max Fast",
+    value: "claude-opus-4-8-thinking-max-fast",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking Max",
+    value: "claude-opus-4-8-thinking-max",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking Low Fast",
+    value: "claude-opus-4-8-thinking-low-fast",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking Low",
+    value: "claude-opus-4-8-thinking-low",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking High Fast",
+    value: "claude-opus-4-8-thinking-high-fast",
+  },
+  {
+    label: "Claude Opus 4 8 Thinking High",
+    value: "claude-opus-4-8-thinking-high",
+  },
+  {
+    label: "Claude Opus 4 8 Medium Fast",
+    value: "claude-opus-4-8-medium-fast",
+  },
+  { label: "Claude Opus 4 8 Medium", value: "claude-opus-4-8-medium" },
+  { label: "Claude Opus 4 8 Max Fast", value: "claude-opus-4-8-max-fast" },
+  { label: "Claude Opus 4 8 Max", value: "claude-opus-4-8-max" },
+  { label: "Claude Opus 4 8 Low Fast", value: "claude-opus-4-8-low-fast" },
+  { label: "Claude Opus 4 8 Low", value: "claude-opus-4-8-low" },
+  { label: "Claude Opus 4 8 High Fast", value: "claude-opus-4-8-high-fast" },
+  { label: "Claude Opus 4 8 High", value: "claude-opus-4-8-high" },
   { label: "Claude Opus 4 7 Xhigh Fast", value: "claude-opus-4-7-xhigh-fast" },
   { label: "Claude Opus 4 7 Xhigh", value: "claude-opus-4-7-xhigh" },
   {
@@ -146,6 +197,31 @@ export const cursorModels: CursorModel[] = [
   { label: "Claude Opus 4 7 Low", value: "claude-opus-4-7-low" },
   { label: "Claude Opus 4 7 High Fast", value: "claude-opus-4-7-high-fast" },
   { label: "Claude Opus 4 7 High", value: "claude-opus-4-7-high" },
+  { label: "Claude Fable 5 Xhigh", value: "claude-fable-5-xhigh" },
+  {
+    label: "Claude Fable 5 Thinking Xhigh",
+    value: "claude-fable-5-thinking-xhigh",
+  },
+  {
+    label: "Claude Fable 5 Thinking Medium",
+    value: "claude-fable-5-thinking-medium",
+  },
+  {
+    label: "Claude Fable 5 Thinking Max",
+    value: "claude-fable-5-thinking-max",
+  },
+  {
+    label: "Claude Fable 5 Thinking Low",
+    value: "claude-fable-5-thinking-low",
+  },
+  {
+    label: "Claude Fable 5 Thinking High",
+    value: "claude-fable-5-thinking-high",
+  },
+  { label: "Claude Fable 5 Medium", value: "claude-fable-5-medium" },
+  { label: "Claude Fable 5 Max", value: "claude-fable-5-max" },
+  { label: "Claude Fable 5 Low", value: "claude-fable-5-low" },
+  { label: "Claude Fable 5 High", value: "claude-fable-5-high" },
   {
     label: "Claude 4.6 Sonnet Medium Thinking",
     value: "claude-4.6-sonnet-medium-thinking",

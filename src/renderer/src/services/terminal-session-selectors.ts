@@ -18,6 +18,7 @@ export const MODEL_OPTIONS: { value: ClaudeModel; label: string }[] = [
   { value: "sonnet", label: "Sonnet" },
   { value: "sonnet[1m]", label: "Sonnet 1m" },
   { value: "opus", label: "Opus" },
+  { value: "fable", label: "Fable" },
 ];
 
 interface BuildProjectSessionGroupsInput {

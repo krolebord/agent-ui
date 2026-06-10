@@ -14,6 +14,7 @@ export const claudeModelSchema = z.enum([
   "haiku",
   "sonnet",
   "sonnet[1m]",
+  "fable",
   "opus",
 ]);
 

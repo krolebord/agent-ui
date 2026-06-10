@@ -21,6 +21,35 @@ if [ "${#MODELS[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# Match the historical generated-file ordering: "auto" first, Composer models
+# next, then the remaining model ids in reverse lexicographic order.
+HAS_AUTO=false
+COMPOSER_MODELS=()
+OTHER_MODELS=()
+for model in "${MODELS[@]}"; do
+  if [ "$model" = "auto" ]; then
+    HAS_AUTO=true
+  elif [[ "$model" == composer-* ]]; then
+    COMPOSER_MODELS+=("$model")
+  else
+    OTHER_MODELS+=("$model")
+  fi
+done
+
+SORTED_MODELS=()
+if [ "$HAS_AUTO" = true ]; then
+  SORTED_MODELS+=("auto")
+fi
+while IFS= read -r model; do
+  [ -z "$model" ] && continue
+  SORTED_MODELS+=("$model")
+done < <(printf "%s\n" "${COMPOSER_MODELS[@]}" | LC_ALL=C sort -r)
+while IFS= read -r model; do
+  [ -z "$model" ] && continue
+  SORTED_MODELS+=("$model")
+done < <(printf "%s\n" "${OTHER_MODELS[@]}" | LC_ALL=C sort -r)
+MODELS=("${SORTED_MODELS[@]}")
+
 # Target file
 TARGET="src/shared/cursor-models.ts"
 
