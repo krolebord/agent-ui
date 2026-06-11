@@ -47,6 +47,33 @@ function normalizeProjectPath(pathValue: string): string {
   return pathValue.trim();
 }
 
+const projectCommitLocks = new Map<string, Promise<void>>();
+
+/**
+ * Serializes commit pipelines per project. The auto-message flow amends HEAD
+ * after generation, so a second commit landing in between would get its
+ * message overwritten by the first commit's generated one (and concurrent
+ * `git commit` calls can collide on index.lock).
+ */
+export async function acquireProjectCommitLock(
+  projectPath: string,
+): Promise<() => void> {
+  const previous = projectCommitLocks.get(projectPath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  projectCommitLocks.set(projectPath, tail);
+  await previous;
+  return () => {
+    release();
+    if (projectCommitLocks.get(projectPath) === tail) {
+      projectCommitLocks.delete(projectPath);
+    }
+  };
+}
+
 function normalizeProjectAlias(
   aliasValue: string | undefined,
 ): string | undefined {
@@ -376,11 +403,89 @@ export const projectsRouter = {
 
       yield { stage: "committing" } satisfies CommitProgressEvent;
 
-      if (!subject) {
+      const releaseCommitLock = await acquireProjectCommitLock(path);
+      try {
+        if (!subject) {
+          try {
+            await context.projectGitService.commitSelectedChanges(path, {
+              paths: input.filePaths,
+              subject: autogenerateCommitPlaceholderSubject,
+            });
+          } catch (error) {
+            const message =
+              error instanceof Error && error.message.trim()
+                ? error.message
+                : "Git commit failed.";
+            throw new ORPCError("BAD_REQUEST", { message });
+          }
+
+          yield { stage: "committed" } satisfies CommitProgressEvent;
+
+          const placeholderNote = formatCommittedWithPlaceholderNote();
+
+          yield { stage: "generating" } satisfies CommitProgressEvent;
+
+          try {
+            const diff = await context.projectGitService.getLastCommitDiff(
+              path,
+              input.filePaths,
+            );
+            if (!diff) {
+              throw new ORPCError("BAD_REQUEST", {
+                message: `Failed to generate commit message. ${placeholderNote}`,
+              });
+            }
+
+            const generated = await generateCommitMessage(
+              context.appSettingsState.state.titleGeneration,
+              diff,
+            );
+            if (!generated?.subject.trim()) {
+              throw new ORPCError("BAD_REQUEST", {
+                message: `Failed to generate commit message. ${placeholderNote}`,
+              });
+            }
+
+            const finalSubject = generated.subject.trim();
+            const finalDescription =
+              description ?? generated.description?.trim();
+
+            try {
+              await context.projectGitService.amendLastCommitMessage(path, {
+                subject: finalSubject,
+                description: finalDescription,
+              });
+            } catch (error) {
+              const detail =
+                error instanceof Error && error.message.trim()
+                  ? error.message
+                  : "Failed to update commit message.";
+              throw new ORPCError("BAD_REQUEST", {
+                message: `${detail} ${placeholderNote}`,
+              });
+            }
+          } catch (error) {
+            if (error instanceof ORPCError) {
+              throw error;
+            }
+            const detail =
+              error instanceof Error && error.message.trim()
+                ? error.message
+                : "Failed to generate commit message.";
+            throw new ORPCError("BAD_REQUEST", {
+              message: `${detail} ${placeholderNote}`,
+            });
+          }
+
+          yield { stage: "done" } satisfies CommitProgressEvent;
+          return;
+        }
+
         try {
           await context.projectGitService.commitSelectedChanges(path, {
             paths: input.filePaths,
-            subject: autogenerateCommitPlaceholderSubject,
+            subject,
+            description,
           });
         } catch (error) {
           const message =
@@ -391,82 +496,10 @@ export const projectsRouter = {
         }
 
         yield { stage: "committed" } satisfies CommitProgressEvent;
-
-        const placeholderNote = formatCommittedWithPlaceholderNote();
-
-        yield { stage: "generating" } satisfies CommitProgressEvent;
-
-        try {
-          const diff = await context.projectGitService.getLastCommitDiff(
-            path,
-            input.filePaths,
-          );
-          if (!diff) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: `Failed to generate commit message. ${placeholderNote}`,
-            });
-          }
-
-          const generated = await generateCommitMessage(
-            context.appSettingsState.state.titleGeneration,
-            diff,
-          );
-          if (!generated?.subject.trim()) {
-            throw new ORPCError("BAD_REQUEST", {
-              message: `Failed to generate commit message. ${placeholderNote}`,
-            });
-          }
-
-          const finalSubject = generated.subject.trim();
-          const finalDescription = description ?? generated.description?.trim();
-
-          try {
-            await context.projectGitService.amendLastCommitMessage(path, {
-              subject: finalSubject,
-              description: finalDescription,
-            });
-          } catch (error) {
-            const detail =
-              error instanceof Error && error.message.trim()
-                ? error.message
-                : "Failed to update commit message.";
-            throw new ORPCError("BAD_REQUEST", {
-              message: `${detail} ${placeholderNote}`,
-            });
-          }
-        } catch (error) {
-          if (error instanceof ORPCError) {
-            throw error;
-          }
-          const detail =
-            error instanceof Error && error.message.trim()
-              ? error.message
-              : "Failed to generate commit message.";
-          throw new ORPCError("BAD_REQUEST", {
-            message: `${detail} ${placeholderNote}`,
-          });
-        }
-
         yield { stage: "done" } satisfies CommitProgressEvent;
-        return;
+      } finally {
+        releaseCommitLock();
       }
-
-      try {
-        await context.projectGitService.commitSelectedChanges(path, {
-          paths: input.filePaths,
-          subject,
-          description,
-        });
-      } catch (error) {
-        const message =
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "Git commit failed.";
-        throw new ORPCError("BAD_REQUEST", { message });
-      }
-
-      yield { stage: "committed" } satisfies CommitProgressEvent;
-      yield { stage: "done" } satisfies CommitProgressEvent;
     }),
   discardChanges: procedure
     .input(

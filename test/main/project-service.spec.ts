@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  acquireProjectCommitLock,
   addTrackedProject,
   defineProjectState,
   refreshTrackedProject,
@@ -142,6 +143,63 @@ describe("project-service addTrackedProject", () => {
       },
     ]);
     expect(refreshProject).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("project-service acquireProjectCommitLock", () => {
+  it("blocks a second acquisition on the same project until released", async () => {
+    const events: string[] = [];
+
+    const releaseFirst = await acquireProjectCommitLock("/repo");
+    const secondLock = acquireProjectCommitLock("/repo").then((release) => {
+      events.push("second-acquired");
+      return release;
+    });
+
+    await Promise.resolve();
+    expect(events).toEqual([]);
+
+    releaseFirst();
+    const releaseSecond = await secondLock;
+    expect(events).toEqual(["second-acquired"]);
+    releaseSecond();
+  });
+
+  it("serializes three overlapping acquisitions in order", async () => {
+    const order: number[] = [];
+
+    const run = (id: number) =>
+      acquireProjectCommitLock("/repo").then(async (release) => {
+        order.push(id);
+        await Promise.resolve();
+        release();
+      });
+
+    await Promise.all([run(1), run(2), run(3)]);
+    expect(order).toEqual([1, 2, 3]);
+  });
+
+  it("does not block acquisitions for different projects", async () => {
+    const releaseFirst = await acquireProjectCommitLock("/repo-one");
+    const releaseSecond = await acquireProjectCommitLock("/repo-two");
+
+    releaseFirst();
+    releaseSecond();
+  });
+
+  it("releases waiters even when the holder releases after an error", async () => {
+    const releaseFirst = await acquireProjectCommitLock("/repo");
+
+    const second = acquireProjectCommitLock("/repo");
+
+    try {
+      throw new Error("commit failed");
+    } catch {
+      releaseFirst();
+    }
+
+    const releaseSecond = await second;
+    releaseSecond();
   });
 });
 
