@@ -394,7 +394,7 @@ function ProjectGitHistoryPaneContent() {
   const selectedFilePath = useGitHistoryStore(
     (state) => state.selectedFilePath,
   );
-  const selectCommit = useGitHistoryStore((state) => state.selectCommit);
+  const selectFile = useGitHistoryStore((state) => state.selectFile);
   const commitsSize = useGitHistoryStore((state) => state.commitsSize);
   const filesSize = useGitHistoryStore((state) => state.filesSize);
   const setCommitsSize = useGitHistoryStore((state) => state.setCommitsSize);
@@ -447,15 +447,12 @@ function ProjectGitHistoryPaneContent() {
     [historyQuery.data],
   );
 
-  const { selectedCommit, selectedCommitIndex } = useMemo(() => {
+  const selectedCommit = useMemo(() => {
     const foundIndex = commits.findIndex(
       (commit) => commit.hash === selectedCommitHash,
     );
     const selectedCommitIndex = foundIndex >= 0 ? foundIndex : 0;
-    return {
-      selectedCommit: commits[selectedCommitIndex] ?? null,
-      selectedCommitIndex,
-    };
+    return commits[selectedCommitIndex] ?? null;
   }, [commits, selectedCommitHash]);
 
   const diffQuery = useQuery(
@@ -476,6 +473,13 @@ function ProjectGitHistoryPaneContent() {
     if (!files?.length) return null;
     return files.find((f) => f.name === selectedFilePath) ?? files[0];
   }, [files, selectedFilePath]);
+  const selectedFileIndex = useMemo(() => {
+    if (!files?.length) return 0;
+    const foundIndex = files.findIndex(
+      (file) => file.name === selectedFilePath,
+    );
+    return foundIndex >= 0 ? foundIndex : 0;
+  }, [files, selectedFilePath]);
 
   const diffViewMode = useDiffViewMode();
   const diffOptions = useMemo(
@@ -489,26 +493,20 @@ function ProjectGitHistoryPaneContent() {
   useHotkey(
     "ArrowUp",
     () => {
-      if (commits.length === 0) return;
-      const previous = commits[Math.max(selectedCommitIndex - 1, 0)];
-      if (previous) selectCommit(previous.hash);
+      if (!files || files.length === 0) return;
+      const newIndex = (selectedFileIndex - 1 + files.length) % files.length;
+      selectFile(files[newIndex].name);
     },
-    { enabled: commits.length > 0 },
+    { enabled: Boolean(files?.length) },
   );
   useHotkey(
     "ArrowDown",
     () => {
-      if (commits.length === 0) return;
-      const next = commits[selectedCommitIndex + 1];
-      if (next) {
-        selectCommit(next.hash);
-        return;
-      }
-      if (historyQuery.hasNextPage && !historyQuery.isFetchingNextPage) {
-        void historyQuery.fetchNextPage();
-      }
+      if (!files || files.length === 0) return;
+      const newIndex = (selectedFileIndex + 1) % files.length;
+      selectFile(files[newIndex].name);
     },
-    { enabled: commits.length > 0 },
+    { enabled: Boolean(files?.length) },
   );
 
   return (
