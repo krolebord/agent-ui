@@ -3,6 +3,7 @@ import {
   TerminalPane,
   type TerminalPaneHandle,
 } from "@renderer/components/terminal-pane";
+import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { orpc } from "@renderer/orpc-client";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -68,6 +69,19 @@ export function LiveTerminalSurface({
       terminalRef.current?.focus();
     }
   }, [active, readOnly]);
+
+  useEffect(() => {
+    if (!active || !trackGlobalSize) {
+      return;
+    }
+
+    const { cols, rows } = getTerminalSize();
+    void orpc.terminals.resizeTerminal.call({
+      terminalId,
+      cols,
+      rows,
+    });
+  }, [active, terminalId, trackGlobalSize]);
 
   const handleInput = useCallback(
     (data: string) => {
