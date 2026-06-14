@@ -73,6 +73,51 @@ function formatResetsAt(resetsAt: string | null): string | null {
   }).format(date);
 }
 
+function formatMembership(type: string | null | undefined): string | null {
+  if (!type) {
+    return null;
+  }
+  return type
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function MetricBar({
+  label,
+  subLabel,
+  valueLabel,
+  pct,
+}: {
+  label: string;
+  subLabel?: string | null;
+  valueLabel: string;
+  pct: number;
+}) {
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="text-zinc-400">
+          {label}
+          {subLabel ? (
+            <span className="text-zinc-500">{` (${subLabel})`}</span>
+          ) : null}
+        </span>
+        <span className={cn("tabular-nums", getTextColor(pct))}>
+          {valueLabel}
+        </span>
+      </div>
+      <div className="h-1 rounded-full bg-white/10">
+        <div
+          className={cn("h-full rounded-full transition-all", getBarColor(pct))}
+          style={{ width: `${Math.min(pct, 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function UsagePanel() {
   const activeSessionId = useActiveSessionId();
   const activeSession = useAppState((x) =>
@@ -135,12 +180,17 @@ export function UsagePanel() {
 
     if (cursorAgentQuery.data?.ok && cursorAgentQuery.data.usage) {
       const usage = cursorAgentQuery.data.usage;
-      const spent = usage.planUsage.includedSpend / 100;
-      const limit = usage.planUsage.limit / 100;
-      const planPct = limit > 0 ? Math.round((spent / limit) * 100) : 0;
+      const plan = usage.planUsage;
+      const spent = plan.includedSpend / 100;
+      const limit = plan.limit != null ? plan.limit / 100 : null;
+      const planPct = Math.round(plan.totalPercentUsed);
+      const planValueLabel =
+        limit != null
+          ? `$${spent.toFixed(2)} / $${limit.toFixed(2)}`
+          : `${planPct}%`;
+      const planLabel = formatMembership(usage.membershipType) ?? "Plan";
+
       const slData = usage.spendLimitUsage;
-      const slIndividualLimit = slData?.individualLimit;
-      const slIndividualUsed = slData?.individualUsed;
       const cycleEnd = new Date(Number(usage.billingCycleEnd));
       const cycleEndLabel = Number.isNaN(cycleEnd.getTime())
         ? null
@@ -149,65 +199,81 @@ export function UsagePanel() {
             day: "numeric",
           }).format(cycleEnd);
 
+      const onDemand: {
+        key: string;
+        label: string;
+        used: number;
+        limit: number;
+      }[] = [];
+      if (
+        slData?.individualUsed != null &&
+        slData.individualLimit != null &&
+        slData.individualLimit > 0
+      ) {
+        onDemand.push({
+          key: "individual",
+          label: "On-demand",
+          used: slData.individualUsed,
+          limit: slData.individualLimit,
+        });
+      }
+      if (
+        slData?.pooledUsed != null &&
+        slData.pooledLimit != null &&
+        slData.pooledLimit > 0
+      ) {
+        onDemand.push({
+          key: "pooled",
+          label: "On-demand (team)",
+          used: slData.pooledUsed,
+          limit: slData.pooledLimit,
+        });
+      }
+
       return (
         <div className="border-t border-border/70 p-2">
           <div className="space-y-1.5">
-            <div className="space-y-0.5">
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="text-zinc-400">
-                  Plan
-                  {cycleEndLabel ? (
-                    <span className="text-zinc-500">
-                      {` (resets ${cycleEndLabel})`}
-                    </span>
-                  ) : null}
-                </span>
-                <span className={cn("tabular-nums", getTextColor(planPct))}>
-                  ${spent.toFixed(2)} / ${limit.toFixed(2)}
-                </span>
-              </div>
-              <div className="h-1 rounded-full bg-white/10">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-all",
-                    getBarColor(planPct),
-                  )}
-                  style={{ width: `${Math.min(planPct, 100)}%` }}
+            <MetricBar
+              label={planLabel}
+              subLabel={cycleEndLabel ? `resets ${cycleEndLabel}` : null}
+              valueLabel={planValueLabel}
+              pct={planPct}
+            />
+            {plan.autoPercentUsed != null ? (
+              <MetricBar
+                label="Auto"
+                valueLabel={`${Math.round(plan.autoPercentUsed)}%`}
+                pct={Math.round(plan.autoPercentUsed)}
+              />
+            ) : null}
+            {plan.apiPercentUsed != null ? (
+              <MetricBar
+                label="API"
+                valueLabel={`${Math.round(plan.apiPercentUsed)}%`}
+                pct={Math.round(plan.apiPercentUsed)}
+              />
+            ) : null}
+            {onDemand.map((entry) => {
+              const used = entry.used / 100;
+              const cap = entry.limit / 100;
+              const pct = Math.round((entry.used / entry.limit) * 100);
+              return (
+                <MetricBar
+                  key={entry.key}
+                  label={entry.label}
+                  valueLabel={`$${used.toFixed(2)} / $${cap.toFixed(2)}`}
+                  pct={pct}
                 />
+              );
+            })}
+            {usage.credits ? (
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-zinc-400">Credits</span>
+                <span className="tabular-nums text-zinc-400">
+                  ${usage.credits.balance.toFixed(2)}
+                </span>
               </div>
-            </div>
-            {slIndividualLimit != null &&
-            slIndividualUsed != null &&
-            slIndividualLimit > 0
-              ? (() => {
-                  const slUsed = slIndividualUsed / 100;
-                  const slLimit = slIndividualLimit / 100;
-                  const slPct = Math.round(
-                    (slIndividualUsed / slIndividualLimit) * 100,
-                  );
-                  return (
-                    <div className="space-y-0.5">
-                      <div className="flex items-center justify-between text-[10px]">
-                        <span className="text-zinc-400">On-demand</span>
-                        <span
-                          className={cn("tabular-nums", getTextColor(slPct))}
-                        >
-                          ${slUsed.toFixed(2)} / ${slLimit.toFixed(2)}
-                        </span>
-                      </div>
-                      <div className="h-1 rounded-full bg-white/10">
-                        <div
-                          className={cn(
-                            "h-full rounded-full transition-all",
-                            getBarColor(slPct),
-                          )}
-                          style={{ width: `${Math.min(slPct, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })()
-              : null}
+            ) : null}
           </div>
         </div>
       );
