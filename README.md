@@ -1,13 +1,18 @@
 # Agent UI
 
-Agent UI is a desktop app that brings Claude Code into a clean multi-session workspace.
+Agent UI is a desktop app that orchestrates multiple CLI coding agents — Claude Code, Codex, Cursor Agent, and plain terminals — in one clean, project-centric workspace.
 
 ## What You Can Do
 
-- Work across multiple Claude sessions in one app.
-- Organize sessions by project in a focused sidebar.
-- Start sessions with an initial prompt, chosen model, and permission mode.
-- Set project defaults so new sessions start with your preferred settings.
+- Run many agent sessions at once and switch between them instantly.
+- Mix session types in a single workspace:
+  - **Claude Code** — the Claude CLI with live activity tracking
+  - **Codex** — the Codex CLI agent
+  - **Cursor Agent** — the Cursor CLI agent
+  - **Terminal** — a plain shell session
+- Organize sessions by project in a focused sidebar, with collapse/expand groups.
+- Start a session with an initial prompt, name, model, and permission mode.
+- Set per-project defaults (including worktree setup commands) so new sessions start the way you like.
 - See clear live status indicators:
   - running
   - working
@@ -15,31 +20,32 @@ Agent UI is a desktop app that brings Claude Code into a clean multi-session wor
   - awaiting user response
   - stopped / error
 - Stop, resume, switch, and delete sessions quickly.
-- Keep history available when switching between sessions.
 - Auto-generate session titles for unnamed conversations.
-- View Claude usage metrics from the built-in usage panel.
+- Review changes in the built-in git history and diff panes, with inline comments.
+- Generate commit messages automatically.
+- Track agent usage (Claude / Codex / Cursor) from the built-in usage panel.
+- Open a project in external apps (Cursor, Finder, GitHub Desktop, Terminal).
 - Reopen the app and continue from saved projects and sessions.
 
 ## Feature Highlights
 
-### Multi-Session Workspace
-Run multiple Claude sessions at once, with a single active terminal view to stay focused.
+### Multi-Agent Workspace
+Run Claude Code, Codex, Cursor Agent, and plain terminal sessions side by side, with a single active terminal view to stay focused.
 
 ### Project-Centric Navigation
-Group sessions by folder, collapse/expand projects, and keep your workspace tidy.
+Group sessions by folder, collapse/expand projects, drag sessions between projects, and keep your workspace tidy. Projects can have custom aliases and shared default startup settings.
 
-### Fast Session Setup
-Create a session with optional:
-- Initial prompt
-- Session name
-- Model (`Opus`, `Sonnet`, `Haiku`)
-- Permission mode (`Default`, `Accept edits`, `Plan`, `Yolo`)
+### Git & Diff Review
+- Browse commit history in an infinite-scroll history pane (navigable with arrow keys).
+- Inspect file-level diffs and add inline, side-aware comments in the diff review pane.
+- See ahead/behind counts against upstream and which commits are unpushed.
+- Generate commit messages automatically.
 
 ### Activity Awareness
-Know what Claude is doing at a glance with real-time activity badges and status icons.
+Know what each agent is doing at a glance with real-time activity badges and status icons. Per-project badges surface how many sessions are active or awaiting you.
 
 ### Usage Visibility
-Open the usage panel to track key usage buckets and extra usage progress.
+Open the usage panel to track usage buckets, reset times, and extra-usage / credit balances across Claude, Codex, and Cursor.
 
 ## Getting Started
 
@@ -47,7 +53,7 @@ Open the usage panel to track key usage buckets and extra usage progress.
 
 - Node.js 22+
 - pnpm
-- Claude CLI available in your `PATH`
+- The CLI for each agent you want to use, available in your `PATH` (e.g. Claude CLI, Codex, Cursor Agent)
 
 ### TypeScript Tooling
 
