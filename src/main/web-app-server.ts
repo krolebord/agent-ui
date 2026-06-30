@@ -13,7 +13,6 @@ import { WebSocketServer } from "ws";
 import type { Services } from "./create-services";
 import log from "./logger";
 import { orpcRouter } from "./orpc-router";
-import { orpcTrafficMonitor } from "./orpc-traffic-monitor";
 
 interface WebAppServerOptions {
   rendererDist: string;
@@ -157,7 +156,6 @@ function listen(
 export async function startWebAppServer(options: WebAppServerOptions) {
   const config = getConfig();
   const rpcHandler = new RPCHandler(orpcRouter, {
-    clientInterceptors: [orpcTrafficMonitor.interceptor],
     interceptors: [
       onError((error) => {
         console.error(error);

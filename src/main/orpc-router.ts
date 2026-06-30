@@ -3,7 +3,6 @@ import { appSettingsRouter } from "./app-settings";
 import { fsRouter } from "./fs.router";
 import { moveStoppedSessionToProject } from "./move-stopped-session-to-project";
 import { procedure } from "./orpc";
-import { orpcTrafficMonitor } from "./orpc-traffic-monitor";
 import { projectsRouter } from "./project-service";
 import { projectTerminalsRouter } from "./project-terminals";
 import { claudeSessionsRouter } from "./session-service";
@@ -58,11 +57,6 @@ const sessionsRouter = {
 
 export const orpcRouter = {
   appSettings: appSettingsRouter,
-  diagnostics: {
-    getOrpcTrafficSnapshot: procedure.handler(() =>
-      orpcTrafficMonitor.getSnapshot(),
-    ),
-  },
   projects: projectsRouter,
   projectTerminals: projectTerminalsRouter,
   terminals: terminalsRouter,
