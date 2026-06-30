@@ -11,6 +11,7 @@ import { createServices } from "./create-services";
 import log from "./logger";
 import { orpcRouter } from "./orpc-router";
 import { orpcTrafficMonitor } from "./orpc-traffic-monitor";
+import { startWebAppServer } from "./web-app-server";
 
 if (process.platform !== "darwin") {
   throw new Error("Only macOS is supported");
@@ -34,6 +35,7 @@ const indexHtml = path.join(rendererDist, "index.html");
 
 let mainWindow: BrowserWindow | null = null;
 let services: Awaited<ReturnType<typeof createServices>> | null = null;
+let webAppServer: Awaited<ReturnType<typeof startWebAppServer>> | null = null;
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -112,6 +114,12 @@ app.whenReady().then(async () => {
 
   log.info("Session service created");
 
+  webAppServer = await startWebAppServer({
+    rendererDist,
+    viteDevServerUrl,
+    getServices: () => services,
+  });
+
   ipcMain.on("start-orpc-server", async (event) => {
     if (!services) {
       return;
@@ -161,6 +169,7 @@ app.on("before-quit", (event) => {
 
   shutdownPromise ??= (async () => {
     try {
+      await webAppServer?.close();
       await services?.shutdown();
     } catch (error) {
       log.error("Failed during app shutdown", { error });
