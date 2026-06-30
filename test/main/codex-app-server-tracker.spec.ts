@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   type CodexAppServerSessionState,
+  type CodexAppServerSubagentUpdate,
   CodexAppServerTracker,
 } from "../../src/main/codex-app-server-tracker";
 
@@ -14,6 +15,8 @@ type TrackerHarness = {
 function createTracker(options?: { initialThreadId?: string }) {
   const onStatusChange = vi.fn<(status: CodexAppServerSessionState) => void>();
   const onThreadId = vi.fn<(threadId: string) => void>();
+  const onSubagentUpdate =
+    vi.fn<(update: CodexAppServerSubagentUpdate) => void>();
 
   const tracker = new CodexAppServerTracker({
     sessionId: "session-1",
@@ -21,9 +24,10 @@ function createTracker(options?: { initialThreadId?: string }) {
     initialThreadId: options?.initialThreadId,
     onStatusChange,
     onThreadId,
+    onSubagentUpdate,
   });
 
-  return { tracker, onStatusChange, onThreadId };
+  return { tracker, onStatusChange, onThreadId, onSubagentUpdate };
 }
 
 function asHarness(tracker: CodexAppServerTracker): TrackerHarness {
@@ -119,5 +123,82 @@ describe("CodexAppServerTracker mappings", () => {
     });
 
     expect(onStatusChange).toHaveBeenCalledWith("error");
+  });
+
+  it("tracks subagent thread status without replacing the root status", () => {
+    const { tracker, onStatusChange, onThreadId, onSubagentUpdate } =
+      createTracker();
+
+    asHarness(tracker).handleNotification({
+      method: "thread/started",
+      params: {
+        thread: {
+          id: "root-thread",
+          parentThreadId: null,
+        },
+      },
+    });
+    asHarness(tracker).handleNotification({
+      method: "thread/status/changed",
+      params: {
+        threadId: "root-thread",
+        status: {
+          type: "active",
+          activeFlags: [],
+        },
+      },
+    });
+    asHarness(tracker).handleNotification({
+      method: "thread/status/changed",
+      params: {
+        threadId: "child-thread",
+        status: {
+          type: "active",
+          activeFlags: [],
+        },
+      },
+    });
+
+    expect(onThreadId).toHaveBeenCalledTimes(1);
+    expect(onThreadId).toHaveBeenCalledWith("root-thread");
+    expect(onStatusChange).toHaveBeenCalledTimes(1);
+    expect(onStatusChange).toHaveBeenCalledWith("running");
+    expect(onSubagentUpdate).toHaveBeenCalledWith({
+      threadId: "child-thread",
+      status: "running",
+    });
+  });
+
+  it("discovers subagents from completed collab spawn items", () => {
+    const { tracker, onSubagentUpdate } = createTracker({
+      initialThreadId: "root-thread",
+    });
+
+    asHarness(tracker).handleNotification({
+      method: "item/completed",
+      params: {
+        item: {
+          type: "collabAgentToolCall",
+          tool: "spawnAgent",
+          senderThreadId: "root-thread",
+          receiverThreadIds: ["child-thread"],
+          prompt: "Inspect package.json and report findings",
+          agentsStates: {
+            "child-thread": {
+              status: "pendingInit",
+              message: null,
+            },
+          },
+        },
+      },
+    });
+
+    expect(onSubagentUpdate).toHaveBeenCalledWith({
+      threadId: "child-thread",
+      parentThreadId: "root-thread",
+      initialPrompt: "Inspect package.json and report findings",
+      collabStatus: "pendingInit",
+      status: "starting",
+    });
   });
 });

@@ -6,6 +6,29 @@ export type CodexAppServerSessionState =
   | "awaiting_user_response"
   | "error";
 
+export type CodexAppServerCollabAgentStatus =
+  | "pendingInit"
+  | "running"
+  | "interrupted"
+  | "completed"
+  | "errored"
+  | "shutdown"
+  | "notFound";
+
+export interface CodexAppServerSubagentUpdate {
+  threadId: string;
+  parentThreadId?: string;
+  nickname?: string;
+  role?: string;
+  preview?: string;
+  initialPrompt?: string;
+  status?: CodexAppServerSessionState | "starting" | "stopped";
+  collabStatus?: CodexAppServerCollabAgentStatus;
+  message?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
 interface JsonRpcRequest {
   id: number;
   method: string;
@@ -41,6 +64,11 @@ export interface CodexAppServerTrackerOptions {
   initialThreadId?: string;
   onThreadId?: (threadId: string) => void;
   onStatusChange?: (status: CodexAppServerSessionState) => void;
+  onThreadStatusChange?: (
+    threadId: string,
+    status: CodexAppServerSessionState,
+  ) => void;
+  onSubagentUpdate?: (update: CodexAppServerSubagentUpdate) => void;
   onError?: (errorMessage: string) => void;
 }
 
@@ -89,6 +117,25 @@ function mapThreadStatus(status: object): CodexAppServerSessionState | null {
   }
 
   return "running";
+}
+
+function mapCollabAgentStatus(
+  status: CodexAppServerCollabAgentStatus,
+): CodexAppServerSubagentUpdate["status"] {
+  switch (status) {
+    case "pendingInit":
+      return "starting";
+    case "running":
+      return "running";
+    case "completed":
+      return "awaiting_user_response";
+    case "errored":
+    case "notFound":
+      return "error";
+    case "interrupted":
+    case "shutdown":
+      return "stopped";
+  }
 }
 
 function getTextFromUserInput(input: unknown): string | undefined {
@@ -164,13 +211,24 @@ export class CodexAppServerTracker {
   private readonly onStatusChange?: (
     status: CodexAppServerSessionState,
   ) => void;
+  private readonly onThreadStatusChange?: (
+    threadId: string,
+    status: CodexAppServerSessionState,
+  ) => void;
+  private readonly onSubagentUpdate?: (
+    update: CodexAppServerSubagentUpdate,
+  ) => void;
   private readonly onError?: (errorMessage: string) => void;
   private readonly pendingRequests = new Map<number, PendingRequest>();
 
   private ws: WebSocket | null = null;
   private nextRequestId = 1;
   private threadId: string | undefined;
-  private lastStatus: CodexAppServerSessionState | null = null;
+  private readonly threadStatuses = new Map<
+    string,
+    CodexAppServerSessionState
+  >();
+  private readonly hydratedSubagentThreads = new Set<string>();
 
   constructor(options: CodexAppServerTrackerOptions) {
     this.sessionId = options.sessionId;
@@ -178,6 +236,8 @@ export class CodexAppServerTracker {
     this.threadId = options.initialThreadId;
     this.onThreadId = options.onThreadId;
     this.onStatusChange = options.onStatusChange;
+    this.onThreadStatusChange = options.onThreadStatusChange;
+    this.onSubagentUpdate = options.onSubagentUpdate;
     this.onError = options.onError;
   }
 
@@ -219,7 +279,6 @@ export class CodexAppServerTracker {
         experimentalApi: false,
         optOutNotificationMethods: [
           "item/started",
-          "item/completed",
           "item/agentMessage/delta",
           "item/plan/delta",
           "item/commandExecution/outputDelta",
@@ -341,13 +400,7 @@ export class CodexAppServerTracker {
           return;
         }
 
-        const threadId =
-          "id" in thread && typeof thread.id === "string"
-            ? thread.id
-            : undefined;
-        if (threadId) {
-          this.setThreadId(threadId);
-        }
+        this.handleThread(thread);
         return;
       }
 
@@ -364,18 +417,16 @@ export class CodexAppServerTracker {
           return;
         }
 
-        this.setThreadId(threadId);
-        if (this.threadId !== threadId) {
-          return;
+        if (!this.threadId) {
+          this.setThreadId(threadId);
         }
 
         const nextStatus = mapThreadStatus(status);
-        if (!nextStatus || this.lastStatus === nextStatus) {
+        if (!nextStatus) {
           return;
         }
 
-        this.lastStatus = nextStatus;
-        this.onStatusChange?.(nextStatus);
+        this.emitThreadStatus(threadId, nextStatus);
         return;
       }
 
@@ -388,17 +439,10 @@ export class CodexAppServerTracker {
           return;
         }
 
-        this.setThreadId(threadId);
-        if (this.threadId !== threadId) {
-          return;
+        if (!this.threadId) {
+          this.setThreadId(threadId);
         }
-
-        if (this.lastStatus === "running") {
-          return;
-        }
-
-        this.lastStatus = "running";
-        this.onStatusChange?.("running");
+        this.emitThreadStatus(threadId, "running");
         return;
       }
 
@@ -415,23 +459,16 @@ export class CodexAppServerTracker {
           return;
         }
 
-        this.setThreadId(threadId);
-        if (this.threadId !== threadId) {
-          return;
+        if (!this.threadId) {
+          this.setThreadId(threadId);
         }
 
         if (turn.status === "failed") {
-          this.lastStatus = "error";
-          this.onStatusChange?.("error");
+          this.emitThreadStatus(threadId, "error");
           return;
         }
 
-        if (this.lastStatus === "awaiting_user_response") {
-          return;
-        }
-
-        this.lastStatus = "awaiting_user_response";
-        this.onStatusChange?.("awaiting_user_response");
+        this.emitThreadStatus(threadId, "awaiting_user_response");
         return;
       }
 
@@ -444,26 +481,32 @@ export class CodexAppServerTracker {
           return;
         }
 
-        this.setThreadId(threadId);
-        if (this.threadId !== threadId) {
-          return;
+        if (!this.threadId) {
+          this.setThreadId(threadId);
         }
 
         const nextStatus = "awaiting_user_response";
-        if (!nextStatus || this.lastStatus === nextStatus) {
-          return;
-        }
+        this.emitThreadStatus(threadId, nextStatus);
+        return;
+      }
 
-        this.lastStatus = nextStatus;
-        this.onStatusChange?.(nextStatus);
+      case "item/completed": {
+        this.handleCompletedItem(message.params);
         return;
       }
 
       case "error": {
         const error = message.params?.error;
         const errorMessage = getErrorMessage(error);
-        this.lastStatus = "error";
-        this.onStatusChange?.("error");
+        const threadId =
+          typeof message.params?.threadId === "string"
+            ? message.params.threadId
+            : this.threadId;
+        if (threadId) {
+          this.emitThreadStatus(threadId, "error");
+        } else {
+          this.onStatusChange?.("error");
+        }
         this.onError?.(errorMessage);
         return;
       }
@@ -471,6 +514,168 @@ export class CodexAppServerTracker {
       default:
         return;
     }
+  }
+
+  private handleThread(thread: object) {
+    const threadRecord = thread as {
+      id?: unknown;
+      parentThreadId?: unknown;
+      preview?: unknown;
+      status?: unknown;
+      agentNickname?: unknown;
+      agentRole?: unknown;
+      createdAt?: unknown;
+      updatedAt?: unknown;
+    };
+    const threadId =
+      typeof threadRecord.id === "string" ? threadRecord.id : undefined;
+    if (!threadId) {
+      return;
+    }
+
+    const parentThreadId =
+      typeof threadRecord.parentThreadId === "string"
+        ? threadRecord.parentThreadId
+        : undefined;
+
+    if (parentThreadId) {
+      const status =
+        threadRecord.status && typeof threadRecord.status === "object"
+          ? mapThreadStatus(threadRecord.status)
+          : null;
+      this.onSubagentUpdate?.({
+        threadId,
+        parentThreadId,
+        nickname:
+          typeof threadRecord.agentNickname === "string"
+            ? threadRecord.agentNickname
+            : undefined,
+        role:
+          typeof threadRecord.agentRole === "string"
+            ? threadRecord.agentRole
+            : undefined,
+        preview:
+          typeof threadRecord.preview === "string"
+            ? threadRecord.preview
+            : undefined,
+        status: status ?? undefined,
+        createdAt:
+          typeof threadRecord.createdAt === "number"
+            ? threadRecord.createdAt
+            : undefined,
+        updatedAt:
+          typeof threadRecord.updatedAt === "number"
+            ? threadRecord.updatedAt
+            : undefined,
+      });
+      if (status) {
+        this.emitThreadStatus(threadId, status);
+      }
+      return;
+    }
+
+    this.setThreadId(threadId);
+  }
+
+  private handleCompletedItem(params: Record<string, unknown> | undefined) {
+    const item = params?.item;
+    if (!item || typeof item !== "object") {
+      return;
+    }
+
+    const collabItem = item as {
+      type?: unknown;
+      tool?: unknown;
+      senderThreadId?: unknown;
+      receiverThreadIds?: unknown;
+      prompt?: unknown;
+      agentsStates?: unknown;
+    };
+    if (collabItem.type !== "collabAgentToolCall") {
+      return;
+    }
+
+    const senderThreadId =
+      typeof collabItem.senderThreadId === "string"
+        ? collabItem.senderThreadId
+        : undefined;
+    const receiverThreadIds = Array.isArray(collabItem.receiverThreadIds)
+      ? collabItem.receiverThreadIds.filter(
+          (threadId): threadId is string => typeof threadId === "string",
+        )
+      : [];
+    const agentsStates =
+      collabItem.agentsStates && typeof collabItem.agentsStates === "object"
+        ? (collabItem.agentsStates as Record<string, unknown>)
+        : {};
+
+    for (const receiverThreadId of receiverThreadIds) {
+      const agentState = agentsStates[receiverThreadId];
+      const update: CodexAppServerSubagentUpdate = {
+        threadId: receiverThreadId,
+        parentThreadId: senderThreadId,
+      };
+      if (typeof collabItem.prompt === "string") {
+        update.initialPrompt = collabItem.prompt;
+      }
+      if (agentState && typeof agentState === "object") {
+        const state = agentState as { status?: unknown; message?: unknown };
+        if (isCollabAgentStatus(state.status)) {
+          update.collabStatus = state.status;
+          update.status = mapCollabAgentStatus(state.status);
+        }
+        if (typeof state.message === "string") {
+          update.message = state.message;
+        }
+      }
+
+      this.onSubagentUpdate?.(update);
+
+      if (collabItem.tool === "spawnAgent" && this.ws) {
+        void this.hydrateSubagentThread(receiverThreadId).catch((error) => {
+          log.warn("Failed to hydrate Codex subagent thread", {
+            sessionId: this.sessionId,
+            threadId: receiverThreadId,
+            error,
+          });
+        });
+      }
+    }
+  }
+
+  private async hydrateSubagentThread(threadId: string): Promise<void> {
+    if (this.hydratedSubagentThreads.has(threadId)) {
+      return;
+    }
+    this.hydratedSubagentThreads.add(threadId);
+
+    const response = await this.call("thread/read", {
+      threadId,
+      includeTurns: false,
+    });
+    const thread = (response as { thread?: unknown }).thread;
+    if (!thread || typeof thread !== "object") {
+      return;
+    }
+
+    this.handleThread(thread);
+  }
+
+  private emitThreadStatus(
+    threadId: string,
+    nextStatus: CodexAppServerSessionState,
+  ) {
+    if (this.threadStatuses.get(threadId) === nextStatus) {
+      return;
+    }
+
+    this.threadStatuses.set(threadId, nextStatus);
+    this.onThreadStatusChange?.(threadId, nextStatus);
+    if (this.threadId === threadId) {
+      this.onStatusChange?.(nextStatus);
+      return;
+    }
+    this.onSubagentUpdate?.({ threadId, status: nextStatus });
   }
 
   private setThreadId(threadId: string) {
@@ -481,4 +686,18 @@ export class CodexAppServerTracker {
     this.threadId = threadId;
     this.onThreadId?.(threadId);
   }
+}
+
+function isCollabAgentStatus(
+  status: unknown,
+): status is CodexAppServerCollabAgentStatus {
+  return (
+    status === "pendingInit" ||
+    status === "running" ||
+    status === "interrupted" ||
+    status === "completed" ||
+    status === "errored" ||
+    status === "shutdown" ||
+    status === "notFound"
+  );
 }

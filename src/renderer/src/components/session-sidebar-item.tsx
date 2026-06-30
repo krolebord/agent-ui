@@ -237,8 +237,12 @@ export const SessionSidebarItemTrigger = forwardRef<
   {
     sessionId: string;
     children: React.ReactNode;
+    leading?: React.ReactNode;
   } & React.HTMLAttributes<HTMLLIElement>
->(function SessionSidebarItemTrigger({ sessionId, children, ...props }, ref) {
+>(function SessionSidebarItemTrigger(
+  { sessionId, children, leading, ...props },
+  ref,
+) {
   const session = useAppState((x) => x.sessions[sessionId]);
   const isActive = useActiveSessionStore(
     (x) => x.activeSessionId === sessionId,
@@ -252,6 +256,11 @@ export const SessionSidebarItemTrigger = forwardRef<
       {...props}
       className={cn("group/session relative", props.className)}
     >
+      {leading ? (
+        <span className="absolute inset-y-0 left-1 flex items-center">
+          {leading}
+        </span>
+      ) : null}
       <button
         type="button"
         onClick={() => switchSession(sessionId)}
@@ -352,19 +361,21 @@ export function BaseSessionSidebarItem({
   extraMenuItems,
   onDelete,
   deleteDisabled,
+  leading,
 }: {
   sessionId: string;
   primaryButton: React.ReactNode;
   extraMenuItems?: React.ReactNode;
   onDelete: () => void;
   deleteDisabled: boolean;
+  leading?: React.ReactNode;
 }) {
   const session = useAppState((x) => x.sessions[sessionId]);
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <SessionSidebarItemTrigger sessionId={sessionId}>
+        <SessionSidebarItemTrigger sessionId={sessionId} leading={leading}>
           {primaryButton}
           <SidebarIconButton
             icon={TrashIcon}

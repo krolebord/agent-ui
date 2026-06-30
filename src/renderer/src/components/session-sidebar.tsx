@@ -24,6 +24,7 @@ import {
 } from "@renderer/services/terminal-session-selectors";
 import { useMutation } from "@tanstack/react-query";
 import {
+  ChevronRight,
   EllipsisVertical,
   Folder,
   FolderOpen,
@@ -38,7 +39,7 @@ import {
   SquareIcon,
   Trash2,
 } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useConfirmDialogStore } from "./confirm-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
@@ -49,6 +50,7 @@ import { RenameSessionDialog } from "./rename-session-dialog";
 import {
   BaseSessionSidebarItem,
   SidebarIconButton,
+  statusIndicatorMeta,
 } from "./session-sidebar-item";
 import { useSettingsStore } from "./settings-dialog";
 import { useAppState } from "./sync-state-provider";
@@ -753,6 +755,7 @@ function CodexLocalTerminalSessionSidebarItem({
   sessionId: string;
 }) {
   const session = useAppState((x) => x.sessions[sessionId]);
+  const [subagentsCollapsed, setSubagentsCollapsed] = useState(false);
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -801,38 +804,140 @@ function CodexLocalTerminalSessionSidebarItem({
     return null;
   }
 
+  const subagentIds =
+    session.subagentOrder ??
+    Object.keys(session.subagentsByThreadId ?? {}).sort((a, b) => {
+      const left = session.subagentsByThreadId?.[a]?.createdAt ?? 0;
+      const right = session.subagentsByThreadId?.[b]?.createdAt ?? 0;
+      return left - right;
+    });
+  const subagents = subagentIds
+    .map((id) => session.subagentsByThreadId?.[id])
+    .filter((subagent): subagent is NonNullable<typeof subagent> =>
+      Boolean(subagent),
+    );
+  const hasSubagents = subagents.length > 0;
+
   return (
-    <BaseSessionSidebarItem
-      sessionId={sessionId}
-      primaryButton={
-        session.status === "stopped" ? (
-          <SidebarIconButton
-            icon={PlayIcon}
-            label="Resume session"
-            disabled={resumeMutation.isPending}
-            onClick={() => resumeMutation.mutate(sessionId)}
-          />
-        ) : (
-          <SidebarIconButton
-            icon={SquareIcon}
-            label="Stop session"
-            disabled={stopMutation.isPending}
-            onClick={() => stopMutation.mutate(sessionId)}
-          />
-        )
-      }
-      extraMenuItems={
-        <ContextMenuItem
-          onClick={() => forkMutation.mutate(sessionId)}
-          disabled={forkMutation.isPending || !session.codexSessionId}
-        >
-          <GitFork className="size-3.5" />
-          Fork session
-        </ContextMenuItem>
-      }
-      onDelete={() => deleteMutation.mutate(sessionId)}
-      deleteDisabled={deleteMutation.isPending}
-    />
+    <>
+      <BaseSessionSidebarItem
+        sessionId={sessionId}
+        leading={
+          hasSubagents ? (
+            <button
+              type="button"
+              aria-label={
+                subagentsCollapsed ? "Expand subagents" : "Collapse subagents"
+              }
+              title={
+                subagentsCollapsed ? "Expand subagents" : "Collapse subagents"
+              }
+              className="pointer-events-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-zinc-500 transition hover:bg-white/10 hover:text-zinc-200"
+              onClick={(event) => {
+                event.stopPropagation();
+                setSubagentsCollapsed((value) => !value);
+              }}
+            >
+              <ChevronRight
+                className={cn(
+                  "size-3 transition-transform",
+                  !subagentsCollapsed && "rotate-90",
+                )}
+              />
+            </button>
+          ) : undefined
+        }
+        primaryButton={
+          session.status === "stopped" ? (
+            <SidebarIconButton
+              icon={PlayIcon}
+              label="Resume session"
+              disabled={resumeMutation.isPending}
+              onClick={() => resumeMutation.mutate(sessionId)}
+            />
+          ) : (
+            <SidebarIconButton
+              icon={SquareIcon}
+              label="Stop session"
+              disabled={stopMutation.isPending}
+              onClick={() => stopMutation.mutate(sessionId)}
+            />
+          )
+        }
+        extraMenuItems={
+          <ContextMenuItem
+            onClick={() => forkMutation.mutate(sessionId)}
+            disabled={forkMutation.isPending || !session.codexSessionId}
+          >
+            <GitFork className="size-3.5" />
+            Fork session
+          </ContextMenuItem>
+        }
+        onDelete={() => deleteMutation.mutate(sessionId)}
+        deleteDisabled={deleteMutation.isPending}
+      />
+      {hasSubagents && !subagentsCollapsed
+        ? subagents.map((subagent) => (
+            <CodexSubagentSidebarItem
+              key={subagent.threadId}
+              subagent={subagent}
+            />
+          ))
+        : null}
+    </>
+  );
+}
+
+function CodexSubagentSidebarItem({
+  subagent,
+}: {
+  subagent: NonNullable<
+    NonNullable<
+      Extract<Session, { type: "codex-local-terminal" }>["subagentsByThreadId"]
+    >[string]
+  >;
+}) {
+  const statusMeta = statusIndicatorMeta[subagent.status];
+  const displayName =
+    subagent.nickname?.trim() ||
+    subagent.role?.trim() ||
+    subagent.preview?.trim() ||
+    "Subagent";
+  const secondary = subagent.nickname?.trim()
+    ? subagent.role?.trim()
+    : undefined;
+  const title = [displayName, secondary, subagent.message]
+    .filter(Boolean)
+    .join(" - ");
+
+  return (
+    <li
+      className="flex min-h-6 items-center gap-1.5 py-0.5 pl-10 pr-2 text-xs text-zinc-400"
+      title={title || undefined}
+    >
+      <span className="inline-flex shrink-0" title={statusMeta.label}>
+        <statusMeta.icon
+          className={cn(
+            "size-3",
+            statusMeta.className,
+            statusMeta.animate && "animate-spin",
+          )}
+          aria-hidden="true"
+        />
+      </span>
+      <GitFork className="size-3 shrink-0 text-zinc-600" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">
+        {displayName}
+        {secondary ? (
+          <span className="ml-1 text-zinc-500">({secondary})</span>
+        ) : null}
+      </span>
+      {subagent.message ? (
+        <span className="max-w-20 truncate text-zinc-500">
+          {subagent.message}
+        </span>
+      ) : null}
+    </li>
   );
 }
 

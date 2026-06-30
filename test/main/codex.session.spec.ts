@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CodexAppServerSubagentUpdate } from "../../src/main/codex-app-server-tracker";
 import {
   type CodexLocalTerminalSessionData,
   CodexSessionsManager,
@@ -11,6 +12,8 @@ type TrackerState =
   | "awaiting_approval"
   | "awaiting_user_response"
   | "error";
+
+const CODEX_SUBAGENT_TTL_MS = 10 * 60 * 1000;
 
 const terminalSessionSpies = vi.hoisted(() => {
   return {
@@ -61,6 +64,7 @@ const trackerSpies = vi.hoisted(() => {
       callbacks: {
         onThreadId?: (threadId: string) => void;
         onStatusChange?: (status: TrackerState) => void;
+        onSubagentUpdate?: (update: CodexAppServerSubagentUpdate) => void;
         onError?: (errorMessage: string) => void;
       };
     }>,
@@ -121,6 +125,7 @@ vi.mock("../../src/main/codex-app-server-tracker", () => ({
       callbacks: {
         onThreadId: options.onThreadId,
         onStatusChange: options.onStatusChange,
+        onSubagentUpdate: options.onSubagentUpdate,
         onError: options.onError,
       },
     };
@@ -282,6 +287,136 @@ describe("CodexSessionsManager", () => {
     expect(state[sessionId]?.codexSessionId).toBe(
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
     );
+  });
+
+  it("stores subagent updates reported by the tracker", async () => {
+    const { manager, sessionId, state } = createManager({
+      initialPrompt: undefined,
+    });
+
+    await manager.startLiveSession({
+      sessionId,
+      cwd: "/tmp",
+      modelReasoningEffort: "high",
+      fastMode: "off",
+      permissionMode: "default",
+      initialPrompt: undefined,
+    });
+
+    trackerSpies.instances[0]?.callbacks.onSubagentUpdate?.({
+      threadId: "child-thread",
+      parentThreadId: "root-thread",
+      nickname: "Socrates",
+      role: "explorer",
+      status: "running",
+      collabStatus: "running",
+      preview: "Inspect package.json",
+      initialPrompt: "Inspect package.json and report findings",
+      createdAt: 100,
+      updatedAt: 101,
+    });
+    trackerSpies.instances[0]?.callbacks.onSubagentUpdate?.({
+      threadId: "child-thread",
+      message: "yes",
+      collabStatus: "completed",
+    });
+
+    expect(state[sessionId]?.subagentOrder).toEqual(["child-thread"]);
+    expect(
+      state[sessionId]?.subagentsByThreadId?.["child-thread"],
+    ).toMatchObject({
+      threadId: "child-thread",
+      parentThreadId: "root-thread",
+      nickname: "Socrates",
+      role: "explorer",
+      preview: "Inspect package.json",
+      initialPrompt: "Inspect package.json and report findings",
+      status: "awaiting_user_response",
+      collabStatus: "completed",
+      message: "yes",
+      createdAt: 100,
+      updatedAt: 101,
+    });
+  });
+
+  it("prunes inactive subagents after ten minutes", async () => {
+    const { manager, sessionId, state } = createManager({
+      initialPrompt: undefined,
+    });
+
+    await manager.startLiveSession({
+      sessionId,
+      cwd: "/tmp",
+      modelReasoningEffort: "high",
+      fastMode: "off",
+      permissionMode: "default",
+      initialPrompt: undefined,
+    });
+
+    trackerSpies.instances[0]?.callbacks.onSubagentUpdate?.({
+      threadId: "child-thread",
+      parentThreadId: "root-thread",
+      status: "running",
+      collabStatus: "running",
+    });
+    trackerSpies.instances[0]?.callbacks.onSubagentUpdate?.({
+      threadId: "child-thread",
+      message: "done",
+      collabStatus: "completed",
+    });
+
+    expect(state[sessionId]?.subagentOrder).toEqual(["child-thread"]);
+
+    await vi.advanceTimersByTimeAsync(CODEX_SUBAGENT_TTL_MS - 1);
+    expect(
+      state[sessionId]?.subagentsByThreadId?.["child-thread"],
+    ).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state[sessionId]?.subagentsByThreadId).toBeUndefined();
+    expect(state[sessionId]?.subagentOrder).toBeUndefined();
+  });
+
+  it("keeps running subagents until the root session stops", async () => {
+    const { manager, sessionId, state } = createManager({
+      initialPrompt: undefined,
+    });
+
+    await manager.startLiveSession({
+      sessionId,
+      cwd: "/tmp",
+      modelReasoningEffort: "high",
+      fastMode: "off",
+      permissionMode: "default",
+      initialPrompt: undefined,
+    });
+
+    trackerSpies.instances[0]?.callbacks.onSubagentUpdate?.({
+      threadId: "child-thread",
+      parentThreadId: "root-thread",
+      status: "running",
+      collabStatus: "running",
+    });
+
+    await vi.advanceTimersByTimeAsync(CODEX_SUBAGENT_TTL_MS * 2);
+    expect(
+      state[sessionId]?.subagentsByThreadId?.["child-thread"],
+    ).toMatchObject({
+      status: "running",
+      collabStatus: "running",
+    });
+
+    await manager.stopLiveSession(sessionId);
+    expect(
+      state[sessionId]?.subagentsByThreadId?.["child-thread"],
+    ).toMatchObject({
+      status: "stopped",
+      collabStatus: "shutdown",
+    });
+
+    await vi.advanceTimersByTimeAsync(CODEX_SUBAGENT_TTL_MS);
+    expect(state[sessionId]?.subagentsByThreadId).toBeUndefined();
+    expect(state[sessionId]?.subagentOrder).toBeUndefined();
   });
 
   it("does not defer-submit prompt when it is not /plan mode", async () => {

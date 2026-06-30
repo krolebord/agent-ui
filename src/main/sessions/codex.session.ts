@@ -10,7 +10,9 @@ import type { TerminalEvent } from "@shared/terminal-types";
 import { z } from "zod";
 import { CodexAppServerProcess } from "../codex-app-server-runtime";
 import {
+  type CodexAppServerCollabAgentStatus,
   type CodexAppServerSessionState,
+  type CodexAppServerSubagentUpdate,
   CodexAppServerTracker,
 } from "../codex-app-server-tracker";
 import { buildCodexArgs } from "../codex-cli";
@@ -23,14 +25,51 @@ import {
   commonSessionSchema,
   generateUniqueSessionId,
   type SessionStatus,
+  sessionStatusSchema,
 } from "./common";
 import type { SessionServiceState } from "./state";
 
 const DEFAULT_CODEX_SESSION_TITLE = "Codex Session";
+const CODEX_SUBAGENT_TTL_MS = 10 * 60 * 1000;
+
+const codexSubagentCollabStatusSchema = z.enum([
+  "pendingInit",
+  "running",
+  "interrupted",
+  "completed",
+  "errored",
+  "shutdown",
+  "notFound",
+]);
+
+export const codexSubagentSessionSchema = z.object({
+  threadId: z.string(),
+  parentThreadId: z.string().optional(),
+  nickname: z.string().optional(),
+  role: z.string().optional(),
+  preview: z.string().optional(),
+  initialPrompt: z.string().optional(),
+  status: sessionStatusSchema
+    .transform(() => "stopped" as SessionStatus)
+    .catch("stopped"),
+  collabStatus: codexSubagentCollabStatusSchema.optional(),
+  message: z.string().optional(),
+  createdAt: z.number().optional(),
+  updatedAt: z.number().optional(),
+  lastActivityAt: z.number().default(Date.now),
+});
+export type CodexSubagentSessionData = z.infer<
+  typeof codexSubagentSessionSchema
+>;
 
 export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
   type: z.literal("codex-local-terminal"),
   codexSessionId: z.string().optional(),
+  subagentsByThreadId: z
+    .record(z.string(), codexSubagentSessionSchema)
+    .optional()
+    .catch(undefined),
+  subagentOrder: z.array(z.string()).optional().catch(undefined),
   startupConfig: z.object({
     cwd: z.string(),
     model: z.string().optional(),
@@ -214,6 +253,146 @@ function getCodexSessionStatus(
   return "idle";
 }
 
+function normalizeSubagentStatus(
+  status: CodexAppServerSubagentUpdate["status"] | undefined,
+): SessionStatus | undefined {
+  if (!status) {
+    return undefined;
+  }
+  switch (status) {
+    case "starting":
+    case "stopped":
+    case "running":
+    case "awaiting_approval":
+    case "awaiting_user_response":
+    case "error":
+      return status;
+  }
+}
+
+function collabStatusToSessionStatus(
+  status: CodexAppServerCollabAgentStatus | undefined,
+): SessionStatus | undefined {
+  switch (status) {
+    case "pendingInit":
+      return "starting";
+    case "running":
+      return "running";
+    case "completed":
+      return "awaiting_user_response";
+    case "errored":
+    case "notFound":
+      return "error";
+    case "interrupted":
+    case "shutdown":
+      return "stopped";
+    case undefined:
+      return undefined;
+  }
+}
+
+function isActiveCodexSubagent(subagent: CodexSubagentSessionData): boolean {
+  if (
+    subagent.collabStatus === "pendingInit" ||
+    subagent.collabStatus === "running"
+  ) {
+    return true;
+  }
+
+  return (
+    !subagent.collabStatus &&
+    (subagent.status === "starting" ||
+      subagent.status === "running" ||
+      subagent.status === "awaiting_approval")
+  );
+}
+
+function pruneExpiredCodexSubagents(
+  session: CodexLocalTerminalSessionData,
+  now = Date.now(),
+): boolean {
+  if (!session.subagentsByThreadId) {
+    return false;
+  }
+
+  let changed = false;
+  for (const [threadId, subagent] of Object.entries(
+    session.subagentsByThreadId,
+  )) {
+    if (isActiveCodexSubagent(subagent)) {
+      continue;
+    }
+    if (now - subagent.lastActivityAt < CODEX_SUBAGENT_TTL_MS) {
+      continue;
+    }
+
+    delete session.subagentsByThreadId[threadId];
+    changed = true;
+  }
+
+  if (!changed) {
+    return false;
+  }
+
+  const remainingThreadIds = new Set(Object.keys(session.subagentsByThreadId));
+  session.subagentOrder = (session.subagentOrder ?? []).filter((threadId) =>
+    remainingThreadIds.has(threadId),
+  );
+
+  if (remainingThreadIds.size === 0) {
+    delete session.subagentsByThreadId;
+    delete session.subagentOrder;
+  }
+
+  return true;
+}
+
+function getNextCodexSubagentPruneDelay(
+  session: CodexLocalTerminalSessionData,
+  now = Date.now(),
+): number | null {
+  if (!session.subagentsByThreadId) {
+    return null;
+  }
+
+  let nextDelay: number | null = null;
+  for (const subagent of Object.values(session.subagentsByThreadId)) {
+    if (isActiveCodexSubagent(subagent)) {
+      continue;
+    }
+
+    const delay = CODEX_SUBAGENT_TTL_MS - (now - subagent.lastActivityAt);
+    if (delay <= 0) {
+      return 0;
+    }
+    nextDelay = nextDelay === null ? delay : Math.min(nextDelay, delay);
+  }
+
+  return nextDelay;
+}
+
+function markCodexSubagentsStopped(
+  session: CodexLocalTerminalSessionData,
+  now = Date.now(),
+): boolean {
+  if (!session.subagentsByThreadId) {
+    return false;
+  }
+
+  let changed = false;
+  for (const subagent of Object.values(session.subagentsByThreadId)) {
+    if (!isActiveCodexSubagent(subagent)) {
+      continue;
+    }
+    subagent.status = "stopped";
+    subagent.collabStatus = "shutdown";
+    subagent.lastActivityAt = now;
+    changed = true;
+  }
+
+  return changed;
+}
+
 function normalizeCodexTitlePrompt(prompt: string): string {
   const trimmedPrompt = prompt.trim();
   return /^\/plan(?:\s+|$)/.test(trimmedPrompt)
@@ -226,6 +405,10 @@ export class CodexSessionsManager {
   private readonly sessionsState: SessionServiceState;
   private readonly terminalManager: TerminalManager;
   private readonly titleGeneration: TitleGenerationService | null;
+  private readonly subagentPruneTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
 
   constructor(options: CodexSessionsManagerOptions | SessionServiceState) {
     if ("updateState" in options) {
@@ -237,6 +420,8 @@ export class CodexSessionsManager {
       )) {
         if (session.type === "codex-local-terminal") {
           this.terminalManager.registerTerminal(sessionId);
+          this.pruneExpiredSubagents(sessionId);
+          this.scheduleSubagentPrune(sessionId);
         }
       }
       return;
@@ -250,6 +435,8 @@ export class CodexSessionsManager {
     )) {
       if (session.type === "codex-local-terminal") {
         this.terminalManager.registerTerminal(sessionId);
+        this.pruneExpiredSubagents(sessionId);
+        this.scheduleSubagentPrune(sessionId);
       }
     }
   }
@@ -301,6 +488,76 @@ export class CodexSessionsManager {
       );
     }
     return session;
+  }
+
+  private pruneExpiredSubagents(sessionId: string): boolean {
+    let pruned = false;
+    this.sessionsState.updateState((state) => {
+      const session = state[sessionId];
+      if (!session || session.type !== "codex-local-terminal") {
+        return;
+      }
+
+      pruned = pruneExpiredCodexSubagents(session);
+    });
+
+    return pruned;
+  }
+
+  private scheduleSubagentPrune(sessionId: string): void {
+    const existingTimer = this.subagentPruneTimers.get(sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.subagentPruneTimers.delete(sessionId);
+    }
+
+    const session = this.sessionsState.state[sessionId];
+    if (!session || session.type !== "codex-local-terminal") {
+      return;
+    }
+
+    const delay = getNextCodexSubagentPruneDelay(session);
+    if (delay === null) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      this.subagentPruneTimers.delete(sessionId);
+      this.pruneExpiredSubagents(sessionId);
+      this.scheduleSubagentPrune(sessionId);
+    }, delay);
+
+    if (typeof timer === "object" && "unref" in timer) {
+      timer.unref();
+    }
+
+    this.subagentPruneTimers.set(sessionId, timer);
+  }
+
+  private clearSubagentPruneTimer(sessionId: string): void {
+    const timer = this.subagentPruneTimers.get(sessionId);
+    if (!timer) {
+      return;
+    }
+
+    clearTimeout(timer);
+    this.subagentPruneTimers.delete(sessionId);
+  }
+
+  private markSubagentsStopped(sessionId: string): void {
+    let changed = false;
+    this.sessionsState.updateState((state) => {
+      const session = state[sessionId];
+      if (!session || session.type !== "codex-local-terminal") {
+        return;
+      }
+
+      changed = markCodexSubagentsStopped(session);
+    });
+
+    if (changed) {
+      this.scheduleSubagentPrune(sessionId);
+    }
   }
 
   private maybeGenerateTitleFromInitialPrompt(
@@ -446,6 +703,47 @@ export class CodexSessionsManager {
       const terminalStatus = runtime?.status ?? "stopped";
       setSessionStatus(getCodexSessionStatus(terminalStatus, trackerState));
     };
+    const updateSubagent = (update: CodexAppServerSubagentUpdate) => {
+      state.updateState((state) => {
+        const session = state[sessionId];
+        if (!session || session.type !== "codex-local-terminal") {
+          return;
+        }
+
+        session.subagentsByThreadId ??= {};
+        session.subagentOrder ??= [];
+
+        const existing = session.subagentsByThreadId[update.threadId];
+        const now = Date.now();
+        const nextStatus =
+          normalizeSubagentStatus(update.status) ??
+          collabStatusToSessionStatus(update.collabStatus) ??
+          existing?.status ??
+          "starting";
+
+        session.subagentsByThreadId[update.threadId] = {
+          threadId: update.threadId,
+          parentThreadId: update.parentThreadId ?? existing?.parentThreadId,
+          nickname: update.nickname ?? existing?.nickname,
+          role: update.role ?? existing?.role,
+          preview: update.preview ?? existing?.preview,
+          initialPrompt: update.initialPrompt ?? existing?.initialPrompt,
+          status: nextStatus,
+          collabStatus: update.collabStatus ?? existing?.collabStatus,
+          message: update.message ?? existing?.message,
+          createdAt: update.createdAt ?? existing?.createdAt,
+          updatedAt: update.updatedAt ?? existing?.updatedAt,
+          lastActivityAt: now,
+        };
+
+        if (!session.subagentOrder.includes(update.threadId)) {
+          session.subagentOrder.push(update.threadId);
+        }
+        session.lastActivityAt = now;
+      });
+      this.pruneExpiredSubagents(sessionId);
+      this.scheduleSubagentPrune(sessionId);
+    };
 
     const appServer = new CodexAppServerProcess({
       sessionId,
@@ -481,6 +779,7 @@ export class CodexSessionsManager {
             void this.maybeGenerateTitleFromCodexThread(sessionId, tracker);
           }
         },
+        onSubagentUpdate: updateSubagent,
         onError: (errorMessage) => {
           runtimeErrorMessage = errorMessage;
           setSessionErrorMessage(errorMessage);
@@ -633,6 +932,7 @@ export class CodexSessionsManager {
       return;
     }
 
+    this.markSubagentsStopped(sessionId);
     this.persistOfflineBuffer(
       sessionId,
       offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),
@@ -648,10 +948,14 @@ export class CodexSessionsManager {
         await this.stopLiveSession(sessionId);
       }),
     );
+    for (const sessionId of this.subagentPruneTimers.keys()) {
+      this.clearSubagentPruneTimer(sessionId);
+    }
   }
 
   async deleteSession(sessionId: string) {
     await this.stopLiveSession(sessionId);
+    this.clearSubagentPruneTimer(sessionId);
     await this.terminalManager.unregisterTerminal(sessionId);
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
