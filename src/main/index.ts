@@ -10,6 +10,7 @@ import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { createServices } from "./create-services";
 import log from "./logger";
 import { orpcRouter } from "./orpc-router";
+import { orpcTrafficMonitor } from "./orpc-traffic-monitor";
 
 if (process.platform !== "darwin") {
   throw new Error("Only macOS is supported");
@@ -81,6 +82,7 @@ async function createWindow(): Promise<void> {
 }
 
 const handler = new RPCHandler(orpcRouter, {
+  clientInterceptors: [orpcTrafficMonitor.interceptor],
   interceptors: [
     onError((error) => {
       console.error(error);
@@ -155,6 +157,7 @@ app.on("before-quit", (event) => {
   isHandlingBeforeQuit = true;
 
   disposeController.abort();
+  orpcTrafficMonitor.dispose();
 
   shutdownPromise ??= (async () => {
     try {

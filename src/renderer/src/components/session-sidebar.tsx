@@ -3,6 +3,7 @@ import type { DragEndEvent } from "@dnd-kit/react";
 import { DragDropProvider, PointerSensor } from "@dnd-kit/react";
 import { isSortable, useSortable } from "@dnd-kit/react/sortable";
 import type { Session } from "@main/sessions/state";
+import { OrpcTrafficPanel } from "@renderer/components/orpc-traffic-panel";
 import { Button } from "@renderer/components/ui/button";
 import { ContextMenuItem } from "@renderer/components/ui/context-menu";
 import {
@@ -371,6 +372,7 @@ export function SessionSidebar() {
           </DragDropProvider>
         </div>
       </div>
+      <OrpcTrafficPanel />
       <UsagePanel />
       <RenameSessionDialog />
       <RawSessionStateDialog />
