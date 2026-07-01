@@ -9,6 +9,7 @@ export interface ProjectSessionGroup {
   path: string;
   displayName: string;
   collapsed: boolean;
+  hidden: boolean;
   fromProjectList: boolean;
   gitBranch?: string;
   gitUpstreamDiffStats?: GitUpstreamDiffStats;
@@ -152,6 +153,7 @@ export function buildProjectSessionGroups(
       path: project.path,
       displayName: getProjectDisplayName(project),
       collapsed: project.collapsed,
+      hidden: project.hidden === true,
       fromProjectList: true,
       gitBranch: project.gitBranch,
       gitUpstreamDiffStats: project.gitUpstreamDiffStats,
@@ -174,6 +176,7 @@ export function buildProjectSessionGroups(
       path,
       displayName: getProjectNameFromPath(path),
       collapsed: false,
+      hidden: false,
       fromProjectList: false,
       isWorktree: false,
       interactionDisabled: false,

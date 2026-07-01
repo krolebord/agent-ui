@@ -24,6 +24,7 @@ describe("buildProjectSessionGroups", () => {
         path: "/workspace/app",
         displayName: "app",
         collapsed: false,
+        hidden: false,
         fromProjectList: true,
         gitBranch: "feature/sidebar-branch",
         isWorktree: false,
@@ -77,6 +78,7 @@ describe("buildProjectSessionGroups", () => {
         path: "/workspace/app-feature-sidebar",
         displayName: "Sidebar Spike (app-feature-sidebar)",
         collapsed: false,
+        hidden: false,
         fromProjectList: true,
         gitBranch: "feature/sidebar",
         isWorktree: true,
@@ -85,6 +87,24 @@ describe("buildProjectSessionGroups", () => {
         sessions: [],
       },
     ]);
+  });
+
+  it("marks hidden projects for sidebar filtering", () => {
+    const groups = buildProjectSessionGroups({
+      projects: [
+        {
+          path: "/workspace/hidden-app",
+          collapsed: true,
+          hidden: true,
+        },
+      ],
+      sessionsById: {},
+    });
+
+    expect(groups[0]).toMatchObject({
+      path: "/workspace/hidden-app",
+      hidden: true,
+    });
   });
 });
 

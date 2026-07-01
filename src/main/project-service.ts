@@ -36,6 +36,7 @@ const projectDeletionToastSchema = z.object({
 export const claudeProjectSchema = z.object({
   path: z.string().trim().min(1),
   collapsed: z.boolean().catch(false),
+  hidden: z.boolean().optional().catch(undefined),
   alias: projectAliasSchema,
   worktreeOriginPath: worktreeOriginPathSchema,
   worktreeSetupCommands: z.string().optional().catch(undefined),
@@ -97,6 +98,7 @@ function normalizeProjects(projects: ClaudeProject[]): ClaudeProject[] {
       path,
       alias: normalizeProjectAlias(project.alias),
       collapsed: project.collapsed === true,
+      hidden: project.hidden === true ? true : undefined,
       worktreeOriginPath: project.worktreeOriginPath?.trim() || undefined,
     });
   }
@@ -123,12 +125,15 @@ export const defineProjectStatePersistence = (state: ProjectState) =>
     serviceState: state,
     schema: z.array(claudeProjectSchema).transform(normalizeProjects),
     toPersisted: (projects) =>
-      projects.map(({ path, collapsed, alias, worktreeOriginPath }) => ({
-        path,
-        collapsed,
-        alias,
-        worktreeOriginPath,
-      })) as ClaudeProject[],
+      projects.map(
+        ({ path, collapsed, hidden, alias, worktreeOriginPath }) => ({
+          path,
+          collapsed,
+          hidden,
+          alias,
+          worktreeOriginPath,
+        }),
+      ) as ClaudeProject[],
   });
 
 const projectPathSchema = z.string().trim().min(1);
@@ -556,6 +561,22 @@ export const projectsRouter = {
         const project = projects.find((p) => p.path === path);
         if (!project || project.collapsed === input.collapsed) return;
         project.collapsed = input.collapsed;
+      });
+    }),
+  setProjectHidden: procedure
+    .input(z.object({ path: projectPathSchema, hidden: z.boolean() }))
+    .handler(async ({ input, context }) => {
+      const path = normalizeProjectPath(input.path);
+      if (!path) return;
+
+      assertProjectPathInteractionAllowed(path, context);
+
+      context.projectsState.updateState((projects) => {
+        const project = projects.find((p) => p.path === path);
+        if (!project) return;
+        const hidden = input.hidden ? true : undefined;
+        if (project.hidden === hidden) return;
+        project.hidden = hidden;
       });
     }),
   setProjectDefaults: procedure

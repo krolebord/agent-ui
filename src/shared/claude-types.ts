@@ -78,6 +78,7 @@ export interface ProjectDeletionToast {
 export interface ClaudeProject {
   path: string;
   collapsed: boolean;
+  hidden?: boolean;
   alias?: string;
   gitBranch?: string;
   gitDiffStats?: GitDiffStats;

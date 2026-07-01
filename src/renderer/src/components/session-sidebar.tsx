@@ -26,6 +26,8 @@ import { useMutation } from "@tanstack/react-query";
 import {
   ChevronRight,
   EllipsisVertical,
+  Eye,
+  EyeOff,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -157,6 +159,7 @@ async function stopSession(session: Session): Promise<void> {
 export function SessionSidebar() {
   const projects = useAppState((x) => x.projects);
   const sessions = useAppState((x) => x.sessions);
+  const [showHiddenProjects, setShowHiddenProjects] = useState(false);
 
   const openSettingsDialog = useSettingsStore((x) => x.openSettingsDialog);
 
@@ -167,6 +170,18 @@ export function SessionSidebar() {
         sessionsById: sessions,
       }),
     [projects, sessions],
+  );
+  const visibleProjectGroups = useMemo(
+    () =>
+      groups.filter(
+        (group) =>
+          group.fromProjectList && (showHiddenProjects || !group.hidden),
+      ),
+    [groups, showHiddenProjects],
+  );
+  const untrackedGroups = useMemo(
+    () => groups.filter((group) => !group.fromProjectList),
+    [groups],
   );
   const setOpenProjectCwd = useProjectDefaultsDialogStore(
     (x) => x.setOpenProjectCwd,
@@ -186,6 +201,9 @@ export function SessionSidebar() {
 
   const toggleProjectCollapsed = useMutation(
     orpc.projects.setProjectCollapsed.mutationOptions(),
+  );
+  const toggleProjectHidden = useMutation(
+    orpc.projects.setProjectHidden.mutationOptions(),
   );
 
   const deleteProjectMutation = useMutation({
@@ -221,9 +239,8 @@ export function SessionSidebar() {
       const fromIndex = source.sortable.initialIndex;
       const toIndex = source.sortable.index;
       if (fromIndex === toIndex) return;
-      const projectGroups = groups.filter((g) => g.fromProjectList);
-      const fromGroup = projectGroups[fromIndex];
-      const toGroup = projectGroups[toIndex];
+      const fromGroup = visibleProjectGroups[fromIndex];
+      const toGroup = visibleProjectGroups[toIndex];
       if (!fromGroup || !toGroup) return;
       if (fromGroup.interactionDisabled || toGroup.interactionDisabled) {
         return;
@@ -233,7 +250,7 @@ export function SessionSidebar() {
         toPath: toGroup.path,
       });
     },
-    [groups, reorderProjectsMutation],
+    [reorderProjectsMutation, visibleProjectGroups],
   );
 
   const setOpenNewSessionDialogCwd = useNewSessionDialogStore(
@@ -244,6 +261,31 @@ export function SessionSidebar() {
     <aside className="flex h-full w-full flex-col border-r border-border/70 bg-black/35 backdrop-blur-xl">
       <div className="flex h-9 items-center border-b border-border/70 pl-16 [app-region:drag]">
         <div className="ml-auto flex h-full items-center [app-region:no-drag]">
+          <Button
+            variant="flat"
+            className={cn(
+              "h-full w-9 shrink-0 px-0",
+              showHiddenProjects && "text-zinc-100",
+            )}
+            onClick={() => setShowHiddenProjects((value) => !value)}
+            aria-label={
+              showHiddenProjects
+                ? "Hide hidden projects"
+                : "Show hidden projects"
+            }
+            aria-pressed={showHiddenProjects}
+            title={
+              showHiddenProjects
+                ? "Hide hidden projects"
+                : "Show hidden projects"
+            }
+          >
+            {showHiddenProjects ? (
+              <Eye className="size-3.5" />
+            ) : (
+              <EyeOff className="size-3.5" />
+            )}
+          </Button>
           <Button
             variant="flat"
             className="h-full w-9 shrink-0 px-0"
@@ -280,94 +322,95 @@ export function SessionSidebar() {
             sensors={projectDragSensors}
             onDragEnd={handleDragEnd}
           >
-            {groups
-              .filter((g) => g.fromProjectList)
-              .map((group, index) => (
-                <SortableProjectGroup
-                  key={group.path}
-                  group={group}
-                  index={index}
-                  onToggleCollapsed={() =>
-                    toggleProjectCollapsed.mutate({
+            {visibleProjectGroups.map((group, index) => (
+              <SortableProjectGroup
+                key={group.path}
+                group={group}
+                index={index}
+                onToggleCollapsed={() =>
+                  toggleProjectCollapsed.mutate({
+                    path: group.path,
+                    collapsed: !group.collapsed,
+                  })
+                }
+                onCreateWorktree={() => setOpenProjectWorktreePath(group.path)}
+                canCreateWorktree={
+                  Boolean(group.gitBranch) && !group.isWorktree
+                }
+                onOpenSettings={() => setOpenProjectCwd(group.path)}
+                onOpenFolder={() => openFolderMutation.mutate(group.path)}
+                onDelete={() => {
+                  if (group.isWorktree) {
+                    openWorktreeDeleteDialog({
                       path: group.path,
-                      collapsed: !group.collapsed,
-                    })
-                  }
-                  onCreateWorktree={() =>
-                    setOpenProjectWorktreePath(group.path)
-                  }
-                  canCreateWorktree={
-                    Boolean(group.gitBranch) && !group.isWorktree
-                  }
-                  onOpenSettings={() => setOpenProjectCwd(group.path)}
-                  onOpenFolder={() => openFolderMutation.mutate(group.path)}
-                  onDelete={() => {
-                    if (group.isWorktree) {
-                      openWorktreeDeleteDialog({
-                        path: group.path,
-                        displayName: group.displayName,
-                        gitBranch: group.gitBranch,
-                      });
-                      return;
-                    }
-
-                    const sessionCount = group.sessions.length;
-                    const sessionLabel =
-                      sessionCount === 1
-                        ? "1 session"
-                        : `${sessionCount} sessions`;
-
-                    useConfirmDialogStore.getState().confirm({
-                      title: "Delete project",
-                      description:
-                        sessionCount > 0
-                          ? `Delete "${group.displayName}" and its ${sessionLabel}? This will also delete the project's sessions from Agent UI.`
-                          : `Delete "${group.displayName}" from Agent UI? This cannot be undone.`,
-                      confirmLabel: "Delete",
-                      onConfirm: async () => {
-                        await deleteProjectMutation.mutateAsync({
-                          path: group.path,
-                        });
-                      },
+                      displayName: group.displayName,
+                      gitBranch: group.gitBranch,
                     });
-                  }}
-                  isDeleting={deleteProjectMutation.isPending}
-                  onNewSession={() => setOpenNewSessionDialogCwd(group.path)}
-                />
-              ))}
-            {groups
-              .filter((g) => !g.fromProjectList)
-              .map((group) => (
-                <section
-                  key={group.path}
-                  className="group/project border-b border-border/40"
-                >
-                  <div className="flex items-center">
-                    <button
-                      type="button"
-                      className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition"
-                    >
-                      <span className="inline-flex w-4 shrink-0" />
-                      <FolderOpen
-                        className={cn(
-                          "size-4 shrink-0",
-                          groupHasAwaitingUserInput(group)
-                            ? "text-violet-400"
-                            : "text-zinc-300",
-                        )}
-                      />
-                      <span className="truncate">{group.displayName}</span>
-                      <ProjectActiveSessionsPill
-                        projectPath={group.path}
-                        sessions={group.sessions}
-                      />
-                    </button>
-                  </div>
-                  {!group.collapsed ? (
-                    <GroupSessionsList sessions={group.sessions} />
-                  ) : null}
-                </section>
-              ))}
+                    return;
+                  }
+
+                  const sessionCount = group.sessions.length;
+                  const sessionLabel =
+                    sessionCount === 1
+                      ? "1 session"
+                      : `${sessionCount} sessions`;
+
+                  useConfirmDialogStore.getState().confirm({
+                    title: "Delete project",
+                    description:
+                      sessionCount > 0
+                        ? `Delete "${group.displayName}" and its ${sessionLabel}? This will also delete the project's sessions from Agent UI.`
+                        : `Delete "${group.displayName}" from Agent UI? This cannot be undone.`,
+                    confirmLabel: "Delete",
+                    onConfirm: async () => {
+                      await deleteProjectMutation.mutateAsync({
+                        path: group.path,
+                      });
+                    },
+                  });
+                }}
+                isDeleting={deleteProjectMutation.isPending}
+                onToggleHidden={() =>
+                  toggleProjectHidden.mutate({
+                    path: group.path,
+                    hidden: !group.hidden,
+                  })
+                }
+                isTogglingHidden={toggleProjectHidden.isPending}
+                onNewSession={() => setOpenNewSessionDialogCwd(group.path)}
+              />
+            ))}
+            {untrackedGroups.map((group) => (
+              <section
+                key={group.path}
+                className="group/project border-b border-border/40"
+              >
+                <div className="flex items-center">
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition"
+                  >
+                    <span className="inline-flex w-4 shrink-0" />
+                    <FolderOpen
+                      className={cn(
+                        "size-4 shrink-0",
+                        groupHasAwaitingUserInput(group)
+                          ? "text-violet-400"
+                          : "text-zinc-300",
+                      )}
+                    />
+                    <span className="truncate">{group.displayName}</span>
+                    <ProjectActiveSessionsPill
+                      projectPath={group.path}
+                      sessions={group.sessions}
+                    />
+                  </button>
+                </div>
+                {!group.collapsed ? (
+                  <GroupSessionsList sessions={group.sessions} />
+                ) : null}
+              </section>
+            ))}
           </DragDropProvider>
         </div>
       </div>
@@ -388,6 +431,8 @@ function SortableProjectGroup({
   onOpenFolder,
   onDelete,
   isDeleting,
+  onToggleHidden,
+  isTogglingHidden,
   onNewSession,
 }: {
   group: ProjectSessionGroup;
@@ -399,6 +444,8 @@ function SortableProjectGroup({
   onOpenFolder: () => void;
   onDelete: () => void;
   isDeleting: boolean;
+  onToggleHidden: () => void;
+  isTogglingHidden: boolean;
   onNewSession: () => void;
 }) {
   const locked = group.interactionDisabled;
@@ -464,6 +511,7 @@ function SortableProjectGroup({
       className={cn(
         "group/project border-b border-border/40",
         isDragging && "opacity-50",
+        group.hidden && "bg-zinc-950/35",
         locked && "opacity-60",
       )}
     >
@@ -502,6 +550,12 @@ function SortableProjectGroup({
                 />
               )}
               <span className="truncate">{group.displayName}</span>
+              {group.hidden ? (
+                <EyeOff
+                  className="size-3 shrink-0 text-zinc-500"
+                  aria-hidden="true"
+                />
+              ) : null}
               <ProjectActiveSessionsPill
                 projectPath={group.path}
                 sessions={group.sessions}
@@ -581,6 +635,18 @@ function SortableProjectGroup({
               >
                 <RefreshCw className="size-3.5" />
                 Refresh git status
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={locked || isTogglingHidden}
+                onClick={onToggleHidden}
+              >
+                {group.hidden ? (
+                  <Eye className="size-3.5" />
+                ) : (
+                  <EyeOff className="size-3.5" />
+                )}
+                {group.hidden ? "Unhide project" : "Hide project"}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
