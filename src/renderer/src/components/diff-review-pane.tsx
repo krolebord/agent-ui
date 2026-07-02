@@ -17,13 +17,23 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from "@renderer/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@renderer/components/ui/dropdown-menu";
 import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
+import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { useHotkey } from "@tanstack/react-hotkeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   Check,
+  ChevronDown,
+  ChevronUp,
   Copy,
   FileDiff as FileDiffIcon,
   FileMinus,
@@ -33,11 +43,19 @@ import {
   LoaderCircle,
   MessageSquare,
   MessageSquarePlus,
+  MoreHorizontal,
   Pencil,
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { create, createStore, type ExtractState } from "zustand";
 import { combine } from "zustand/middleware";
 import { useStore } from "zustand/react";
@@ -500,29 +518,13 @@ function gitPathsForConfirmedFiles(
   return [...out];
 }
 
-function FileListItem({
-  file,
-  selected,
-  commentCount,
-}: {
-  file: FileDiffMetadata;
-  selected: boolean;
-  commentCount: number;
-}) {
+function useFileListItemDiscardActions(file: FileDiffMetadata) {
   const store = useContext(projectDiffPaneContext);
-  const confirmed = useProjectDiffStore((s) =>
-    s.confirmedFiles.includes(file.name),
-  );
+  const projectPath = useProjectDiffStore((s) => s.projectPath);
   const hasSelectedFiles = useProjectDiffStore(
     (s) => s.confirmedFiles.length > 0,
   );
-  const projectPath = useProjectDiffStore((s) => s.projectPath);
-  const selectFile = useProjectDiffStore((s) => s.selectFile);
-  const toggleFileConfirmation = useProjectDiffStore(
-    (s) => s.toggleFileConfirmation,
-  );
   const clearConfirmations = useProjectDiffStore((s) => s.clearConfirmations);
-
   const queryClient = useQueryClient();
   const confirm = useConfirmDialogStore((s) => s.confirm);
   const discardMutation = useMutation(
@@ -581,6 +583,115 @@ function FileListItem({
     });
   };
 
+  return {
+    requestDiscard,
+    requestDiscardSelected,
+    isDiscardPending: discardMutation.isPending,
+    hasSelectedFiles,
+  };
+}
+
+function FileDiscardMenuItems({
+  requestDiscard,
+  requestDiscardSelected,
+  isDiscardPending,
+  hasSelectedFiles,
+  showDiscardSelected = true,
+}: {
+  requestDiscard: () => void;
+  requestDiscardSelected: () => void;
+  isDiscardPending: boolean;
+  hasSelectedFiles: boolean;
+  showDiscardSelected?: boolean;
+}) {
+  return (
+    <>
+      <ContextMenuItem
+        variant="destructive"
+        onSelect={requestDiscard}
+        disabled={isDiscardPending}
+      >
+        <Trash2 className="size-3.5" />
+        Discard changes
+      </ContextMenuItem>
+      {showDiscardSelected ? (
+        <ContextMenuItem
+          variant="destructive"
+          onSelect={requestDiscardSelected}
+          disabled={!hasSelectedFiles || isDiscardPending}
+        >
+          <Trash2 className="size-3.5" />
+          Discard selected files
+        </ContextMenuItem>
+      ) : null}
+    </>
+  );
+}
+
+function FileDiscardDropdownItems({
+  requestDiscard,
+  requestDiscardSelected,
+  isDiscardPending,
+  hasSelectedFiles,
+  showDiscardSelected = true,
+}: {
+  requestDiscard: () => void;
+  requestDiscardSelected: () => void;
+  isDiscardPending: boolean;
+  hasSelectedFiles: boolean;
+  showDiscardSelected?: boolean;
+}) {
+  return (
+    <>
+      <DropdownMenuItem
+        variant="destructive"
+        onSelect={requestDiscard}
+        disabled={isDiscardPending}
+      >
+        <Trash2 className="size-3.5" />
+        Discard changes
+      </DropdownMenuItem>
+      {showDiscardSelected ? (
+        <DropdownMenuItem
+          variant="destructive"
+          onSelect={requestDiscardSelected}
+          disabled={!hasSelectedFiles || isDiscardPending}
+        >
+          <Trash2 className="size-3.5" />
+          Discard selected files
+        </DropdownMenuItem>
+      ) : null}
+    </>
+  );
+}
+
+function FileListItem({
+  file,
+  selected,
+  commentCount,
+  showMobileMenu = false,
+  onOpenFile,
+}: {
+  file: FileDiffMetadata;
+  selected: boolean;
+  commentCount: number;
+  showMobileMenu?: boolean;
+  onOpenFile?: () => void;
+}) {
+  const selectFile = useProjectDiffStore((s) => s.selectFile);
+  const toggleFileConfirmation = useProjectDiffStore(
+    (s) => s.toggleFileConfirmation,
+  );
+  const confirmed = useProjectDiffStore((s) =>
+    s.confirmedFiles.includes(file.name),
+  );
+  const {
+    requestDiscard,
+    requestDiscardSelected,
+    isDiscardPending,
+    hasSelectedFiles,
+  } = useFileListItemDiscardActions(file);
+
   const Icon = fileTypeIcon(file);
   const { additions, deletions } = useMemo(
     () => ({
@@ -597,6 +708,11 @@ function FileListItem({
     ? file.name.slice(0, file.name.lastIndexOf("/"))
     : null;
 
+  const handleRowActivate = () => {
+    selectFile(file.name);
+    onOpenFile?.();
+  };
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -604,16 +720,16 @@ function FileListItem({
           role="option"
           tabIndex={-1}
           className={cn(
-            "flex w-full cursor-pointer items-center gap-1.5 px-1.5 py-1 text-left text-sm transition outline-none",
+            "flex w-full cursor-pointer items-center gap-1.5 px-1.5 py-1 text-left text-sm transition outline-none pointer-coarse:min-h-11 pointer-coarse:py-2",
             selected
               ? "bg-white/12 text-white"
               : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
           )}
-          onClick={() => selectFile(file.name)}
+          onClick={handleRowActivate}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              selectFile(file.name);
+              handleRowActivate();
             }
           }}
           aria-selected={selected}
@@ -669,25 +785,40 @@ function FileListItem({
               {commentCount}
             </span>
           ) : null}
+          {showMobileMenu ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0 text-muted-foreground hover:text-zinc-200"
+                  aria-label="File actions"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <FileDiscardDropdownItems
+                  requestDiscard={requestDiscard}
+                  requestDiscardSelected={requestDiscardSelected}
+                  isDiscardPending={isDiscardPending}
+                  hasSelectedFiles={hasSelectedFiles}
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem
-          variant="destructive"
-          onSelect={requestDiscard}
-          disabled={discardMutation.isPending}
-        >
-          <Trash2 className="size-3.5" />
-          Discard changes
-        </ContextMenuItem>
-        <ContextMenuItem
-          variant="destructive"
-          onSelect={requestDiscardSelected}
-          disabled={!hasSelectedFiles || discardMutation.isPending}
-        >
-          <Trash2 className="size-3.5" />
-          Discard selected files
-        </ContextMenuItem>
+        <FileDiscardMenuItems
+          requestDiscard={requestDiscard}
+          requestDiscardSelected={requestDiscardSelected}
+          isDiscardPending={isDiscardPending}
+          hasSelectedFiles={hasSelectedFiles}
+        />
       </ContextMenuContent>
     </ContextMenu>
   );
@@ -991,8 +1122,384 @@ function AddCommentGutterButton({ onClick }: { onClick: () => void }) {
   );
 }
 
+type DiffViewerPanelProps = {
+  isLoading: boolean;
+  selectedFile: FileDiffMetadata | null;
+  diffOptions: Parameters<typeof FileDiff>[0]["options"];
+  lineAnnotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[];
+  staleCommentsForSelectedFile: DiffReviewComment[];
+  projectPath: string;
+  selectFile: (filePath: string) => void;
+  startCommentDraft: (
+    projectPath: string,
+    filePath: string,
+    side: AnnotationSide,
+    lineNumber: number,
+  ) => void;
+};
+
+function DiffViewerPanel({
+  isLoading,
+  selectedFile,
+  diffOptions,
+  lineAnnotations,
+  staleCommentsForSelectedFile,
+  projectPath,
+  selectFile,
+  startCommentDraft,
+}: DiffViewerPanelProps) {
+  return (
+    <main className="h-full min-w-0 overflow-auto bg-black/10">
+      {isLoading ? (
+        <div className="flex h-full items-center justify-center">
+          <LoaderCircle className="text-muted-foreground size-6 animate-spin" />
+        </div>
+      ) : selectedFile ? (
+        <>
+          <StaleCommentsSection comments={staleCommentsForSelectedFile} />
+          <FileDiff
+            fileDiff={selectedFile}
+            options={diffOptions}
+            lineAnnotations={lineAnnotations}
+            renderAnnotation={(annotation) => (
+              <CommentAnnotation
+                annotation={
+                  annotation as DiffLineAnnotation<DiffReviewAnnotationMetadata>
+                }
+                selectedFile={selectedFile}
+              />
+            )}
+            renderGutterUtility={(getHoveredLine) => (
+              <AddCommentGutterButton
+                onClick={() => {
+                  const hoveredLine = getHoveredLine();
+                  if (!selectedFile || !hoveredLine) return;
+                  selectFile(selectedFile.name);
+                  startCommentDraft(
+                    projectPath,
+                    selectedFile.name,
+                    hoveredLine.side,
+                    hoveredLine.lineNumber,
+                  );
+                }}
+              />
+            )}
+          />
+        </>
+      ) : (
+        <div className="flex h-full items-center justify-center">
+          <p className="text-muted-foreground text-sm">
+            No uncommitted changes
+          </p>
+        </div>
+      )}
+    </main>
+  );
+}
+
+type DiffFilesSidebarProps = {
+  files: FileDiffMetadata[];
+  isLoading: boolean;
+  selectedFile: FileDiffMetadata | null;
+  allFilesConfirmed: boolean;
+  someFilesConfirmed: boolean;
+  commentCountsByFile: Record<string, number>;
+  isRefreshing: boolean;
+  hasReviewComments: boolean;
+  reviewCopied: boolean;
+  canCommit: boolean;
+  showDiffViewModeToggle: boolean;
+  showMobileMenu: boolean;
+  requestDiscardAll: () => void;
+  isDiscardAllPending: boolean;
+  onRefresh: () => void;
+  onToggleAllFilesConfirmation: () => void;
+  onDiscardReview: () => void;
+  onCopyReview: () => void;
+  onCommit: () => void;
+  onOpenFile?: () => void;
+  containerClassName?: string;
+  headerClassName?: string;
+};
+
+function DiffFilesSidebar({
+  files,
+  isLoading,
+  selectedFile,
+  allFilesConfirmed,
+  someFilesConfirmed,
+  commentCountsByFile,
+  isRefreshing,
+  hasReviewComments,
+  reviewCopied,
+  canCommit,
+  showDiffViewModeToggle,
+  showMobileMenu,
+  requestDiscardAll,
+  isDiscardAllPending,
+  onRefresh,
+  onToggleAllFilesConfirmation,
+  onDiscardReview,
+  onCopyReview,
+  onCommit,
+  onOpenFile,
+  containerClassName,
+  headerClassName,
+}: DiffFilesSidebarProps) {
+  return (
+    <div className={cn("flex h-full flex-col bg-black/15", containerClassName)}>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div
+              className={cn(
+                "flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2 pointer-coarse:h-11",
+                headerClassName,
+              )}
+            >
+              <Checkbox
+                id="all-files-checkbox"
+                checked={
+                  allFilesConfirmed
+                    ? true
+                    : someFilesConfirmed
+                      ? "indeterminate"
+                      : false
+                }
+                disabled={!files.length}
+                onCheckedChange={onToggleAllFilesConfirmation}
+                className="shrink-0"
+                aria-label={
+                  allFilesConfirmed
+                    ? "Exclude all changed files from commit"
+                    : "Include all changed files in commit"
+                }
+              />
+              <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <label
+                htmlFor="all-files-checkbox"
+                className="min-w-0 flex-1 truncate text-xs font-medium"
+              >
+                {files.length} changed file{files.length === 1 ? "" : "s"}
+              </label>
+              {showDiffViewModeToggle ? <DiffViewModeToggle /> : null}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-5 shrink-0 text-muted-foreground hover:text-zinc-200 pointer-coarse:size-8"
+                disabled={isRefreshing}
+                onClick={onRefresh}
+                aria-label="Refresh diff"
+                title="Refresh diff"
+              >
+                <RefreshCw
+                  className={cn(
+                    "size-3 pointer-coarse:size-4",
+                    isRefreshing && "animate-spin",
+                  )}
+                />
+              </Button>
+              {showMobileMenu ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 shrink-0 text-muted-foreground hover:text-zinc-200"
+                      aria-label="Sidebar actions"
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={requestDiscardAll}
+                      disabled={!files.length || isDiscardAllPending}
+                    >
+                      <Trash2 className="size-3.5" />
+                      Discard all pending changes
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+            </div>
+
+            <div
+              className="min-h-0 flex-1 overflow-y-auto py-1"
+              role="listbox"
+              aria-label="Changed files"
+            >
+              {isLoading ? (
+                <div className="flex h-full items-center justify-center">
+                  <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
+                </div>
+              ) : files.length ? (
+                files.map((file) => (
+                  <FileListItem
+                    key={file.name}
+                    file={file}
+                    selected={!!selectedFile && selectedFile.name === file.name}
+                    commentCount={commentCountsByFile[file.name] ?? 0}
+                    showMobileMenu={showMobileMenu}
+                    onOpenFile={onOpenFile}
+                  />
+                ))
+              ) : (
+                <p className="px-2 py-4 text-xs text-zinc-500">No changes</p>
+              )}
+            </div>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem
+            variant="destructive"
+            onSelect={requestDiscardAll}
+            disabled={!files.length || isDiscardAllPending}
+          >
+            <Trash2 className="size-3.5" />
+            Discard all pending changes
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+
+      <div className="shrink-0 space-y-1 border-t border-border/70 p-1.5 pointer-coarse:p-2">
+        {hasReviewComments ? (
+          <div className="flex flex-wrap gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-auto min-h-6 min-w-0 flex-1 basis-[calc(50%-0.125rem)] gap-1 px-1 py-1 text-[11px] whitespace-normal pointer-coarse:min-h-11 pointer-coarse:text-xs"
+              onClick={onDiscardReview}
+            >
+              <Trash2 className="size-2.5 shrink-0" />
+              Discard review
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={cn(
+                "h-auto min-h-6 min-w-0 flex-1 basis-[calc(50%-0.125rem)] gap-1 px-1 py-1 text-[11px] whitespace-normal pointer-coarse:min-h-11 pointer-coarse:text-xs",
+                reviewCopied && "border-emerald-500/40 text-emerald-400",
+              )}
+              onClick={onCopyReview}
+            >
+              {reviewCopied ? (
+                <Check className="size-2.5 shrink-0" />
+              ) : (
+                <Copy className="size-2.5 shrink-0" />
+              )}
+              Copy review
+            </Button>
+          </div>
+        ) : null}
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          className="h-7 w-full px-2 text-xs pointer-coarse:h-11 pointer-coarse:text-sm"
+          disabled={!canCommit}
+          onClick={onCommit}
+        >
+          <GitCommitHorizontal className="size-3" />
+          Commit
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function MobileDiffDetailHeader({
+  selectedFile,
+  canGoPrev,
+  canGoNext,
+  onBack,
+  onPrev,
+  onNext,
+}: {
+  selectedFile: FileDiffMetadata;
+  canGoPrev: boolean;
+  canGoNext: boolean;
+  onBack: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const { requestDiscard, isDiscardPending } =
+    useFileListItemDiscardActions(selectedFile);
+
+  return (
+    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border/70 px-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-9 shrink-0 text-muted-foreground hover:text-zinc-200"
+        onClick={onBack}
+        aria-label="Back to file list"
+      >
+        <ArrowLeft className="size-4" />
+      </Button>
+      <span className="min-w-0 flex-1 truncate text-xs font-medium">
+        {selectedFile.name}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-9 shrink-0 text-muted-foreground hover:text-zinc-200"
+        disabled={!canGoPrev}
+        onClick={onPrev}
+        aria-label="Previous file"
+      >
+        <ChevronUp className="size-4" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-9 shrink-0 text-muted-foreground hover:text-zinc-200"
+        disabled={!canGoNext}
+        onClick={onNext}
+        aria-label="Next file"
+      >
+        <ChevronDown className="size-4" />
+      </Button>
+      <DiffViewModeToggle />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0 text-muted-foreground hover:text-zinc-200"
+            aria-label="File actions"
+          >
+            <MoreHorizontal className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem
+            variant="destructive"
+            onSelect={requestDiscard}
+            disabled={isDiscardPending}
+          >
+            <Trash2 className="size-3.5" />
+            Discard changes
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
 function ProjectDiffPaneContent() {
   const queryClient = useQueryClient();
+  const isMobile = useIsMobile();
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   const projectPath = useProjectDiffStore((state) => state.projectPath);
   const {
@@ -1190,6 +1697,34 @@ function ProjectDiffPaneContent() {
     refreshStaleComments(projectPath, files);
   }, [files, isLoading, projectPath, refreshStaleComments]);
 
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileDetailOpen(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!isMobile || !mobileDetailOpen) return;
+    if (
+      !files?.length ||
+      !selectedFilePath ||
+      !files.some((file) => file.name === selectedFilePath)
+    ) {
+      setMobileDetailOpen(false);
+    }
+  }, [isMobile, mobileDetailOpen, files, selectedFilePath]);
+
+  const canGoPrev = Boolean(files && selectedFileIndex > 0);
+  const canGoNext = Boolean(files && selectedFileIndex < files.length - 1);
+  const goToPrevFile = () => {
+    if (!files || !canGoPrev) return;
+    selectFile(files[selectedFileIndex - 1].name);
+  };
+  const goToNextFile = () => {
+    if (!files || !canGoNext) return;
+    selectFile(files[selectedFileIndex + 1].name);
+  };
+
   useHotkey(
     "ArrowUp",
     () => {
@@ -1226,6 +1761,75 @@ function ProjectDiffPaneContent() {
 
   if (!files) return null;
 
+  const sidebarProps = {
+    files,
+    isLoading,
+    selectedFile,
+    allFilesConfirmed,
+    someFilesConfirmed,
+    commentCountsByFile,
+    isRefreshing,
+    hasReviewComments,
+    reviewCopied,
+    canCommit,
+    requestDiscardAll,
+    isDiscardAllPending: discardAllMutation.isPending,
+    onRefresh: refreshProjectDiff,
+    onToggleAllFilesConfirmation: () =>
+      toggleAllFilesConfirmation(files.map((file) => file.name)),
+    onDiscardReview: () => discardReview(projectPath),
+    onCopyReview: () => {
+      void copyReview(formatReviewCommentsForCopy(comments));
+    },
+    onCommit: () =>
+      openCommitDialog({
+        projectPath,
+        pathsToCommit,
+        selectedFileCount,
+        onCommitted: clearConfirmations,
+      }),
+  };
+
+  const diffViewerProps = {
+    isLoading,
+    selectedFile,
+    diffOptions,
+    lineAnnotations,
+    staleCommentsForSelectedFile,
+    projectPath,
+    selectFile,
+    startCommentDraft,
+  };
+
+  if (isMobile) {
+    if (mobileDetailOpen && selectedFile) {
+      return (
+        <div className="flex h-full min-h-0 flex-col">
+          <MobileDiffDetailHeader
+            selectedFile={selectedFile}
+            canGoPrev={canGoPrev}
+            canGoNext={canGoNext}
+            onBack={() => setMobileDetailOpen(false)}
+            onPrev={goToPrevFile}
+            onNext={goToNextFile}
+          />
+          <div className="min-h-0 flex-1">
+            <DiffViewerPanel {...diffViewerProps} />
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <DiffFilesSidebar
+        {...sidebarProps}
+        showDiffViewModeToggle
+        showMobileMenu
+        onOpenFile={() => setMobileDetailOpen(true)}
+      />
+    );
+  }
+
   return (
     <ResizablePanelGroup
       onLayoutChanged={(e) => {
@@ -1237,196 +1841,18 @@ function ProjectDiffPaneContent() {
       className="h-full min-h-0"
     >
       <ResizablePanel>
-        <main className="h-full min-w-0 overflow-auto bg-black/10">
-          {isLoading ? (
-            <div className="flex h-full items-center justify-center">
-              <LoaderCircle className="text-muted-foreground size-6 animate-spin" />
-            </div>
-          ) : selectedFile ? (
-            <>
-              <StaleCommentsSection comments={staleCommentsForSelectedFile} />
-              <FileDiff
-                fileDiff={selectedFile}
-                options={diffOptions}
-                lineAnnotations={lineAnnotations}
-                renderAnnotation={(annotation) => (
-                  <CommentAnnotation
-                    annotation={annotation}
-                    selectedFile={selectedFile}
-                  />
-                )}
-                renderGutterUtility={(getHoveredLine) => (
-                  <AddCommentGutterButton
-                    onClick={() => {
-                      const hoveredLine = getHoveredLine();
-                      if (!selectedFile || !hoveredLine) return;
-                      selectFile(selectedFile.name);
-                      startCommentDraft(
-                        projectPath,
-                        selectedFile.name,
-                        hoveredLine.side,
-                        hoveredLine.lineNumber,
-                      );
-                    }}
-                  />
-                )}
-              />
-            </>
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-muted-foreground text-sm">
-                No uncommitted changes
-              </p>
-            </div>
-          )}
-        </main>
+        <DiffViewerPanel {...diffViewerProps} />
       </ResizablePanel>
 
       <ResizableHandle />
 
       <ResizablePanel id="files-sidebar" defaultSize={sidebarSize}>
         <aside className="flex h-full flex-col border-l border-border/70 bg-black/15">
-          <ContextMenu>
-            <ContextMenuTrigger asChild>
-              <div className="flex min-h-0 flex-1 flex-col">
-                <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2">
-                  <Checkbox
-                    id="all-files-checkbox"
-                    checked={
-                      allFilesConfirmed
-                        ? true
-                        : someFilesConfirmed
-                          ? "indeterminate"
-                          : false
-                    }
-                    disabled={!files.length}
-                    onCheckedChange={() =>
-                      toggleAllFilesConfirmation(files.map((f) => f.name))
-                    }
-                    className="shrink-0"
-                    aria-label={
-                      allFilesConfirmed
-                        ? "Exclude all changed files from commit"
-                        : "Include all changed files in commit"
-                    }
-                  />
-                  <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                  <label
-                    htmlFor="all-files-checkbox"
-                    className="min-w-0 flex-1 truncate text-xs font-medium"
-                  >
-                    {files.length} changed file{files.length === 1 ? "" : "s"}
-                  </label>
-                  <DiffViewModeToggle />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-5 shrink-0 text-muted-foreground hover:text-zinc-200"
-                    disabled={isRefreshing}
-                    onClick={refreshProjectDiff}
-                    aria-label="Refresh diff"
-                    title="Refresh diff"
-                  >
-                    <RefreshCw
-                      className={cn("size-3", isRefreshing && "animate-spin")}
-                    />
-                  </Button>
-                </div>
-
-                <div
-                  className="min-h-0 flex-1 overflow-y-auto py-1"
-                  role="listbox"
-                  aria-label="Changed files"
-                >
-                  {isLoading ? (
-                    <div className="flex h-full items-center justify-center">
-                      <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
-                    </div>
-                  ) : files.length ? (
-                    files.map((file) => (
-                      <FileListItem
-                        key={file.name}
-                        file={file}
-                        selected={
-                          !!selectedFile && selectedFile.name === file.name
-                        }
-                        commentCount={commentCountsByFile[file.name] ?? 0}
-                      />
-                    ))
-                  ) : (
-                    <p className="px-2 py-4 text-xs text-zinc-500">
-                      No changes
-                    </p>
-                  )}
-                </div>
-              </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent>
-              <ContextMenuItem
-                variant="destructive"
-                onSelect={requestDiscardAll}
-                disabled={!files.length || discardAllMutation.isPending}
-              >
-                <Trash2 className="size-3.5" />
-                Discard all pending changes
-              </ContextMenuItem>
-            </ContextMenuContent>
-          </ContextMenu>
-
-          <div className="shrink-0 space-y-1 border-t border-border/70 p-1.5">
-            {hasReviewComments ? (
-              <div className="flex flex-wrap gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-auto min-h-6 min-w-0 flex-1 basis-[calc(50%-0.125rem)] gap-1 px-1 py-1 text-[11px] whitespace-normal"
-                  onClick={() => discardReview(projectPath)}
-                >
-                  <Trash2 className="size-2.5 shrink-0" />
-                  Discard review
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className={cn(
-                    "h-auto min-h-6 min-w-0 flex-1 basis-[calc(50%-0.125rem)] gap-1 px-1 py-1 text-[11px] whitespace-normal",
-                    reviewCopied && "border-emerald-500/40 text-emerald-400",
-                  )}
-                  onClick={() => {
-                    void copyReview(formatReviewCommentsForCopy(comments));
-                  }}
-                >
-                  {reviewCopied ? (
-                    <Check className="size-2.5 shrink-0" />
-                  ) : (
-                    <Copy className="size-2.5 shrink-0" />
-                  )}
-                  Copy review
-                </Button>
-              </div>
-            ) : null}
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              className="h-7 w-full px-2 text-xs"
-              disabled={!canCommit}
-              onClick={() =>
-                openCommitDialog({
-                  projectPath,
-                  pathsToCommit,
-                  selectedFileCount,
-                  onCommitted: clearConfirmations,
-                })
-              }
-            >
-              <GitCommitHorizontal className="size-3" />
-              Commit
-            </Button>
-          </div>
+          <DiffFilesSidebar
+            {...sidebarProps}
+            showDiffViewModeToggle
+            showMobileMenu={false}
+          />
         </aside>
       </ResizablePanel>
     </ResizablePanelGroup>

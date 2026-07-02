@@ -11,9 +11,20 @@ import {
   ContextMenuTrigger,
 } from "@renderer/components/ui/context-menu";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@renderer/components/ui/dropdown-menu";
+import {
   switchSession,
   useActiveSessionStore,
 } from "@renderer/hooks/use-active-session-id";
+import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import {
@@ -31,6 +42,7 @@ import {
   LoaderCircle,
   type LucideIcon,
   MessageCircleQuestionMark,
+  MoreHorizontal,
   Pencil,
   ShieldAlert,
   Square,
@@ -115,7 +127,35 @@ export const sessionTypeIcon: Record<
   "worktree-setup": { icon: GitFork, label: "Worktree setup" },
 };
 
-export function MoveSessionToProjectSubmenu({ session }: { session: Session }) {
+type SessionMenuActionItem = {
+  type: "item";
+  key?: string;
+  label: string;
+  icon?: LucideIcon;
+  onSelect: () => void;
+  disabled?: boolean;
+  variant?: "default" | "destructive";
+};
+
+type SessionMenuSeparator = {
+  type: "separator";
+  key?: string;
+};
+
+type SessionMenuSubmenu = {
+  type: "submenu";
+  key?: string;
+  label: string;
+  icon?: LucideIcon;
+  items: SessionMenuActionItem[];
+};
+
+export type SessionMenuAction =
+  | SessionMenuActionItem
+  | SessionMenuSeparator
+  | SessionMenuSubmenu;
+
+function useMoveSessionToProjectActions(session: Session): SessionMenuAction[] {
   const projects = useAppState((s) => s.projects);
   const moveSessionToProjectMutation = useMutation({
     mutationFn: (input: { sessionId: string; targetProjectPath: string }) =>
@@ -137,35 +177,195 @@ export function MoveSessionToProjectSubmenu({ session }: { session: Session }) {
   );
 
   if (targets.length === 0) {
-    return null;
+    return [];
   }
 
-  return (
-    <>
-      <ContextMenuSub>
-        <ContextMenuSubTrigger>
-          <Folder className="size-3.5" />
-          Move to project
-        </ContextMenuSubTrigger>
-        <ContextMenuSubContent>
-          {targets.map((project) => (
-            <ContextMenuItem
-              key={project.path}
-              onClick={() => {
-                moveSessionToProjectMutation.mutate({
-                  sessionId: session.sessionId,
-                  targetProjectPath: project.path,
-                });
-              }}
-            >
-              {getProjectDisplayName(project)}
-            </ContextMenuItem>
-          ))}
-        </ContextMenuSubContent>
-      </ContextMenuSub>
-      <ContextMenuSeparator />
-    </>
-  );
+  return [
+    {
+      type: "submenu",
+      key: "move-to-project",
+      label: "Move to project",
+      icon: Folder,
+      items: targets.map((project) => ({
+        type: "item",
+        key: `move-to-project:${project.path}`,
+        label: getProjectDisplayName(project),
+        onSelect: () => {
+          moveSessionToProjectMutation.mutate({
+            sessionId: session.sessionId,
+            targetProjectPath: project.path,
+          });
+        },
+      })),
+    },
+    { type: "separator", key: "after-move-to-project" },
+  ];
+}
+
+function useCommonSessionMenuActions(session: Session): SessionMenuAction[] {
+  const openRename = useRenameSessionDialogStore((x) => x.open);
+  const openRawState = useRawSessionStateDialogStore((x) => x.open);
+  const moveSessionToProjectActions = useMoveSessionToProjectActions(session);
+
+  return [
+    ...moveSessionToProjectActions,
+    {
+      type: "item",
+      key: "rename-session",
+      label: "Rename session",
+      icon: Pencil,
+      onSelect: () => {
+        openRename({
+          sessionId: session.sessionId,
+          type: session.type,
+          title: session.title,
+        });
+      },
+    },
+    {
+      type: "item",
+      key: "mark-unseen",
+      label: "Mark as unseen",
+      icon: EyeOff,
+      onSelect: () => {
+        void orpc.sessions.markUnseen.call({
+          sessionId: session.sessionId,
+        });
+      },
+    },
+    { type: "separator", key: "after-visibility-actions" },
+    {
+      type: "item",
+      key: "view-raw-json",
+      label: "View raw JSON",
+      icon: FileJson,
+      onSelect: () => {
+        openRawState(session);
+      },
+    },
+    {
+      type: "item",
+      key: "copy-session-id",
+      label: "Copy session ID",
+      icon: Copy,
+      onSelect: () => {
+        void navigator.clipboard.writeText(session.sessionId);
+        toast.success("Session ID copied");
+      },
+    },
+    {
+      type: "item",
+      key: "copy-working-directory",
+      label: "Copy working directory",
+      icon: Copy,
+      onSelect: () => {
+        void navigator.clipboard.writeText(session.startupConfig.cwd);
+        toast.success("Working directory copied");
+      },
+    },
+  ];
+}
+
+function renderContextMenuActions(actions: SessionMenuAction[]) {
+  return actions.map((action, index) => {
+    const key = action.key ?? `${action.type}:${index}`;
+
+    if (action.type === "separator") {
+      return <ContextMenuSeparator key={key} />;
+    }
+
+    const Icon = action.icon;
+
+    if (action.type === "submenu") {
+      return (
+        <ContextMenuSub key={key}>
+          <ContextMenuSubTrigger>
+            {Icon ? <Icon className="size-3.5" /> : null}
+            {action.label}
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            {action.items.map((item, itemIndex) => {
+              const ItemIcon = item.icon;
+              return (
+                <ContextMenuItem
+                  key={item.key ?? `${key}:item:${itemIndex}`}
+                  disabled={item.disabled}
+                  variant={item.variant}
+                  onClick={item.onSelect}
+                >
+                  {ItemIcon ? <ItemIcon className="size-3.5" /> : null}
+                  {item.label}
+                </ContextMenuItem>
+              );
+            })}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+      );
+    }
+
+    return (
+      <ContextMenuItem
+        key={key}
+        disabled={action.disabled}
+        variant={action.variant}
+        onClick={action.onSelect}
+      >
+        {Icon ? <Icon className="size-3.5" /> : null}
+        {action.label}
+      </ContextMenuItem>
+    );
+  });
+}
+
+function renderDropdownMenuActions(actions: SessionMenuAction[]) {
+  return actions.map((action, index) => {
+    const key = action.key ?? `${action.type}:${index}`;
+
+    if (action.type === "separator") {
+      return <DropdownMenuSeparator key={key} />;
+    }
+
+    const Icon = action.icon;
+
+    if (action.type === "submenu") {
+      return (
+        <DropdownMenuSub key={key}>
+          <DropdownMenuSubTrigger>
+            {Icon ? <Icon className="size-3.5" /> : null}
+            {action.label}
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {action.items.map((item, itemIndex) => {
+              const ItemIcon = item.icon;
+              return (
+                <DropdownMenuItem
+                  key={item.key ?? `${key}:item:${itemIndex}`}
+                  disabled={item.disabled}
+                  variant={item.variant}
+                  onClick={item.onSelect}
+                >
+                  {ItemIcon ? <ItemIcon className="size-3.5" /> : null}
+                  {item.label}
+                </DropdownMenuItem>
+              );
+            })}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      );
+    }
+
+    return (
+      <DropdownMenuItem
+        key={key}
+        disabled={action.disabled}
+        variant={action.variant}
+        onClick={action.onSelect}
+      >
+        {Icon ? <Icon className="size-3.5" /> : null}
+        {action.label}
+      </DropdownMenuItem>
+    );
+  });
 }
 
 export function CommonSessionContextMenuItems({
@@ -173,63 +373,9 @@ export function CommonSessionContextMenuItems({
 }: {
   session: Session;
 }) {
-  const openRename = useRenameSessionDialogStore((x) => x.open);
-  const openRawState = useRawSessionStateDialogStore((x) => x.open);
+  const actions = useCommonSessionMenuActions(session);
 
-  return (
-    <>
-      <MoveSessionToProjectSubmenu session={session} />
-      <ContextMenuItem
-        onClick={() => {
-          openRename({
-            sessionId: session.sessionId,
-            type: session.type,
-            title: session.title,
-          });
-        }}
-      >
-        <Pencil className="size-3.5" />
-        Rename session
-      </ContextMenuItem>
-      <ContextMenuItem
-        onClick={() => {
-          void orpc.sessions.markUnseen.call({
-            sessionId: session.sessionId,
-          });
-        }}
-      >
-        <EyeOff className="size-3.5" />
-        Mark as unseen
-      </ContextMenuItem>
-      <ContextMenuSeparator />
-      <ContextMenuItem
-        onClick={() => {
-          openRawState(session);
-        }}
-      >
-        <FileJson className="size-3.5" />
-        View raw JSON
-      </ContextMenuItem>
-      <ContextMenuItem
-        onClick={() => {
-          void navigator.clipboard.writeText(session.sessionId);
-          toast.success("Session ID copied");
-        }}
-      >
-        <Copy className="size-3.5" />
-        Copy session ID
-      </ContextMenuItem>
-      <ContextMenuItem
-        onClick={() => {
-          void navigator.clipboard.writeText(session.startupConfig.cwd);
-          toast.success("Working directory copied");
-        }}
-      >
-        <Copy className="size-3.5" />
-        Copy working directory
-      </ContextMenuItem>
-    </>
-  );
+  return <>{renderContextMenuActions(actions)}</>;
 }
 
 export const SessionSidebarItemTrigger = forwardRef<
@@ -263,9 +409,12 @@ export const SessionSidebarItemTrigger = forwardRef<
       ) : null}
       <button
         type="button"
-        onClick={() => switchSession(sessionId)}
+        onClick={() => {
+          switchSession(sessionId);
+          useMobileNavStore.getState().closeSidebar();
+        }}
         className={cn(
-          "flex w-full items-center justify-start gap-1.5 py-1 pl-5 pr-[3rem] text-sm transition",
+          "flex w-full items-center justify-start gap-1.5 py-1 pl-5 pr-[3rem] text-sm transition pointer-coarse:py-2 pointer-coarse:pr-[5.75rem]",
           isActive
             ? "bg-white/15 text-white"
             : session.status === "stopped"
@@ -273,7 +422,12 @@ export const SessionSidebarItemTrigger = forwardRef<
               : "text-zinc-300 hover:bg-white/8 hover:text-zinc-100",
         )}
       >
-        <span className="inline-flex shrink-0" title={statusMeta.label}>
+        <span
+          className="inline-flex shrink-0"
+          title={statusMeta.label}
+          role="img"
+          aria-label={statusMeta.label}
+        >
           <statusMeta.icon
             className={cn(
               "size-3",
@@ -287,7 +441,7 @@ export const SessionSidebarItemTrigger = forwardRef<
           {session.title}
         </span>
       </button>
-      <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1.5 transition group-hover/session:opacity-0 group-focus-within/session:opacity-0">
+      <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center gap-1.5 transition group-hover/session:opacity-0 group-focus-within/session:opacity-0 pointer-coarse:opacity-0">
         <span className="w-7 text-right text-xs tabular-nums text-zinc-400">
           {getSessionLastActivityLabel(session)}
         </span>
@@ -295,7 +449,12 @@ export const SessionSidebarItemTrigger = forwardRef<
           (() => {
             const typeMeta = sessionTypeIcon[session.type];
             return (
-              <span className="inline-flex" title={typeMeta.label}>
+              <span
+                className="inline-flex"
+                title={typeMeta.label}
+                role="img"
+                aria-label={typeMeta.label}
+              >
                 <typeMeta.icon
                   className="size-3 text-zinc-500"
                   aria-hidden="true"
@@ -304,7 +463,7 @@ export const SessionSidebarItemTrigger = forwardRef<
             );
           })()}
       </span>
-      <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition group-hover/session:opacity-100 group-focus-within/session:opacity-100">
+      <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition group-hover/session:opacity-100 group-focus-within/session:opacity-100 pointer-coarse:opacity-100">
         {children}
       </div>
     </li>
@@ -358,25 +517,56 @@ export const SidebarIconButton = forwardRef<
 export function BaseSessionSidebarItem({
   sessionId,
   primaryButton,
-  extraMenuItems,
+  extraMenuActions,
   onDelete,
   deleteDisabled,
   leading,
 }: {
   sessionId: string;
   primaryButton: React.ReactNode;
-  extraMenuItems?: React.ReactNode;
+  extraMenuActions?: SessionMenuAction[];
   onDelete: () => void;
   deleteDisabled: boolean;
   leading?: React.ReactNode;
 }) {
   const session = useAppState((x) => x.sessions[sessionId]);
+  const menuActions: SessionMenuAction[] = [
+    ...(extraMenuActions ?? []),
+    ...useCommonSessionMenuActions(session),
+    { type: "separator", key: "before-delete-session" },
+    {
+      type: "item",
+      key: "delete-session",
+      label: "Delete session",
+      icon: TrashIcon,
+      onSelect: onDelete,
+      disabled: deleteDisabled,
+      variant: "destructive",
+    },
+  ];
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <SessionSidebarItemTrigger sessionId={sessionId} leading={leading}>
           {primaryButton}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="pointer-events-auto hidden size-7 items-center justify-center rounded-md text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:flex"
+                aria-label="Session actions"
+                title="Session actions"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <MoreHorizontal className="size-4" aria-hidden="true" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {renderDropdownMenuActions(menuActions)}
+            </DropdownMenuContent>
+          </DropdownMenu>
           <SidebarIconButton
             icon={TrashIcon}
             label="Delete session"
@@ -387,8 +577,7 @@ export function BaseSessionSidebarItem({
         </SessionSidebarItemTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        {extraMenuItems}
-        <CommonSessionContextMenuItems session={session} />
+        {renderContextMenuActions(menuActions)}
       </ContextMenuContent>
     </ContextMenu>
   );

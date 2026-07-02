@@ -191,6 +191,7 @@ describe("SessionsServiceNew", () => {
         expect.objectContaining({
           env: expect.objectContaining({
             AGENT_UI_STATE_FILE: "/tmp/test-state.ndjson",
+            CLAUDE_AFK_TIMEOUT_MS: "86400000",
           }),
         }),
       );

@@ -1,10 +1,12 @@
 import { LiveTerminalSurface } from "@renderer/components/live-terminal-surface";
+import { TerminalKeyBar } from "@renderer/components/terminal-key-bar";
 import { Button } from "@renderer/components/ui/button";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@renderer/components/ui/resizable";
+import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -66,7 +68,87 @@ function ProjectTerminalSurface({
   );
 }
 
+function ProjectTerminalStack({
+  hasCwd,
+  workspace,
+  activeTerminalId,
+  projectLocked,
+  isCreating,
+  onCreateTerminal,
+}: {
+  hasCwd: boolean;
+  workspace: {
+    selectedTerminalId: string | null;
+    order: string[];
+    terminals: Record<
+      string,
+      {
+        title: string;
+        status: string;
+      }
+    >;
+  } | null;
+  activeTerminalId: string | null;
+  projectLocked: boolean;
+  isCreating: boolean;
+  onCreateTerminal: () => void;
+}) {
+  return (
+    <div className="h-full min-w-0 bg-black/10">
+      {!hasCwd ? (
+        <div className="flex h-full items-center justify-center p-6">
+          <div className="max-w-xs space-y-2 text-center">
+            <p className="text-sm text-zinc-300">
+              Select a session to view project terminals.
+            </p>
+            <p className="text-xs text-zinc-500">
+              The terminal and project pane layout stays available here, even
+              when no session is selected.
+            </p>
+          </div>
+        </div>
+      ) : activeTerminalId && workspace?.terminals[activeTerminalId] ? (
+        <div className="relative h-full min-h-0">
+          {workspace.order.map((terminalId) => {
+            const terminal = workspace.terminals[terminalId];
+            if (!terminal) {
+              return null;
+            }
+
+            return (
+              <ProjectTerminalSurface
+                key={terminalId}
+                terminalId={terminalId}
+                isActive={terminalId === activeTerminalId}
+                projectLocked={projectLocked}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex h-full items-center justify-center p-6">
+          <div className="max-w-xs space-y-3 text-center">
+            <p className="text-sm text-zinc-300">
+              No terminal selected for this project.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => {
+                onCreateTerminal();
+              }}
+              disabled={isCreating || projectLocked}
+            >
+              Create terminal
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
+  const isMobile = useIsMobile();
   const hasCwd = Boolean(cwd);
   const projectLocked = useAppState((state) =>
     cwd
@@ -194,59 +276,100 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
     [cwd, projectLocked],
   );
 
+  const renderTerminalStack = () => (
+    <ProjectTerminalStack
+      hasCwd={hasCwd}
+      workspace={workspace}
+      activeTerminalId={activeTerminalId}
+      projectLocked={projectLocked}
+      isCreating={isCreating}
+      onCreateTerminal={() => {
+        void handleCreateTerminal();
+      }}
+    />
+  );
+
+  if (isMobile) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        {hasCwd ? (
+          <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/70 px-2 py-1">
+            {workspace?.order.map((terminalId) => {
+              const terminal = workspace.terminals[terminalId];
+              if (!terminal) {
+                return null;
+              }
+
+              const statusMeta = getTerminalStatusMeta(terminal.status);
+              const StatusIcon = statusMeta.icon;
+              const isActive = terminalId === activeTerminalId;
+              const isClosing = closingTerminalId === terminalId;
+              const isSelecting = selectingTerminalId === terminalId;
+
+              return (
+                <div
+                  key={terminalId}
+                  className={cn(
+                    "flex min-h-9 shrink-0 overflow-hidden rounded-md text-sm transition",
+                    isActive
+                      ? "bg-white/15 text-white"
+                      : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="flex min-h-9 items-center gap-1.5 px-2 text-left"
+                    onClick={() => {
+                      void handleSelectTerminal(terminalId);
+                    }}
+                    disabled={projectLocked || isClosing || isSelecting}
+                  >
+                    <StatusIcon
+                      className={cn("size-3 shrink-0", statusMeta.className)}
+                    />
+                    <span className="max-w-32 truncate text-xs">
+                      {terminal.title}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex min-h-9 w-8 shrink-0 items-center justify-center text-zinc-300 hover:bg-white/10 hover:text-white"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void handleCloseTerminal(terminalId);
+                    }}
+                    disabled={projectLocked || isClosing}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              );
+            })}
+            <Button
+              variant="flat"
+              className="h-9 w-9 shrink-0 px-0"
+              onClick={() => {
+                void handleCreateTerminal();
+              }}
+              disabled={isCreating || projectLocked}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          </div>
+        ) : null}
+
+        <div className="min-h-0 flex-1">{renderTerminalStack()}</div>
+        {activeTerminalId ? (
+          <TerminalKeyBar terminalId={activeTerminalId} />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
       <ResizablePanel defaultSize="80" minSize="40">
-        <div className="h-full min-w-0 bg-black/10">
-          {!hasCwd ? (
-            <div className="flex h-full items-center justify-center p-6">
-              <div className="max-w-xs space-y-2 text-center">
-                <p className="text-sm text-zinc-300">
-                  Select a session to view project terminals.
-                </p>
-                <p className="text-xs text-zinc-500">
-                  The terminal and project pane layout stays available here,
-                  even when no session is selected.
-                </p>
-              </div>
-            </div>
-          ) : activeTerminalId && workspace?.terminals[activeTerminalId] ? (
-            <div className="relative h-full min-h-0">
-              {workspace.order.map((terminalId) => {
-                const terminal = workspace.terminals[terminalId];
-                if (!terminal) {
-                  return null;
-                }
-
-                return (
-                  <ProjectTerminalSurface
-                    key={terminalId}
-                    terminalId={terminalId}
-                    isActive={terminalId === activeTerminalId}
-                    projectLocked={projectLocked}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <div className="flex h-full items-center justify-center p-6">
-              <div className="max-w-xs space-y-3 text-center">
-                <p className="text-sm text-zinc-300">
-                  No terminal selected for this project.
-                </p>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    void handleCreateTerminal();
-                  }}
-                  disabled={isCreating || projectLocked}
-                >
-                  Create terminal
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
+        {renderTerminalStack()}
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel defaultSize="20" minSize="12" maxSize="40">
@@ -298,7 +421,7 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                     <button
                       type="button"
                       className={cn(
-                        "flex w-full items-center gap-1.5 px-1.5 py-1 pr-7 text-left text-sm transition",
+                        "flex w-full items-center gap-1.5 px-1.5 py-1 pr-7 text-left text-sm transition pointer-coarse:py-2",
                         isActive
                           ? "bg-white/12 text-white"
                           : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
@@ -315,7 +438,7 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                     </button>
                     <Button
                       variant="flat"
-                      className="absolute inset-y-0 right-0 h-full w-7 px-0 opacity-0 group-hover/terminal:opacity-100"
+                      className="absolute inset-y-0 right-0 h-full w-7 px-0 opacity-0 group-hover/terminal:opacity-100 pointer-coarse:opacity-100"
                       disabled={projectLocked || isClosing}
                       onClick={() => {
                         void handleCloseTerminal(terminalId);

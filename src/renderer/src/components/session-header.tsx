@@ -1,4 +1,5 @@
 import type { Session } from "@main/sessions/state";
+import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import {
@@ -13,6 +14,7 @@ import {
   GitFork,
   Github,
   History,
+  Menu,
   TerminalSquare,
 } from "lucide-react";
 import {
@@ -111,6 +113,7 @@ const useSessionHeaderOpenAppStore = create(
 
 export function SessionHeader({ session }: { session: Session }) {
   const Icon = sessionTypeConfig[session.type]?.icon;
+  const openSidebar = useMobileNavStore((state) => state.openSidebar);
   const [menuOpen, setMenuOpen] = useState(false);
   const preferredApp = useSessionHeaderOpenAppStore(
     (state) => state.preferredApp,
@@ -218,6 +221,16 @@ export function SessionHeader({ session }: { session: Session }) {
 
   return (
     <header className="flex min-h-11 shrink-0 items-center gap-3 border-b border-border/70 px-2 py-1.5">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="size-8 px-0 md:hidden"
+        onClick={openSidebar}
+        aria-label="Open sessions menu"
+      >
+        <Menu className="size-4" />
+      </Button>
       {Icon ? <Icon className="size-4 shrink-0 text-muted-foreground" /> : null}
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{session.title}</div>
@@ -255,7 +268,7 @@ export function SessionHeader({ session }: { session: Session }) {
           ) : null}
         </div>
       ) : null}
-      <div className="flex shrink-0 items-center">
+      <div className="flex max-md:hidden shrink-0 items-center">
         {bottomPaneViewItems.map(({ view, icon: ViewIcon, label }, index) => (
           <Button
             key={view}
@@ -287,7 +300,7 @@ export function SessionHeader({ session }: { session: Session }) {
           </Button>
         ))}
       </div>
-      <div className="flex shrink-0 items-center">
+      <div className="flex max-md:hidden shrink-0 items-center">
         <Button
           type="button"
           variant="outline"

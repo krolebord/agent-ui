@@ -86,6 +86,7 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): {
 
   const env: Record<string, string> = {
     AGENT_UI_STATE_FILE: input.stateFilePath,
+    CLAUDE_AFK_TIMEOUT_MS: "86400000",
     CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: "true",
     CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1",
     DISABLE_BUG_COMMAND: "1",

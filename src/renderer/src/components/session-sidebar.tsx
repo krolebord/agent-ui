@@ -4,7 +4,6 @@ import { DragDropProvider, PointerSensor } from "@dnd-kit/react";
 import { isSortable, useSortable } from "@dnd-kit/react/sortable";
 import type { Session } from "@main/sessions/state";
 import { Button } from "@renderer/components/ui/button";
-import { ContextMenuItem } from "@renderer/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +13,7 @@ import {
 } from "@renderer/components/ui/dropdown-menu";
 import { UsagePanel } from "@renderer/components/usage-panel";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
+import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -52,6 +52,7 @@ import { RawSessionStateDialog } from "./raw-session-state-dialog";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import {
   BaseSessionSidebarItem,
+  type SessionMenuAction,
   SidebarIconButton,
   statusIndicatorMeta,
 } from "./session-sidebar-item";
@@ -390,7 +391,7 @@ export function SessionSidebar() {
                 <div className="flex items-center">
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition"
+                    className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition pointer-coarse:py-2"
                   >
                     <span className="inline-flex w-4 shrink-0" />
                     <FolderOpen
@@ -528,7 +529,7 @@ function SortableProjectGroup({
           }}
           disabled={locked}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-1.5 pl-1.5 pr-[3rem] py-1 text-left transition hover:bg-white/8",
+            "flex min-w-0 flex-1 items-center gap-1.5 py-1 pl-1.5 pr-[3rem] text-left transition hover:bg-white/8 pointer-coarse:py-2",
             locked
               ? "cursor-not-allowed"
               : "cursor-grab active:cursor-grabbing",
@@ -592,7 +593,7 @@ function SortableProjectGroup({
             ) : null}
           </span>
         </button>
-        <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition group-hover/project:opacity-100 group-focus-within/project:opacity-100">
+        <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition group-hover/project:opacity-100 group-focus-within/project:opacity-100 pointer-coarse:opacity-100">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <SidebarIconButton
@@ -737,6 +738,11 @@ function navigateAwayIfActive(sessionId: string) {
   }
 }
 
+function activateSessionAndCloseSidebar(sessionId: string) {
+  useActiveSessionStore.getState().setActiveSessionId(sessionId);
+  useMobileNavStore.getState().closeSidebar();
+}
+
 function ClaudeLocalTerminalSessionSidebarItem({
   sessionId,
 }: {
@@ -778,9 +784,20 @@ function ClaudeLocalTerminalSessionSidebarItem({
       });
     },
     onSuccess: (newId) => {
-      useActiveSessionStore.getState().setActiveSessionId(newId);
+      activateSessionAndCloseSidebar(newId);
     },
   });
+
+  const extraMenuActions: SessionMenuAction[] = [
+    {
+      type: "item",
+      key: "fork-session",
+      label: "Fork session",
+      icon: GitFork,
+      onSelect: () => forkMutation.mutate(sessionId),
+      disabled: forkMutation.isPending,
+    },
+  ];
 
   return (
     <BaseSessionSidebarItem
@@ -802,15 +819,7 @@ function ClaudeLocalTerminalSessionSidebarItem({
           />
         )
       }
-      extraMenuItems={
-        <ContextMenuItem
-          onClick={() => forkMutation.mutate(sessionId)}
-          disabled={forkMutation.isPending}
-        >
-          <GitFork className="size-3.5" />
-          Fork session
-        </ContextMenuItem>
-      }
+      extraMenuActions={extraMenuActions}
       onDelete={() => deleteMutation.mutate(sessionId)}
       deleteDisabled={deleteMutation.isPending}
     />
@@ -859,7 +868,7 @@ function CodexLocalTerminalSessionSidebarItem({
       });
     },
     onSuccess: ({ sessionId: newId }) => {
-      useActiveSessionStore.getState().setActiveSessionId(newId);
+      activateSessionAndCloseSidebar(newId);
     },
     onError: (error) => {
       toast.error(
@@ -885,6 +894,16 @@ function CodexLocalTerminalSessionSidebarItem({
       Boolean(subagent),
     );
   const hasSubagents = subagents.length > 0;
+  const extraMenuActions: SessionMenuAction[] = [
+    {
+      type: "item",
+      key: "fork-session",
+      label: "Fork session",
+      icon: GitFork,
+      onSelect: () => forkMutation.mutate(sessionId),
+      disabled: forkMutation.isPending || !session.codexSessionId,
+    },
+  ];
 
   return (
     <>
@@ -932,15 +951,7 @@ function CodexLocalTerminalSessionSidebarItem({
             />
           )
         }
-        extraMenuItems={
-          <ContextMenuItem
-            onClick={() => forkMutation.mutate(sessionId)}
-            disabled={forkMutation.isPending || !session.codexSessionId}
-          >
-            <GitFork className="size-3.5" />
-            Fork session
-          </ContextMenuItem>
-        }
+        extraMenuActions={extraMenuActions}
         onDelete={() => deleteMutation.mutate(sessionId)}
         deleteDisabled={deleteMutation.isPending}
       />
@@ -980,10 +991,15 @@ function CodexSubagentSidebarItem({
 
   return (
     <li
-      className="flex min-h-6 items-center gap-1.5 py-0.5 pl-10 pr-2 text-xs text-zinc-400"
+      className="flex min-h-6 items-center gap-1.5 py-0.5 pl-10 pr-2 text-xs text-zinc-400 pointer-coarse:min-h-10 pointer-coarse:py-2"
       title={title || undefined}
     >
-      <span className="inline-flex shrink-0" title={statusMeta.label}>
+      <span
+        className="inline-flex shrink-0"
+        title={statusMeta.label}
+        role="img"
+        aria-label={statusMeta.label}
+      >
         <statusMeta.icon
           className={cn(
             "size-3",

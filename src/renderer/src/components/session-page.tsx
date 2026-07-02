@@ -1,6 +1,11 @@
+import { ProjectDiffPane } from "@renderer/components/diff-review-pane";
+import { ProjectGitHistoryPane } from "@renderer/components/git-history-pane";
 import { LiveTerminalSurface } from "@renderer/components/live-terminal-surface";
 import { ProjectBottomPane } from "@renderer/components/project-bottom-pane";
+import { ProjectTerminalPane } from "@renderer/components/project-terminal-pane";
 import { SessionHeader } from "@renderer/components/session-header";
+import { TerminalKeyBar } from "@renderer/components/terminal-key-bar";
+import { Button } from "@renderer/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -12,14 +17,22 @@ import {
   ResizablePanelGroup,
 } from "@renderer/components/ui/resizable";
 import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
+import { useIsMobile } from "@renderer/hooks/use-is-mobile";
+import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
+import { cn } from "@renderer/lib/utils";
 import {
   AlertCircle,
   ChevronRight,
   CircleCheck,
   CircleX,
+  FileDiff,
+  History,
   LoaderCircle,
+  Menu,
+  SquareTerminal,
+  TerminalSquare,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { useAppState } from "./sync-state-provider";
 import { WelcomePage } from "./welcome-page";
 
@@ -31,6 +44,39 @@ function useActiveSession() {
 
 type Session = Exclude<ReturnType<typeof useActiveSession>, null>;
 
+type MobileTab = "session" | "diff" | "history" | "terminals";
+
+const mobileTabItems: Array<{
+  tab: MobileTab;
+  icon: typeof SquareTerminal;
+  label: string;
+}> = [
+  { tab: "session", icon: SquareTerminal, label: "Session" },
+  { tab: "diff", icon: FileDiff, label: "Diff" },
+  { tab: "history", icon: History, label: "History" },
+  { tab: "terminals", icon: TerminalSquare, label: "Shell" },
+];
+
+function MobileWelcomeBar() {
+  const openSidebar = useMobileNavStore((state) => state.openSidebar);
+
+  return (
+    <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border/70 px-2 py-1.5 md:hidden">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="size-8 px-0"
+        onClick={openSidebar}
+        aria-label="Open sessions menu"
+      >
+        <Menu className="size-4" />
+      </Button>
+      <span className="text-sm font-medium">Agent UI</span>
+    </div>
+  );
+}
+
 export function SessionPage() {
   const session = useActiveSession();
   const projectCount = useAppState((state) => state.projects.length);
@@ -38,36 +84,28 @@ export function SessionPage() {
   if (!session) {
     return (
       <SessionPageLayout
-        topPane={<WelcomePage hasProjects={projectCount > 0} />}
-        bottomPane={<ProjectBottomPane cwd={null} />}
+        topPane={
+          <div className="flex h-full min-h-0 flex-col">
+            <MobileWelcomeBar />
+            <div className="min-h-0 flex-1">
+              <WelcomePage hasProjects={projectCount > 0} />
+            </div>
+          </div>
+        }
+        cwd={null}
       />
     );
   }
 
   switch (session.type) {
     case "claude-local-terminal":
-      return (
-        <TerminalPage
-          session={session}
-          bottomPane={<ProjectBottomPane cwd={session.startupConfig.cwd} />}
-        />
-      );
+      return <TerminalPage session={session} cwd={session.startupConfig.cwd} />;
     case "local-terminal":
       return null;
     case "codex-local-terminal":
-      return (
-        <TerminalPage
-          session={session}
-          bottomPane={<ProjectBottomPane cwd={session.startupConfig.cwd} />}
-        />
-      );
+      return <TerminalPage session={session} cwd={session.startupConfig.cwd} />;
     case "cursor-agent":
-      return (
-        <TerminalPage
-          session={session}
-          bottomPane={<ProjectBottomPane cwd={session.startupConfig.cwd} />}
-        />
-      );
+      return <TerminalPage session={session} cwd={session.startupConfig.cwd} />;
     case "worktree-setup":
       return <WorktreeSetupSessionPage session={session} />;
     default:
@@ -95,7 +133,7 @@ function WorktreeSetupSessionPage({
           </div>
         </div>
       }
-      bottomPane={<ProjectBottomPane cwd={session.startupConfig.cwd} />}
+      cwd={session.startupConfig.cwd}
     />
   );
 }
@@ -147,13 +185,14 @@ function TerminalPage({
   session,
   readOnly,
   controls,
-  bottomPane,
+  cwd,
 }: {
   session: Session;
   readOnly?: boolean;
   controls?: ReactNode;
-  bottomPane?: ReactNode;
+  cwd: string | null;
 }) {
+  const isMobile = useIsMobile();
   const errorMessage = session.errorMessage || session.warningMessage || "";
   const terminalAttachmentState =
     session.status === "stopped" || session.status === "error"
@@ -162,6 +201,7 @@ function TerminalPage({
 
   return (
     <SessionPageLayout
+      cwd={cwd}
       topPane={
         <div className="flex h-full min-h-0 flex-col">
           <SessionHeader session={session} />
@@ -181,20 +221,80 @@ function TerminalPage({
               attachKey={`${session.sessionId}:${terminalAttachmentState}`}
             />
           </div>
+          {isMobile ? <TerminalKeyBar terminalId={session.sessionId} /> : null}
         </div>
       }
-      bottomPane={bottomPane}
     />
   );
 }
 
 function SessionPageLayout({
   topPane,
-  bottomPane,
+  cwd,
 }: {
   topPane: ReactNode;
-  bottomPane?: ReactNode;
+  cwd: string | null;
 }) {
+  const isMobile = useIsMobile();
+  const [activeTab, setActiveTab] = useState<MobileTab>("session");
+
+  if (isMobile) {
+    if (!cwd) {
+      return <div className="min-h-0 flex-1">{topPane}</div>;
+    }
+
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1">
+          <div
+            className={cn(
+              "min-h-0 h-full",
+              activeTab !== "session" && "hidden",
+            )}
+          >
+            {topPane}
+          </div>
+          {activeTab === "diff" ? (
+            <div className="min-h-0 h-full">
+              <ProjectDiffPane cwd={cwd} />
+            </div>
+          ) : null}
+          {activeTab === "history" ? (
+            <div className="min-h-0 h-full">
+              <ProjectGitHistoryPane cwd={cwd} />
+            </div>
+          ) : null}
+          {activeTab === "terminals" ? (
+            <div className="min-h-0 h-full">
+              <ProjectTerminalPane cwd={cwd} />
+            </div>
+          ) : null}
+        </div>
+        <nav className="shrink-0 border-t border-border/70 bg-background pb-[env(safe-area-inset-bottom)]">
+          <div className="flex h-12">
+            {mobileTabItems.map(({ tab, icon: TabIcon, label }) => (
+              <button
+                key={tab}
+                type="button"
+                className={cn(
+                  "flex flex-1 flex-col items-center justify-center gap-0.5",
+                  activeTab === tab
+                    ? "text-foreground"
+                    : "text-muted-foreground",
+                )}
+                aria-pressed={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+              >
+                <TabIcon className="size-4" />
+                <span className="text-[10px]">{label}</span>
+              </button>
+            ))}
+          </div>
+        </nav>
+      </div>
+    );
+  }
+
   return (
     <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
       <ResizablePanel defaultSize={70} minSize={35}>
@@ -202,7 +302,7 @@ function SessionPageLayout({
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel defaultSize={30} minSize={15}>
-        {bottomPane ?? <div className="h-full bg-black/10" />}
+        <ProjectBottomPane cwd={cwd} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );

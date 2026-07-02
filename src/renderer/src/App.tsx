@@ -15,9 +15,17 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@renderer/components/ui/resizable";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+} from "@renderer/components/ui/sheet";
 import { Toaster } from "@renderer/components/ui/sonner";
 import { WorktreeDeleteDialog } from "@renderer/components/worktree-delete-dialog";
 import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
+import { useIsMobile } from "@renderer/hooks/use-is-mobile";
+import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { useEffect } from "react";
 import { useAppState } from "./components/sync-state-provider";
 import { diffsWorkerFactory } from "./diff-worker";
@@ -37,9 +45,52 @@ function useValidateActiveSession() {
   }, [activeSessionId, sessions]);
 }
 
+function DesktopAppShell() {
+  return (
+    <ResizablePanelGroup orientation="horizontal">
+      <ResizablePanel defaultSize="18" minSize="12" maxSize="35">
+        <SessionSidebar />
+      </ResizablePanel>
+      <ResizableHandle />
+      <ResizablePanel>
+        <main className="flex h-full min-w-0 flex-col bg-black/15">
+          <SessionPage />
+        </main>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
+}
+
+function MobileAppShell() {
+  const sidebarOpen = useMobileNavStore((state) => state.sidebarOpen);
+  const setSidebarOpen = useMobileNavStore((state) => state.setSidebarOpen);
+
+  return (
+    <>
+      <main className="flex h-full min-w-0 flex-col bg-black/15">
+        <SessionPage />
+      </main>
+      <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
+        <SheetContent
+          side="left"
+          showCloseButton={false}
+          className="w-[85vw] max-w-sm gap-0 p-0"
+        >
+          <SheetTitle className="sr-only">Sessions</SheetTitle>
+          <SheetDescription className="sr-only">
+            Browse and switch between sessions
+          </SheetDescription>
+          <SessionSidebar />
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
 function App() {
   useAppShortcuts();
   useValidateActiveSession();
+  const isMobile = useIsMobile();
 
   return (
     <>
@@ -52,18 +103,8 @@ function App() {
           langs: ["typescript", "javascript", "css", "html"],
         }}
       >
-        <div className="h-screen overflow-hidden">
-          <ResizablePanelGroup orientation="horizontal">
-            <ResizablePanel defaultSize="18" minSize="12" maxSize="35">
-              <SessionSidebar />
-            </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel>
-              <main className="flex h-full min-w-0 flex-col bg-black/15">
-                <SessionPage />
-              </main>
-            </ResizablePanel>
-          </ResizablePanelGroup>
+        <div className="h-dvh overflow-hidden">
+          {isMobile ? <MobileAppShell /> : <DesktopAppShell />}
         </div>
       </WorkerPoolContextProvider>
 

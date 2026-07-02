@@ -6,6 +6,7 @@ import {
   useDiffViewMode,
 } from "@renderer/components/diff-view-mode";
 import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
+import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import type { GitHistoryCommit } from "@shared/claude-types";
@@ -19,6 +20,8 @@ import {
 import {
   ArrowUp,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   FileMinus,
   FilePlus,
@@ -29,7 +32,14 @@ import {
   RefreshCw,
   Tag,
 } from "lucide-react";
-import { createContext, useContext, useMemo, useRef } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { createStore, type ExtractState } from "zustand";
 import { combine } from "zustand/middleware";
@@ -166,28 +176,35 @@ function useGitHistoryStore<T>(
 function CommitListItem({
   commit,
   selected,
+  onSelect,
 }: {
   commit: GitHistoryCommit;
   selected: boolean;
+  onSelect?: () => void;
 }) {
   const selectCommit = useGitHistoryStore((s) => s.selectCommit);
   const tags = commitTags(commit);
+
+  const handleSelect = () => {
+    selectCommit(commit.hash);
+    onSelect?.();
+  };
 
   return (
     <div
       role="option"
       tabIndex={-1}
       className={cn(
-        "flex w-full cursor-pointer flex-col gap-0.5 border-b border-border/40 px-2 py-1.5 text-left transition outline-none",
+        "flex w-full cursor-pointer flex-col gap-0.5 border-b border-border/40 px-2 py-1.5 text-left transition outline-none pointer-coarse:py-2",
         selected
           ? "bg-white/12 text-white"
-          : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
+          : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200 active:bg-white/8",
       )}
-      onClick={() => selectCommit(commit.hash)}
+      onClick={handleSelect}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          selectCommit(commit.hash);
+          handleSelect();
         }
       }}
       aria-selected={selected}
@@ -238,9 +255,11 @@ function CommitListItem({
 function CommitFileListItem({
   file,
   selected,
+  onSelect,
 }: {
   file: FileDiffMetadata;
   selected: boolean;
+  onSelect?: () => void;
 }) {
   const selectFile = useGitHistoryStore((s) => s.selectFile);
   const Icon = fileTypeIcon(file);
@@ -256,21 +275,26 @@ function CommitFileListItem({
     ? file.name.slice(0, file.name.lastIndexOf("/"))
     : null;
 
+  const handleSelect = () => {
+    selectFile(file.name);
+    onSelect?.();
+  };
+
   return (
     <div
       role="option"
       tabIndex={-1}
       className={cn(
-        "flex w-full cursor-pointer items-center gap-1.5 px-1.5 py-1 text-left text-sm transition outline-none",
+        "flex w-full cursor-pointer items-center gap-1.5 px-1.5 py-1 text-left text-sm transition outline-none pointer-coarse:px-2 pointer-coarse:py-2",
         selected
           ? "bg-white/12 text-white"
-          : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
+          : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200 active:bg-white/8",
       )}
-      onClick={() => selectFile(file.name)}
+      onClick={handleSelect}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           e.preventDefault();
-          selectFile(file.name);
+          handleSelect();
         }
       }}
       aria-selected={selected}
@@ -310,9 +334,11 @@ function CommitFileListItem({
 function CommitDetailsHeader({
   commit,
   files,
+  showDiffViewToggle = true,
 }: {
   commit: GitHistoryCommit;
   files: FileDiffMetadata[];
+  showDiffViewToggle?: boolean;
 }) {
   const { copied, copy } = useCopyToClipboard();
   const shortHash = commit.hash.slice(0, 7);
@@ -380,6 +406,94 @@ function CommitDetailsHeader({
           <Copy className="size-2.5" />
         )}
         {shortHash}
+      </Button>
+      {showDiffViewToggle ? <DiffViewModeToggle /> : null}
+    </header>
+  );
+}
+
+type MobileGitHistoryScreen = "commits" | "commit-detail" | "file-diff";
+
+function MobileCommitDetailHeader({
+  subject,
+  onBack,
+}: {
+  subject: string;
+  onBack: () => void;
+}) {
+  return (
+    <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border/70 bg-black/15 px-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0 text-muted-foreground hover:text-zinc-200 pointer-coarse:size-10"
+        onClick={onBack}
+        aria-label="Back to commit list"
+      >
+        <ChevronLeft className="size-5 pointer-coarse:size-6" />
+      </Button>
+      <span className="min-w-0 flex-1 truncate text-sm font-medium">
+        {subject}
+      </span>
+    </header>
+  );
+}
+
+function MobileFileDiffHeader({
+  filePath,
+  onBack,
+  onPreviousFile,
+  onNextFile,
+  canGoPrevious,
+  canGoNext,
+}: {
+  filePath: string;
+  onBack: () => void;
+  onPreviousFile: () => void;
+  onNextFile: () => void;
+  canGoPrevious: boolean;
+  canGoNext: boolean;
+}) {
+  return (
+    <header className="flex h-11 shrink-0 items-center gap-1 border-b border-border/70 bg-black/15 px-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0 text-muted-foreground hover:text-zinc-200 pointer-coarse:size-10"
+        onClick={onBack}
+        aria-label="Back to commit details"
+      >
+        <ChevronLeft className="size-5 pointer-coarse:size-6" />
+      </Button>
+      <span
+        className="min-w-0 flex-1 truncate font-mono text-xs"
+        title={filePath}
+      >
+        {filePath}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0 text-muted-foreground hover:text-zinc-200 pointer-coarse:size-10"
+        disabled={!canGoPrevious}
+        onClick={onPreviousFile}
+        aria-label="Previous changed file"
+      >
+        <ChevronLeft className="size-4 pointer-coarse:size-5" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8 shrink-0 text-muted-foreground hover:text-zinc-200 pointer-coarse:size-10"
+        disabled={!canGoNext}
+        onClick={onNextFile}
+        aria-label="Next changed file"
+      >
+        <ChevronRight className="size-4 pointer-coarse:size-5" />
       </Button>
       <DiffViewModeToggle />
     </header>
@@ -509,6 +623,291 @@ function ProjectGitHistoryPaneContent() {
     { enabled: Boolean(files?.length) },
   );
 
+  const isMobile = useIsMobile();
+  const [mobileScreen, setMobileScreen] =
+    useState<MobileGitHistoryScreen>("commits");
+
+  useEffect(() => {
+    if (!isMobile) return;
+    if (!selectedCommitHash) {
+      setMobileScreen("commits");
+      return;
+    }
+    if (mobileScreen === "file-diff" && !selectedFilePath) {
+      setMobileScreen("commit-detail");
+    }
+  }, [isMobile, selectedCommitHash, selectedFilePath, mobileScreen]);
+
+  const canGoPreviousFile = selectedFileIndex > 0;
+  const canGoNextFile = Boolean(
+    files?.length && selectedFileIndex < files.length - 1,
+  );
+
+  const goToPreviousFile = () => {
+    if (!files?.length || !canGoPreviousFile) return;
+    selectFile(files[selectedFileIndex - 1].name);
+  };
+
+  const goToNextFile = () => {
+    if (!files?.length || !canGoNextFile) return;
+    selectFile(files[selectedFileIndex + 1].name);
+  };
+
+  const commitsListPanel = (
+    asideClassName?: string,
+    onCommitSelect?: () => void,
+  ) => (
+    <aside
+      className={cn(
+        "flex h-full flex-col border-r border-border/70 bg-black/15",
+        asideClassName,
+      )}
+    >
+      <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2">
+        <History className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+          History
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-5 shrink-0 text-muted-foreground hover:text-zinc-200 pointer-coarse:size-8"
+          disabled={historyQuery.isRefetching}
+          onClick={() => void historyQuery.refetch()}
+          aria-label="Refresh history"
+          title="Refresh history"
+        >
+          <RefreshCw
+            className={cn(
+              "size-3 pointer-coarse:size-4",
+              historyQuery.isRefetching && "animate-spin",
+            )}
+          />
+        </Button>
+      </div>
+
+      <div
+        className="min-h-0 flex-1 overflow-y-auto"
+        role="listbox"
+        aria-label="Commit history"
+      >
+        {historyQuery.isLoading ? (
+          <div className="flex h-full items-center justify-center">
+            <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
+          </div>
+        ) : commits.length ? (
+          <>
+            {commits.map((commit) => (
+              <CommitListItem
+                key={commit.hash}
+                commit={commit}
+                selected={selectedCommit?.hash === commit.hash}
+                onSelect={onCommitSelect}
+              />
+            ))}
+            {historyQuery.hasNextPage ? (
+              <div className="p-1.5 pointer-coarse:p-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 w-full px-2 text-[11px] pointer-coarse:h-10 pointer-coarse:text-xs"
+                  disabled={historyQuery.isFetchingNextPage}
+                  onClick={() => void historyQuery.fetchNextPage()}
+                >
+                  {historyQuery.isFetchingNextPage ? (
+                    <LoaderCircle className="size-2.5 animate-spin" />
+                  ) : null}
+                  Load more
+                </Button>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p className="px-2 py-4 text-xs text-zinc-500">
+            {historyQuery.isError
+              ? "Failed to load commit history"
+              : "No commits yet"}
+          </p>
+        )}
+      </div>
+
+      <div className="shrink-0 border-t border-border/70 p-1.5 pointer-coarse:p-2">
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          className="h-7 w-full px-2 text-xs pointer-coarse:h-10"
+          disabled={
+            pushMutation.isPending ||
+            projectLocked ||
+            commits.length === 0 ||
+            (hasUpstream && aheadCommits === 0)
+          }
+          onClick={() => pushMutation.mutate({ path: projectPath })}
+          title={
+            upstreamStats
+              ? `Push to ${upstreamStats.upstreamBranch}`
+              : "Publish the current branch to origin"
+          }
+        >
+          {pushMutation.isPending ? (
+            <LoaderCircle className="size-3 animate-spin" />
+          ) : (
+            <ArrowUp className="size-3" />
+          )}
+          {hasUpstream
+            ? `Push${aheadCommits > 0 ? ` (${aheadCommits})` : ""}`
+            : "Publish branch"}
+        </Button>
+      </div>
+    </aside>
+  );
+
+  const commitDiffViewer = (includeDetailsHeader: boolean) => (
+    <>
+      {selectedCommit ? (
+        <>
+          {includeDetailsHeader ? (
+            <CommitDetailsHeader commit={selectedCommit} files={files ?? []} />
+          ) : null}
+          <div className="min-h-0 flex-1 overflow-auto">
+            {diffQuery.isLoading ? (
+              <div className="flex h-full items-center justify-center">
+                <LoaderCircle className="text-muted-foreground size-6 animate-spin" />
+              </div>
+            ) : selectedFile ? (
+              <FileDiff fileDiff={selectedFile} options={diffOptions} />
+            ) : (
+              <div className="flex h-full items-center justify-center">
+                <p className="text-muted-foreground text-sm">
+                  {diffQuery.isError
+                    ? "Failed to load commit diff"
+                    : "No changes in this commit"}
+                </p>
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="flex h-full items-center justify-center">
+          <p className="text-muted-foreground text-sm">
+            Select a commit to view its changes
+          </p>
+        </div>
+      )}
+    </>
+  );
+
+  const changedFilesList = (
+    asideClassName?: string,
+    onFileSelect?: () => void,
+  ) => (
+    <aside
+      className={cn(
+        "flex h-full flex-col border-l border-border/70 bg-black/15",
+        asideClassName,
+      )}
+    >
+      <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2">
+        <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+          {files
+            ? `${files.length} changed file${files.length === 1 ? "" : "s"}`
+            : "Changed files"}
+        </span>
+      </div>
+      <div
+        className="min-h-0 flex-1 overflow-y-auto py-1"
+        role="listbox"
+        aria-label="Files changed in commit"
+      >
+        {!selectedCommit || diffQuery.isLoading ? (
+          diffQuery.isLoading ? (
+            <div className="flex h-full items-center justify-center">
+              <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
+            </div>
+          ) : null
+        ) : files?.length ? (
+          files.map((file) => (
+            <CommitFileListItem
+              key={file.name}
+              file={file}
+              selected={!!selectedFile && selectedFile.name === file.name}
+              onSelect={onFileSelect}
+            />
+          ))
+        ) : (
+          <p className="px-2 py-4 text-xs text-zinc-500">No changes</p>
+        )}
+      </div>
+    </aside>
+  );
+
+  if (isMobile) {
+    if (mobileScreen === "commits") {
+      return (
+        <div className="h-full min-h-0">
+          {commitsListPanel("border-r-0", () =>
+            setMobileScreen("commit-detail"),
+          )}
+        </div>
+      );
+    }
+
+    if (mobileScreen === "commit-detail") {
+      return (
+        <div className="flex h-full min-h-0 flex-col bg-black/10">
+          {selectedCommit ? (
+            <>
+              <MobileCommitDetailHeader
+                subject={
+                  selectedCommit.subject || selectedCommit.hash.slice(0, 7)
+                }
+                onBack={() => setMobileScreen("commits")}
+              />
+              <CommitDetailsHeader
+                commit={selectedCommit}
+                files={files ?? []}
+                showDiffViewToggle={false}
+              />
+              {changedFilesList("min-h-0 flex-1 border-l-0", () =>
+                setMobileScreen("file-diff"),
+              )}
+            </>
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-muted-foreground text-sm">
+                Select a commit to view its changes
+              </p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-black/10">
+        {selectedCommit && selectedFilePath && selectedFile ? (
+          <>
+            <MobileFileDiffHeader
+              filePath={selectedFile.name}
+              onBack={() => setMobileScreen("commit-detail")}
+              onPreviousFile={goToPreviousFile}
+              onNextFile={goToNextFile}
+              canGoPrevious={canGoPreviousFile}
+              canGoNext={canGoNextFile}
+            />
+            <div className="flex min-h-0 flex-1 flex-col">
+              {commitDiffViewer(false)}
+            </div>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <ResizablePanelGroup
       onLayoutChanged={(e) => {
@@ -523,182 +922,21 @@ function ProjectGitHistoryPaneContent() {
       className="h-full min-h-0"
     >
       <ResizablePanel id="history-commits" defaultSize={commitsSize}>
-        <aside className="flex h-full flex-col border-r border-border/70 bg-black/15">
-          <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2">
-            <History className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-xs font-medium">
-              History
-            </span>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-5 shrink-0 text-muted-foreground hover:text-zinc-200"
-              disabled={historyQuery.isRefetching}
-              onClick={() => void historyQuery.refetch()}
-              aria-label="Refresh history"
-              title="Refresh history"
-            >
-              <RefreshCw
-                className={cn(
-                  "size-3",
-                  historyQuery.isRefetching && "animate-spin",
-                )}
-              />
-            </Button>
-          </div>
-
-          <div
-            className="min-h-0 flex-1 overflow-y-auto"
-            role="listbox"
-            aria-label="Commit history"
-          >
-            {historyQuery.isLoading ? (
-              <div className="flex h-full items-center justify-center">
-                <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
-              </div>
-            ) : commits.length ? (
-              <>
-                {commits.map((commit) => (
-                  <CommitListItem
-                    key={commit.hash}
-                    commit={commit}
-                    selected={selectedCommit?.hash === commit.hash}
-                  />
-                ))}
-                {historyQuery.hasNextPage ? (
-                  <div className="p-1.5">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-6 w-full px-2 text-[11px]"
-                      disabled={historyQuery.isFetchingNextPage}
-                      onClick={() => void historyQuery.fetchNextPage()}
-                    >
-                      {historyQuery.isFetchingNextPage ? (
-                        <LoaderCircle className="size-2.5 animate-spin" />
-                      ) : null}
-                      Load more
-                    </Button>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="px-2 py-4 text-xs text-zinc-500">
-                {historyQuery.isError
-                  ? "Failed to load commit history"
-                  : "No commits yet"}
-              </p>
-            )}
-          </div>
-
-          <div className="shrink-0 border-t border-border/70 p-1.5">
-            <Button
-              type="button"
-              variant="default"
-              size="sm"
-              className="h-7 w-full px-2 text-xs"
-              disabled={
-                pushMutation.isPending ||
-                projectLocked ||
-                commits.length === 0 ||
-                (hasUpstream && aheadCommits === 0)
-              }
-              onClick={() => pushMutation.mutate({ path: projectPath })}
-              title={
-                upstreamStats
-                  ? `Push to ${upstreamStats.upstreamBranch}`
-                  : "Publish the current branch to origin"
-              }
-            >
-              {pushMutation.isPending ? (
-                <LoaderCircle className="size-3 animate-spin" />
-              ) : (
-                <ArrowUp className="size-3" />
-              )}
-              {hasUpstream
-                ? `Push${aheadCommits > 0 ? ` (${aheadCommits})` : ""}`
-                : "Publish branch"}
-            </Button>
-          </div>
-        </aside>
+        {commitsListPanel()}
       </ResizablePanel>
 
       <ResizableHandle />
 
       <ResizablePanel>
         <main className="flex h-full min-w-0 flex-col bg-black/10">
-          {selectedCommit ? (
-            <>
-              <CommitDetailsHeader
-                commit={selectedCommit}
-                files={files ?? []}
-              />
-              <div className="min-h-0 flex-1 overflow-auto">
-                {diffQuery.isLoading ? (
-                  <div className="flex h-full items-center justify-center">
-                    <LoaderCircle className="text-muted-foreground size-6 animate-spin" />
-                  </div>
-                ) : selectedFile ? (
-                  <FileDiff fileDiff={selectedFile} options={diffOptions} />
-                ) : (
-                  <div className="flex h-full items-center justify-center">
-                    <p className="text-muted-foreground text-sm">
-                      {diffQuery.isError
-                        ? "Failed to load commit diff"
-                        : "No changes in this commit"}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-muted-foreground text-sm">
-                Select a commit to view its changes
-              </p>
-            </div>
-          )}
+          {commitDiffViewer(true)}
         </main>
       </ResizablePanel>
 
       <ResizableHandle />
 
       <ResizablePanel id="history-files" defaultSize={filesSize}>
-        <aside className="flex h-full flex-col border-l border-border/70 bg-black/15">
-          <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-border/70 px-2">
-            <FileText className="size-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-xs font-medium">
-              {files
-                ? `${files.length} changed file${files.length === 1 ? "" : "s"}`
-                : "Changed files"}
-            </span>
-          </div>
-          <div
-            className="min-h-0 flex-1 overflow-y-auto py-1"
-            role="listbox"
-            aria-label="Files changed in commit"
-          >
-            {!selectedCommit || diffQuery.isLoading ? (
-              diffQuery.isLoading ? (
-                <div className="flex h-full items-center justify-center">
-                  <LoaderCircle className="text-muted-foreground size-4 animate-spin" />
-                </div>
-              ) : null
-            ) : files?.length ? (
-              files.map((file) => (
-                <CommitFileListItem
-                  key={file.name}
-                  file={file}
-                  selected={!!selectedFile && selectedFile.name === file.name}
-                />
-              ))
-            ) : (
-              <p className="px-2 py-4 text-xs text-zinc-500">No changes</p>
-            )}
-          </div>
-        </aside>
+        {changedFilesList()}
       </ResizablePanel>
     </ResizablePanelGroup>
   );
