@@ -181,13 +181,6 @@ export function UsagePanel() {
     if (cursorAgentQuery.data?.ok && cursorAgentQuery.data.usage) {
       const usage = cursorAgentQuery.data.usage;
       const plan = usage.planUsage;
-      const spent = plan.includedSpend / 100;
-      const limit = plan.limit != null ? plan.limit / 100 : null;
-      const planPct = Math.round(plan.totalPercentUsed);
-      const planValueLabel =
-        limit != null
-          ? `$${spent.toFixed(2)} / $${limit.toFixed(2)}`
-          : `${planPct}%`;
       const planLabel = formatMembership(usage.membershipType) ?? "Plan";
 
       const slData = usage.spendLimitUsage;
@@ -233,12 +226,12 @@ export function UsagePanel() {
       return (
         <div className="border-t border-border/70 p-2">
           <div className="space-y-1.5">
-            <MetricBar
-              label={planLabel}
-              subLabel={cycleEndLabel ? `resets ${cycleEndLabel}` : null}
-              valueLabel={planValueLabel}
-              pct={planPct}
-            />
+            {cycleEndLabel ? (
+              <div className="text-[10px] text-zinc-500">
+                {planLabel}
+                {` (resets ${cycleEndLabel})`}
+              </div>
+            ) : null}
             {plan.autoPercentUsed != null ? (
               <MetricBar
                 label="Auto"
