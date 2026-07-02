@@ -6,6 +6,7 @@ import { NewSessionDialog } from "@renderer/components/new-session-dialog";
 import { ProjectDefaultsDialog } from "@renderer/components/project-defaults-dialog";
 import { ProjectDeletionToastListener } from "@renderer/components/project-deletion-toast-listener";
 import { ProjectWorktreeDialog } from "@renderer/components/project-worktree-dialog";
+import { PromptLibraryDialog } from "@renderer/components/prompt-library-dialog";
 import { SessionPage } from "@renderer/components/session-page";
 import { SessionSidebar } from "@renderer/components/session-sidebar";
 import { SettingsDialog } from "@renderer/components/settings-dialog";
@@ -74,6 +75,7 @@ function App() {
       <WorktreeDeleteDialog />
       <ProjectDeletionToastListener />
       <SettingsDialog />
+      <PromptLibraryDialog />
       <DiffReviewCommitDialog />
       <Toaster closeButton />
     </>

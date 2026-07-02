@@ -47,6 +47,7 @@ import { useConfirmDialogStore } from "./confirm-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
 import { useProjectWorktreeDialogStore } from "./project-worktree-dialog";
+import { SidebarPromptLibraryButton } from "./prompt-library-popover";
 import { RawSessionStateDialog } from "./raw-session-state-dialog";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import {
@@ -286,6 +287,7 @@ export function SessionSidebar() {
               <EyeOff className="size-3.5" />
             )}
           </Button>
+          <SidebarPromptLibraryButton />
           <Button
             variant="flat"
             className="h-full w-9 shrink-0 px-0"

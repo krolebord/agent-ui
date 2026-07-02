@@ -28,6 +28,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Bug, FolderOpen, Keyboard, LoaderCircle, Type } from "lucide-react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
+import { PromptLibrarySettingsItem } from "./prompt-library-dialog";
 import { useAppState } from "./sync-state-provider";
 
 export const useSettingsStore = create(
@@ -68,6 +69,8 @@ export function SettingsDialog() {
           <DockBounceOnAttentionToggle />
 
           <TitleGenerationSettings />
+
+          <PromptLibrarySettingsItem />
 
           <OpenLogFolder />
           <OpenStatePluginFolder />
