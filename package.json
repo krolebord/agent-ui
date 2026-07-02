@@ -22,7 +22,8 @@
     "typecheck": "tsgo --noEmit",
     "format": "biome check --write .",
     "test": "vitest run",
-    "extract-cursor-models": "bash scripts/extract-cursor-models.sh"
+    "extract-cursor-models": "bash scripts/extract-cursor-models.sh",
+    "extract-codex-models": "bash scripts/extract-codex-models.sh"
   },
   "dependencies": {
     "@dnd-kit/dom": "^0.3.2",

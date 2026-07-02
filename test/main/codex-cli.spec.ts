@@ -10,11 +10,19 @@ describe("buildCodexArgs", () => {
     expect(args).toEqual([
       "--no-alt-screen",
       "--disable apps",
-      "--model",
-      "gpt-5.3-codex",
       "-c",
       "model_reasoning_effort=high",
     ]);
+  });
+
+  it("uses an explicit model when provided", () => {
+    const { args } = buildCodexArgs({
+      permissionMode: "default",
+      model: "gpt-5.3-codex",
+    });
+
+    expect(args).toContain("--model");
+    expect(args).toContain("gpt-5.3-codex");
   });
 
   it("uses provided model reasoning effort", () => {
@@ -64,8 +72,6 @@ describe("buildCodexArgs", () => {
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
       "--no-alt-screen",
       "--disable apps",
-      "--model",
-      "gpt-5.3-codex",
       "-c",
       "model_reasoning_effort=high",
     ]);
@@ -86,8 +92,6 @@ describe("buildCodexArgs", () => {
       "019d0192-767b-7cc1-bdd9-9c8a13484557",
       "--no-alt-screen",
       "--disable apps",
-      "--model",
-      "gpt-5.3-codex",
       "-c",
       "model_reasoning_effort=high",
     ]);

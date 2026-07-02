@@ -1,3 +1,7 @@
+import {
+  addRecentCursorModel,
+  CursorModelPicker,
+} from "@renderer/components/cursor-model-picker";
 import { Button } from "@renderer/components/ui/button";
 import {
   Dialog,
@@ -19,7 +23,6 @@ import {
 import { Switch } from "@renderer/components/ui/switch";
 import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
 import { orpc } from "@renderer/orpc-client";
-import { cursorModels } from "@shared/cursor-models";
 import { titleGenerationProviders } from "@shared/title-generation";
 import { useMutation } from "@tanstack/react-query";
 import { Bug, FolderOpen, Keyboard, LoaderCircle, Type } from "lucide-react";
@@ -270,9 +273,16 @@ const titleGenerationProviderLabels: Record<
 
 function TitleGenerationSettings() {
   const titleGeneration = useAppState((s) => s.appSettings.titleGeneration);
-  const { mutate } = useMutation(
+  const lastSessionOptions = useAppState(
+    (s) => s.appSettings.lastSessionOptions,
+  );
+  const setTitleGeneration = useMutation(
     orpc.appSettings.setTitleGeneration.mutationOptions(),
   );
+  const setLastSessionOptions = useMutation(
+    orpc.appSettings.setLastSessionOptions.mutationOptions(),
+  );
+  const recentCursorModels = lastSessionOptions.cursor?.recentModels ?? [];
 
   return (
     <div className="py-2.5">
@@ -288,7 +298,7 @@ function TitleGenerationSettings() {
           <Select
             value={titleGeneration.provider}
             onValueChange={(value) => {
-              mutate({
+              setTitleGeneration.mutate({
                 provider: value as typeof titleGeneration.provider,
                 model: titleGeneration.model,
               });
@@ -311,26 +321,26 @@ function TitleGenerationSettings() {
         </div>
         <div className="space-y-2">
           <Label className="text-sm font-medium">Model</Label>
-          <Select
+          <CursorModelPicker
             value={titleGeneration.model}
-            onValueChange={(model) => {
-              mutate({
+            recentModels={recentCursorModels}
+            includeAuto
+            onChange={(model) => {
+              setTitleGeneration.mutate({
                 provider: titleGeneration.provider,
                 model,
               });
+              setLastSessionOptions.mutate({
+                ...lastSessionOptions,
+                cursor: {
+                  ...lastSessionOptions.cursor,
+                  permissionMode:
+                    lastSessionOptions.cursor?.permissionMode ?? "default",
+                  recentModels: addRecentCursorModel(recentCursorModels, model),
+                },
+              });
             }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {cursorModels.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          />
         </div>
       </div>
     </div>

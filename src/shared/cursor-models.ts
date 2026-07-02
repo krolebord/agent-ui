@@ -10,6 +10,7 @@ export const cursorModels: CursorModel[] = [
   { label: "Auto", value: "auto" },
   { label: "Composer 2.5 Fast", value: "composer-2.5-fast" },
   { label: "Composer 2.5", value: "composer-2.5" },
+  { label: "Kimi K2.7 Code", value: "kimi-k2.7-code" },
   { label: "Kimi K2.5", value: "kimi-k2.5" },
   { label: "Grok Build 0.1", value: "grok-build-0.1" },
   { label: "Grok 4.3", value: "grok-4.3" },
@@ -88,9 +89,36 @@ export const cursorModels: CursorModel[] = [
   { label: "GPT 5.1 Codex Max High", value: "gpt-5.1-codex-max-high" },
   { label: "GPT 5.1", value: "gpt-5.1" },
   { label: "GPT 5 Mini", value: "gpt-5-mini" },
+  { label: "Glm 5.2 Max", value: "glm-5.2-max" },
+  { label: "Glm 5.2 High", value: "glm-5.2-high" },
   { label: "Gemini 3.5 Flash", value: "gemini-3.5-flash" },
   { label: "Gemini 3.1 Pro", value: "gemini-3.1-pro" },
   { label: "Gemini 3 Flash", value: "gemini-3-flash" },
+  { label: "Claude Sonnet 5 Xhigh", value: "claude-sonnet-5-xhigh" },
+  {
+    label: "Claude Sonnet 5 Thinking Xhigh",
+    value: "claude-sonnet-5-thinking-xhigh",
+  },
+  {
+    label: "Claude Sonnet 5 Thinking Medium",
+    value: "claude-sonnet-5-thinking-medium",
+  },
+  {
+    label: "Claude Sonnet 5 Thinking Max",
+    value: "claude-sonnet-5-thinking-max",
+  },
+  {
+    label: "Claude Sonnet 5 Thinking Low",
+    value: "claude-sonnet-5-thinking-low",
+  },
+  {
+    label: "Claude Sonnet 5 Thinking High",
+    value: "claude-sonnet-5-thinking-high",
+  },
+  { label: "Claude Sonnet 5 Medium", value: "claude-sonnet-5-medium" },
+  { label: "Claude Sonnet 5 Max", value: "claude-sonnet-5-max" },
+  { label: "Claude Sonnet 5 Low", value: "claude-sonnet-5-low" },
+  { label: "Claude Sonnet 5 High", value: "claude-sonnet-5-high" },
   { label: "Claude Opus 4 8 Xhigh Fast", value: "claude-opus-4-8-xhigh-fast" },
   { label: "Claude Opus 4 8 Xhigh", value: "claude-opus-4-8-xhigh" },
   {
@@ -228,18 +256,10 @@ export const cursorModels: CursorModel[] = [
   },
   { label: "Claude 4.6 Sonnet Medium", value: "claude-4.6-sonnet-medium" },
   {
-    label: "Claude 4.6 Opus Max Thinking Fast",
-    value: "claude-4.6-opus-max-thinking-fast",
-  },
-  {
     label: "Claude 4.6 Opus Max Thinking",
     value: "claude-4.6-opus-max-thinking",
   },
   { label: "Claude 4.6 Opus Max", value: "claude-4.6-opus-max" },
-  {
-    label: "Claude 4.6 Opus High Thinking Fast",
-    value: "claude-4.6-opus-high-thinking-fast",
-  },
   {
     label: "Claude 4.6 Opus High Thinking",
     value: "claude-4.6-opus-high-thinking",

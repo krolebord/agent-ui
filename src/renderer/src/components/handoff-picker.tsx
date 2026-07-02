@@ -104,7 +104,7 @@ export function HandoffPicker({
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
           type="button"
@@ -128,7 +128,13 @@ export function HandoffPicker({
       <PopoverContent
         align="start"
         sideOffset={6}
-        className="w-[var(--radix-popover-trigger-width)] min-w-[360px] p-0"
+        className="w-[var(--radix-popover-trigger-width)] min-w-[360px] overflow-hidden p-0"
+        onWheel={(event) => {
+          event.stopPropagation();
+        }}
+        onTouchMove={(event) => {
+          event.stopPropagation();
+        }}
       >
         {entries.length === 0 ? (
           <div className="text-muted-foreground p-6 text-center text-sm">
@@ -139,9 +145,12 @@ export function HandoffPicker({
             skill to create one.
           </div>
         ) : (
-          <Command shouldFilter>
+          <Command
+            shouldFilter
+            className="max-h-[min(420px,var(--radix-popover-content-available-height,420px))]"
+          >
             <CommandInput placeholder="Search handoffs..." />
-            <CommandList className="max-h-[420px]">
+            <CommandList className="max-h-[min(380px,var(--radix-popover-content-available-height,380px))] min-h-0 overscroll-contain">
               <CommandEmpty>No matches.</CommandEmpty>
               {value && (
                 <CommandItem

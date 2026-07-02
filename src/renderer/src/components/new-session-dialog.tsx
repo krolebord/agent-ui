@@ -1,4 +1,13 @@
 import {
+  addRecentCodexModel,
+  CODEX_DEFAULT_MODEL_VALUE,
+  CodexModelPicker,
+} from "@renderer/components/codex-model-picker";
+import {
+  addRecentCursorModel,
+  CursorModelPicker,
+} from "@renderer/components/cursor-model-picker";
+import {
   type HandoffEntryDisplay,
   HandoffPicker,
   useHandoffSelection,
@@ -45,11 +54,11 @@ import {
   MODEL_OPTIONS,
 } from "@renderer/services/terminal-session-selectors";
 import type { ClaudeEffort, ClaudeModel } from "@shared/claude-types";
+import { codexModels } from "@shared/codex-models";
 import type {
   CodexFastMode,
   CodexModelReasoningEffort,
 } from "@shared/codex-types";
-import { cursorModels } from "@shared/cursor-models";
 import {
   type LastClaudeSessionOptions,
   type LastCodexSessionOptions,
@@ -68,7 +77,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, ChevronsUpDown } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import {
@@ -116,6 +125,29 @@ const CODEX_FAST_MODE_OPTIONS: { value: CodexFastMode; label: string }[] = [
   { value: "fast", label: "Fast" },
   { value: "off", label: "Off" },
 ];
+
+function getCodexSupportedReasoningEfforts(
+  modelValue: string | undefined,
+): CodexModelReasoningEffort[] {
+  const selectedModel = modelValue
+    ? codexModels.find((model) => model.value === modelValue)
+    : undefined;
+
+  if (selectedModel?.supportedReasoningEfforts.length) {
+    return selectedModel.supportedReasoningEfforts;
+  }
+
+  const catalogEfforts = new Set(
+    codexModels.flatMap((model) => model.supportedReasoningEfforts),
+  );
+  const orderedCatalogEfforts = CODEX_MODEL_REASONING_EFFORT_OPTIONS.map(
+    (option) => option.value,
+  ).filter((effort) => catalogEfforts.has(effort));
+
+  return orderedCatalogEfforts.length
+    ? orderedCatalogEfforts
+    : CODEX_MODEL_REASONING_EFFORT_OPTIONS.map((option) => option.value);
+}
 
 const CLAUDE_EFFORT_OPTIONS: { value: ClaudeEffort; label: string }[] = [
   { value: "low", label: "Low" },
@@ -726,6 +758,63 @@ function CodexSessionForm({
   });
   const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const selectedCodexModel = useMemo(
+    () =>
+      options.model
+        ? codexModels.find((model) => model.value === options.model)
+        : undefined,
+    [options.model],
+  );
+  const supportedCodexReasoningEfforts = useMemo(
+    () => getCodexSupportedReasoningEfforts(options.model),
+    [options.model],
+  );
+  const codexEffortOptions = useMemo(
+    () =>
+      CODEX_MODEL_REASONING_EFFORT_OPTIONS.filter((option) =>
+        supportedCodexReasoningEfforts.includes(option.value),
+      ),
+    [supportedCodexReasoningEfforts],
+  );
+  const codexModelOptions = useMemo(
+    () =>
+      options.model &&
+      !codexModels.some((model) => model.value === options.model)
+        ? [
+            ...codexModels,
+            {
+              label: options.model,
+              value: options.model,
+              supportedReasoningEfforts: [],
+              supportsFastMode: false,
+            },
+          ]
+        : codexModels,
+    [options.model],
+  );
+
+  useEffect(() => {
+    if (supportedCodexReasoningEfforts.includes(options.modelReasoningEffort)) {
+      return;
+    }
+
+    const defaultEffort = selectedCodexModel?.defaultReasoningEffort;
+    const nextEffort =
+      defaultEffort && supportedCodexReasoningEfforts.includes(defaultEffort)
+        ? defaultEffort
+        : (supportedCodexReasoningEfforts[0] ?? "high");
+
+    setOptions((current) =>
+      current.modelReasoningEffort === nextEffort
+        ? current
+        : { ...current, modelReasoningEffort: nextEffort },
+    );
+  }, [
+    options.modelReasoningEffort,
+    selectedCodexModel?.defaultReasoningEffort,
+    setOptions,
+    supportedCodexReasoningEfforts,
+  ]);
 
   const handleError = (error: unknown) => {
     if (error instanceof Error && error.message.trim()) {
@@ -830,16 +919,22 @@ function CodexSessionForm({
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-2">
           <Label htmlFor="new-codex-model">Model (optional)</Label>
-          <Input
+          <CodexModelPicker
             id="new-codex-model"
-            placeholder="gpt-5.3-codex"
-            value={options.model ?? ""}
-            onChange={(event) => {
+            value={options.model ?? CODEX_DEFAULT_MODEL_VALUE}
+            models={codexModelOptions}
+            recentModels={options.recentModels}
+            onChange={(value) => {
               setOptions((current) => ({
                 ...current,
-                model: event.target.value,
+                model: value === CODEX_DEFAULT_MODEL_VALUE ? undefined : value,
+                recentModels: addRecentCodexModel(
+                  current.recentModels,
+                  value === CODEX_DEFAULT_MODEL_VALUE ? undefined : value,
+                ),
               }));
             }}
+            disabled={isPending}
           />
         </div>
 
@@ -858,7 +953,7 @@ function CodexSessionForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {CODEX_MODEL_REASONING_EFFORT_OPTIONS.map((option) => (
+              {codexEffortOptions.map((option) => (
                 <SelectItem
                   key={option.value}
                   value={option.value}
@@ -1134,26 +1229,22 @@ function CursorAgentSessionForm({
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-2">
           <Label>Model (optional)</Label>
-          <Select
+          <CursorModelPicker
+            includeAuto
             value={options.model || "auto"}
-            onValueChange={(value) => {
+            recentModels={options.recentModels}
+            onChange={(value) => {
               setOptions((current) => ({
                 ...current,
                 model: value === "auto" ? undefined : value,
+                recentModels: addRecentCursorModel(
+                  current.recentModels,
+                  value === "auto" ? undefined : value,
+                ),
               }));
             }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {cursorModels.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            disabled={isPending}
+          />
         </div>
 
         <div className="w-fit shrink-0 space-y-2">

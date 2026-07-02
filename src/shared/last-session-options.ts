@@ -33,6 +33,7 @@ export interface LastClaudeSessionOptions {
 
 export interface LastCodexSessionOptions {
   model?: string;
+  recentModels: string[];
   modelReasoningEffort: CodexModelReasoningEffort;
   fastMode: CodexFastMode;
   permissionMode: CodexPermissionMode;
@@ -41,6 +42,7 @@ export interface LastCodexSessionOptions {
 
 export interface LastCursorSessionOptions {
   model?: string;
+  recentModels: string[];
   mode?: CursorAgentMode;
   permissionMode: CursorAgentPermissionMode;
 }
@@ -66,6 +68,11 @@ export const lastClaudeSessionOptionsSchema = z.object({
 
 export const lastCodexSessionOptionsSchema = z.object({
   model: z.string().optional().catch(undefined),
+  recentModels: z
+    .array(z.string().trim().min(1))
+    .default([])
+    .catch([])
+    .transform((models) => [...new Set(models)].slice(0, 8)),
   modelReasoningEffort: codexModelReasoningEffortSchema.catch("high"),
   fastMode: codexFastModeSchema.catch("default"),
   permissionMode: codexPermissionModeSchema.catch("default"),
@@ -74,6 +81,11 @@ export const lastCodexSessionOptionsSchema = z.object({
 
 export const lastCursorSessionOptionsSchema = z.object({
   model: z.string().optional().catch(undefined),
+  recentModels: z
+    .array(z.string().trim().min(1))
+    .default([])
+    .catch([])
+    .transform((models) => [...new Set(models)].slice(0, 8)),
   mode: cursorAgentModeSchema.optional().catch(undefined),
   permissionMode: cursorAgentPermissionModeSchema.catch("default"),
 });
@@ -99,6 +111,7 @@ export function defaultClaudeSessionOptions(): LastClaudeSessionOptions {
 export function defaultCodexSessionOptions(): LastCodexSessionOptions {
   return {
     model: undefined,
+    recentModels: [],
     modelReasoningEffort: "high",
     fastMode: "default",
     permissionMode: "default",
@@ -109,6 +122,7 @@ export function defaultCodexSessionOptions(): LastCodexSessionOptions {
 export function defaultCursorSessionOptions(): LastCursorSessionOptions {
   return {
     model: undefined,
+    recentModels: [],
     mode: undefined,
     permissionMode: "default",
   };

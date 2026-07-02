@@ -43,8 +43,10 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
     args.push("--dangerously-bypass-approvals-and-sandbox");
   }
 
-  const model = input.model?.trim() || "gpt-5.3-codex";
-  args.push("--model", model);
+  const model = input.model?.trim();
+  if (model) {
+    args.push("--model", model);
+  }
 
   if (input.fastMode === "fast") {
     args.push("--enable", "fast_mode");
