@@ -64,7 +64,7 @@ export function SettingsDialog() {
         </DialogHeader>
 
         <div className="divide-y divide-border/40">
-          <PreventSleepToggle />
+          <SleepBlockModeSelect />
           <DockBadgeForAttentionToggle />
           <DockBounceOnAttentionToggle />
 
@@ -223,10 +223,18 @@ function OpenDevToolsButton() {
   );
 }
 
-function PreventSleepToggle() {
-  const preventSleep = useAppState((s) => s.appSettings.preventSleep);
+const sleepBlockModeLabels: Record<SleepBlockMode, string> = {
+  off: "Off",
+  working: "While sessions run",
+  always: "Always",
+};
+
+type SleepBlockMode = "off" | "working" | "always";
+
+function SleepBlockModeSelect() {
+  const sleepBlockMode = useAppState((s) => s.appSettings.sleepBlockMode);
   const { mutate } = useMutation(
-    orpc.appSettings.setPreventSleep.mutationOptions(),
+    orpc.appSettings.setSleepBlockMode.mutationOptions(),
   );
 
   return (
@@ -234,13 +242,24 @@ function PreventSleepToggle() {
       <div className="space-y-0.5">
         <div className="text-sm font-medium">Prevent sleep</div>
         <div className="text-xs text-muted-foreground">
-          Keep display awake while at least one session is running
+          Control when the app keeps the display awake
         </div>
       </div>
-      <Switch
-        checked={preventSleep}
-        onCheckedChange={(checked) => mutate({ enabled: checked })}
-      />
+      <Select
+        value={sleepBlockMode}
+        onValueChange={(mode) => mutate({ mode: mode as SleepBlockMode })}
+      >
+        <SelectTrigger className="w-44">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {Object.entries(sleepBlockModeLabels).map(([mode, label]) => (
+            <SelectItem key={mode} value={mode}>
+              {label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

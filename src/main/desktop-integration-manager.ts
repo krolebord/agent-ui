@@ -69,8 +69,16 @@ export class DesktopIntegrationManager {
       (session) => session.status === "running",
     );
 
-    const shouldBlock =
-      this.appSettingsState.state.preventSleep && hasRunningSession;
+    const shouldBlock = (() => {
+      switch (this.appSettingsState.state.sleepBlockMode) {
+        case "off":
+          return false;
+        case "working":
+          return hasRunningSession;
+        case "always":
+          return true;
+      }
+    })();
 
     if (shouldBlock) {
       this.startBlockerIfNeeded();

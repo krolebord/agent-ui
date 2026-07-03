@@ -42,6 +42,9 @@ export function buildCursorAgentArgs(input: BuildCursorAgentArgsInput): {
     if (input.plan) {
       args.push("--plan");
     }
+    if (input.initialPrompt.trim().startsWith("-")) {
+      args.push("--");
+    }
     args.push(shellQuote(input.initialPrompt));
   }
 

@@ -74,7 +74,7 @@ describe("DesktopIntegrationManager", () => {
     setPlatform(originalPlatform);
   });
 
-  it("activates blocker when first running session appears", () => {
+  it("activates blocker when first running session appears in working mode", () => {
     const sessionsState = defineSessionServiceState();
     const appSettingsState = defineAppSettingsState();
     const manager = new DesktopIntegrationManager(
@@ -91,6 +91,79 @@ describe("DesktopIntegrationManager", () => {
       "prevent-display-sleep",
     );
     expect(powerSaveBlockerMock.stop).not.toHaveBeenCalled();
+
+    manager.dispose();
+  });
+
+  it("does not activate blocker in off mode", () => {
+    const sessionsState = defineSessionServiceState();
+    const appSettingsState = defineAppSettingsState();
+    appSettingsState.updateState((state) => {
+      state.sleepBlockMode = "off";
+    });
+    const manager = new DesktopIntegrationManager(
+      sessionsState,
+      appSettingsState,
+    );
+
+    sessionsState.updateState((state) => {
+      state["session-1"] = makeLocalTerminalSession("session-1", "running");
+    });
+
+    expect(powerSaveBlockerMock.start).not.toHaveBeenCalled();
+
+    manager.dispose();
+  });
+
+  it("activates blocker immediately in always mode", () => {
+    const sessionsState = defineSessionServiceState();
+    const appSettingsState = defineAppSettingsState();
+    appSettingsState.updateState((state) => {
+      state.sleepBlockMode = "always";
+    });
+    const manager = new DesktopIntegrationManager(
+      sessionsState,
+      appSettingsState,
+    );
+
+    expect(powerSaveBlockerMock.start).toHaveBeenCalledTimes(1);
+    expect(powerSaveBlockerMock.start).toHaveBeenCalledWith(
+      "prevent-display-sleep",
+    );
+
+    sessionsState.updateState((state) => {
+      state["session-1"] = makeLocalTerminalSession("session-1", "idle");
+    });
+
+    expect(powerSaveBlockerMock.stop).not.toHaveBeenCalled();
+
+    manager.dispose();
+  });
+
+  it("updates active blocker when sleep block mode changes", () => {
+    const sessionsState = defineSessionServiceState();
+    const appSettingsState = defineAppSettingsState();
+    powerSaveBlockerMock.start
+      .mockReturnValueOnce(101)
+      .mockReturnValueOnce(102);
+    const manager = new DesktopIntegrationManager(
+      sessionsState,
+      appSettingsState,
+    );
+
+    sessionsState.updateState((state) => {
+      state["session-1"] = makeLocalTerminalSession("session-1", "running");
+    });
+    appSettingsState.updateState((state) => {
+      state.sleepBlockMode = "off";
+    });
+    appSettingsState.updateState((state) => {
+      state.sleepBlockMode = "always";
+    });
+
+    expect(powerSaveBlockerMock.start).toHaveBeenCalledTimes(2);
+    expect(powerSaveBlockerMock.stop).toHaveBeenCalledTimes(1);
+    expect(powerSaveBlockerMock.stop).toHaveBeenCalledWith(101);
 
     manager.dispose();
   });

@@ -57,6 +57,53 @@ describe("app settings prompt library", () => {
     expect(state.state.promptLibrary).toEqual([]);
   });
 
+  it("defaults sleep blocking to working mode", () => {
+    const state = defineAppSettingsState();
+    expect(state.state.sleepBlockMode).toBe("working");
+  });
+
+  it("hydrates persisted sleep block mode", () => {
+    storeMock.seed({
+      appSettings: {
+        sleepBlockMode: "always",
+      },
+    });
+
+    const state = defineAppSettingsState();
+    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
+
+    expect(state.state.sleepBlockMode).toBe("always");
+  });
+
+  it("migrates legacy enabled prevent sleep setting to working mode", () => {
+    storeMock.seed({
+      appSettings: {
+        preventSleep: true,
+      },
+    });
+
+    const state = defineAppSettingsState();
+    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
+
+    expect(state.state.sleepBlockMode).toBe("working");
+  });
+
+  it("migrates legacy disabled prevent sleep setting to off mode", () => {
+    storeMock.seed({
+      appSettings: {
+        preventSleep: false,
+      },
+    });
+
+    const state = defineAppSettingsState();
+    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
+
+    expect(state.state.sleepBlockMode).toBe("off");
+  });
+
   it("rejects invalid prompt library entries during hydration", () => {
     storeMock.seed({
       appSettings: {

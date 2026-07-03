@@ -15,8 +15,11 @@ import {
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
 
+export const sleepBlockModes = ["off", "working", "always"] as const;
+export type SleepBlockMode = (typeof sleepBlockModes)[number];
+
 export interface AppSettings {
-  preventSleep: boolean;
+  sleepBlockMode: SleepBlockMode;
   dockBadgeForAttention: boolean;
   dockBounceOnAttention: boolean;
   lastSessionOptions: z.infer<typeof lastSessionOptionsSchema>;
@@ -25,7 +28,7 @@ export interface AppSettings {
 }
 
 const defaults: AppSettings = {
-  preventSleep: true,
+  sleepBlockMode: "working",
   dockBadgeForAttention: true,
   dockBounceOnAttention: false,
   lastSessionOptions: {},
@@ -39,16 +42,27 @@ export function defineAppSettingsState() {
   return defineServiceState({ key: "appSettings" as const, defaults });
 }
 
-const appSettingsPersistenceSchema = z.object({
-  preventSleep: z.boolean().catch(true),
-  dockBadgeForAttention: z.boolean().catch(true),
-  dockBounceOnAttention: z.boolean().catch(false),
-  lastSessionOptions: lastSessionOptionsSchema.catch({}),
-  titleGeneration: titleGenerationSettingsSchema.catch(
-    defaultTitleGenerationSettings,
-  ),
-  promptLibrary: promptLibrarySchema,
-});
+const sleepBlockModeSchema = z.enum(sleepBlockModes);
+
+const appSettingsPersistenceSchema = z
+  .object({
+    sleepBlockMode: z
+      .union([sleepBlockModeSchema, z.undefined()])
+      .catch(undefined),
+    preventSleep: z.boolean().optional().catch(undefined),
+    dockBadgeForAttention: z.boolean().catch(true),
+    dockBounceOnAttention: z.boolean().catch(false),
+    lastSessionOptions: lastSessionOptionsSchema.catch({}),
+    titleGeneration: titleGenerationSettingsSchema.catch(
+      defaultTitleGenerationSettings,
+    ),
+    promptLibrary: promptLibrarySchema,
+  })
+  .transform(({ preventSleep, sleepBlockMode, ...settings }) => ({
+    ...settings,
+    sleepBlockMode:
+      sleepBlockMode ?? (preventSleep === false ? "off" : "working"),
+  }));
 
 export function defineAppSettingsPersistence(state: AppSettingsState) {
   return defineStatePersistence({
@@ -58,11 +72,11 @@ export function defineAppSettingsPersistence(state: AppSettingsState) {
 }
 
 export const appSettingsRouter = {
-  setPreventSleep: procedure
-    .input(z.object({ enabled: z.boolean() }))
+  setSleepBlockMode: procedure
+    .input(z.object({ mode: sleepBlockModeSchema }))
     .handler(async ({ input, context }) => {
       context.appSettingsState.updateState((state) => {
-        state.preventSleep = input.enabled;
+        state.sleepBlockMode = input.mode;
       });
     }),
   setDockBadgeForAttention: procedure
