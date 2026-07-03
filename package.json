@@ -57,16 +57,21 @@
     "react-resizable-panels": "^4.7.3",
     "simple-git": "^3.33.0",
     "sonner": "^2.0.7",
+    "systeminformation": "^5.31.12",
     "tailwind-merge": "^3.5.0",
     "ws": "^8.21.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
+  },
+  "optionalDependencies": {
+    "macos-temperature-sensor": "^1.0.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "electron",
       "esbuild",
       "lefthook",
+      "macos-temperature-sensor",
       "node-pty"
     ],
     "ignoredBuiltDependencies": [

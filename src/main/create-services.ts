@@ -10,6 +10,7 @@ import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { DesktopIntegrationManager } from "./desktop-integration-manager";
 import { defineHandoffsState, HandoffsService } from "./handoffs-service";
 import log from "./logger";
+import { defineMachineStatsState, MachineStatsMonitor } from "./machine-stats";
 import { ensureManagedSkills } from "./managed-skills";
 import { PersistenceOrchestrator } from "./persistence-orchestrator";
 import { ProjectGitService } from "./project-git-service";
@@ -167,6 +168,13 @@ export async function createServices(options: CreateServicesOptions) {
     defineProjectTerminalsPersistence(projectTerminalsState),
   );
 
+  const machineStatsState = defineMachineStatsState();
+  const machineStatsMonitor = new MachineStatsMonitor(
+    machineStatsState,
+    appSettingsState,
+  );
+  machineStatsMonitor.start();
+
   // Hydrate worktree setup commands from .agent-ui/settings.jsonc files
   const projectPaths = projectsState.state.map((p) => p.path);
   if (projectPaths.length > 0) {
@@ -239,6 +247,7 @@ export async function createServices(options: CreateServicesOptions) {
       projectTerminals: projectTerminalsState,
       sessions: sessionsState,
       handoffs: handoffsState,
+      machineStats: machineStatsState,
     },
   });
 
@@ -267,12 +276,14 @@ export async function createServices(options: CreateServicesOptions) {
     async () => await worktreeSetupSessionsManager.dispose(),
   );
   shutdownDisposable.addDisposable(() => desktopIntegrationManager.dispose());
+  shutdownDisposable.addDisposable(() => machineStatsMonitor.dispose());
   shutdownDisposable.addDisposable(() => handoffsService.dispose());
   shutdownDisposable.addDisposable(() => stateService.dispose());
   shutdownDisposable.addDisposable(() => persistenceService.dispose());
 
   return {
     appSettingsState,
+    machineStatsState,
     projectsState,
     projectTerminalsState,
     projectGitService,

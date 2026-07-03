@@ -62,6 +62,59 @@ describe("app settings prompt library", () => {
     expect(state.state.sleepBlockMode).toBe("working");
   });
 
+  it("defaults machine stats to enabled with compact polling intervals", () => {
+    const state = defineAppSettingsState();
+    expect(state.state.machineStats).toEqual({
+      enabled: true,
+      cpuMemoryPollIntervalSeconds: 15,
+      temperaturePollIntervalSeconds: 30,
+    });
+  });
+
+  it("hydrates persisted machine stats settings", () => {
+    storeMock.seed({
+      appSettings: {
+        machineStats: {
+          enabled: false,
+          cpuMemoryPollIntervalSeconds: 60,
+          temperaturePollIntervalSeconds: 300,
+        },
+      },
+    });
+
+    const state = defineAppSettingsState();
+    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
+
+    expect(state.state.machineStats).toEqual({
+      enabled: false,
+      cpuMemoryPollIntervalSeconds: 60,
+      temperaturePollIntervalSeconds: 300,
+    });
+  });
+
+  it("falls back for invalid persisted machine stats intervals", () => {
+    storeMock.seed({
+      appSettings: {
+        machineStats: {
+          enabled: false,
+          cpuMemoryPollIntervalSeconds: 1,
+          temperaturePollIntervalSeconds: 10_000,
+        },
+      },
+    });
+
+    const state = defineAppSettingsState();
+    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
+
+    expect(state.state.machineStats).toEqual({
+      enabled: false,
+      cpuMemoryPollIntervalSeconds: 15,
+      temperaturePollIntervalSeconds: 30,
+    });
+  });
+
   it("hydrates persisted sleep block mode", () => {
     storeMock.seed({
       appSettings: {

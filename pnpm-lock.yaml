@@ -101,6 +101,9 @@ importers:
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      systeminformation:
+        specifier: ^5.31.12
+        version: 5.31.12
       tailwind-merge:
         specifier: ^3.5.0
         version: 3.5.0
@@ -168,6 +171,10 @@ importers:
       vitest:
         specifier: ^4.0.0
         version: 4.0.18(@types/node@25.3.0)(jiti@2.6.1)(lightningcss@1.31.1)
+    optionalDependencies:
+      macos-temperature-sensor:
+        specifier: ^1.0.4
+        version: 1.0.4
 
 packages:
 
@@ -2846,6 +2853,11 @@ packages:
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
+  macos-temperature-sensor@1.0.4:
+    resolution: {integrity: sha512-JROshGB+f+UnsbNwM6SER4AK82fdGmk79ElhH+8xVieCUQ1fxTanTwp7Rv9DTRtmgB6hLcEGvQYL8XsPbAKLUA==}
+    cpu: [arm64]
+    os: [darwin]
+
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
@@ -3459,6 +3471,12 @@ packages:
   supports-color@7.2.0:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
     engines: {node: '>=8'}
+
+  systeminformation@5.31.12:
+    resolution: {integrity: sha512-qnTtO5wHrKeKE/MvQ6iIt6XAV+5fgt/kPIQf27DYgjVQQuHUfWkV4Gu6k04ZpEzAMuyQ3ZsovY7Ivhp+E9JyWw==}
+    engines: {node: '>=8.0.0'}
+    os: [darwin, linux, win32, freebsd, openbsd, netbsd, sunos, android]
+    hasBin: true
 
   tagged-tag@1.0.0:
     resolution: {integrity: sha512-yEFYrVhod+hdNyx7g5Bnkkb0G6si8HJurOoOEgC8B/O0uXLHlaey/65KRv6cuWBNhBgHKAROVpc7QyYqE5gFng==}
@@ -6732,6 +6750,9 @@ snapshots:
     dependencies:
       react: 19.2.4
 
+  macos-temperature-sensor@1.0.4:
+    optional: true
+
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -7419,6 +7440,8 @@ snapshots:
   supports-color@7.2.0:
     dependencies:
       has-flag: 4.0.0
+
+  systeminformation@5.31.12: {}
 
   tagged-tag@1.0.0: {}
 

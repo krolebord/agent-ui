@@ -18,10 +18,48 @@ import { defineStatePersistence } from "./persistence-orchestrator";
 export const sleepBlockModes = ["off", "working", "always"] as const;
 export type SleepBlockMode = (typeof sleepBlockModes)[number];
 
+export const machineStatsPollIntervalSeconds = [15, 30, 60, 300] as const;
+
+const machineStatsPollIntervalSchema = z.union([
+  z.literal(15),
+  z.literal(30),
+  z.literal(60),
+  z.literal(300),
+]);
+
+export type MachineStatsPollIntervalSeconds = z.infer<
+  typeof machineStatsPollIntervalSchema
+>;
+
+export interface MachineStatsSettings {
+  enabled: boolean;
+  cpuMemoryPollIntervalSeconds: MachineStatsPollIntervalSeconds;
+  temperaturePollIntervalSeconds: MachineStatsPollIntervalSeconds;
+}
+
+export const defaultMachineStatsSettings: MachineStatsSettings = {
+  enabled: true,
+  cpuMemoryPollIntervalSeconds: 15,
+  temperaturePollIntervalSeconds: 30,
+};
+
+export const machineStatsSettingsSchema = z
+  .object({
+    enabled: z.boolean().catch(defaultMachineStatsSettings.enabled),
+    cpuMemoryPollIntervalSeconds: machineStatsPollIntervalSchema.catch(
+      defaultMachineStatsSettings.cpuMemoryPollIntervalSeconds,
+    ),
+    temperaturePollIntervalSeconds: machineStatsPollIntervalSchema.catch(
+      defaultMachineStatsSettings.temperaturePollIntervalSeconds,
+    ),
+  })
+  .catch(defaultMachineStatsSettings);
+
 export interface AppSettings {
   sleepBlockMode: SleepBlockMode;
   dockBadgeForAttention: boolean;
   dockBounceOnAttention: boolean;
+  machineStats: MachineStatsSettings;
   lastSessionOptions: z.infer<typeof lastSessionOptionsSchema>;
   titleGeneration: TitleGenerationSettings;
   promptLibrary: PromptLibraryEntry[];
@@ -31,6 +69,7 @@ const defaults: AppSettings = {
   sleepBlockMode: "working",
   dockBadgeForAttention: true,
   dockBounceOnAttention: false,
+  machineStats: defaultMachineStatsSettings,
   lastSessionOptions: {},
   titleGeneration: defaultTitleGenerationSettings,
   promptLibrary: [],
@@ -52,6 +91,7 @@ const appSettingsPersistenceSchema = z
     preventSleep: z.boolean().optional().catch(undefined),
     dockBadgeForAttention: z.boolean().catch(true),
     dockBounceOnAttention: z.boolean().catch(false),
+    machineStats: machineStatsSettingsSchema,
     lastSessionOptions: lastSessionOptionsSchema.catch({}),
     titleGeneration: titleGenerationSettingsSchema.catch(
       defaultTitleGenerationSettings,
@@ -91,6 +131,13 @@ export const appSettingsRouter = {
     .handler(async ({ input, context }) => {
       context.appSettingsState.updateState((state) => {
         state.dockBounceOnAttention = input.enabled;
+      });
+    }),
+  setMachineStats: procedure
+    .input(machineStatsSettingsSchema)
+    .handler(async ({ input, context }) => {
+      context.appSettingsState.updateState((state) => {
+        state.machineStats = input;
       });
     }),
   setLastSessionOptions: procedure

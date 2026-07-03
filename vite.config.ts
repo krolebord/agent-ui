@@ -16,7 +16,10 @@ export default defineConfig(({ command }) => {
   const isServe = command === "serve";
   const isBuild = command === "build";
   const sourcemap = isServe || !!process.env.VSCODE_DEBUG;
-  const externalDependencies = Object.keys(pkg.dependencies ?? {});
+  const externalDependencies = [
+    ...Object.keys(pkg.dependencies ?? {}),
+    ...Object.keys(pkg.optionalDependencies ?? {}),
+  ];
   const aliases = {
     "@main": path.join(__dirname, "src/main"),
     "@renderer": path.join(__dirname, "src/renderer/src"),

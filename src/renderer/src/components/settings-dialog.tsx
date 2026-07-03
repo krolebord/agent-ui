@@ -25,7 +25,14 @@ import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
 import { orpc } from "@renderer/orpc-client";
 import { titleGenerationProviders } from "@shared/title-generation";
 import { useMutation } from "@tanstack/react-query";
-import { Bug, FolderOpen, Keyboard, LoaderCircle, Type } from "lucide-react";
+import {
+  Activity,
+  Bug,
+  FolderOpen,
+  Keyboard,
+  LoaderCircle,
+  Type,
+} from "lucide-react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import { PromptLibrarySettingsItem } from "./prompt-library-dialog";
@@ -67,6 +74,7 @@ export function SettingsDialog() {
           <SleepBlockModeSelect />
           <DockBadgeForAttentionToggle />
           <DockBounceOnAttentionToggle />
+          <MachineStatsSettings />
 
           <TitleGenerationSettings />
 
@@ -282,6 +290,103 @@ function DockBadgeForAttentionToggle() {
         checked={enabled}
         onCheckedChange={(checked) => mutate({ enabled: checked })}
       />
+    </div>
+  );
+}
+
+const machineStatsIntervalOptions = [15, 30, 60, 300] as const;
+
+type MachineStatsIntervalSeconds = (typeof machineStatsIntervalOptions)[number];
+
+function formatInterval(seconds: MachineStatsIntervalSeconds): string {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  return `${seconds / 60}m`;
+}
+
+function MachineStatsSettings() {
+  const settings = useAppState((s) => s.appSettings.machineStats);
+  const { mutate } = useMutation(
+    orpc.appSettings.setMachineStats.mutationOptions(),
+  );
+
+  return (
+    <div className="py-2.5">
+      <div className="mb-2 flex items-center gap-2">
+        <Activity className="size-3.5 text-muted-foreground" />
+        <div className="text-xs font-medium text-muted-foreground">
+          System status
+        </div>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <div className="text-sm font-medium">Show sidebar status</div>
+            <div className="text-xs text-muted-foreground">
+              Display CPU, temperature, and memory usage in the sidebar
+            </div>
+          </div>
+          <Switch
+            checked={settings.enabled}
+            onCheckedChange={(enabled) => mutate({ ...settings, enabled })}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">CPU and memory</Label>
+            <Select
+              value={`${settings.cpuMemoryPollIntervalSeconds}`}
+              disabled={!settings.enabled}
+              onValueChange={(value) =>
+                mutate({
+                  ...settings,
+                  cpuMemoryPollIntervalSeconds: Number(
+                    value,
+                  ) as MachineStatsIntervalSeconds,
+                })
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {machineStatsIntervalOptions.map((seconds) => (
+                  <SelectItem key={seconds} value={`${seconds}`}>
+                    {formatInterval(seconds)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Temperature</Label>
+            <Select
+              value={`${settings.temperaturePollIntervalSeconds}`}
+              disabled={!settings.enabled}
+              onValueChange={(value) =>
+                mutate({
+                  ...settings,
+                  temperaturePollIntervalSeconds: Number(
+                    value,
+                  ) as MachineStatsIntervalSeconds,
+                })
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {machineStatsIntervalOptions.map((seconds) => (
+                  <SelectItem key={seconds} value={`${seconds}`}>
+                    {formatInterval(seconds)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
