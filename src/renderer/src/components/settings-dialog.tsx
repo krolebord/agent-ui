@@ -2,6 +2,12 @@ import {
   addRecentCursorModel,
   CursorModelPicker,
 } from "@renderer/components/cursor-model-picker";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@renderer/components/ui/accordion";
 import { Button } from "@renderer/components/ui/button";
 import {
   Dialog,
@@ -25,14 +31,17 @@ import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
 import { orpc } from "@renderer/orpc-client";
 import { titleGenerationProviders } from "@shared/title-generation";
 import { useMutation } from "@tanstack/react-query";
+import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   Bug,
   FolderOpen,
   Keyboard,
   LoaderCircle,
-  Type,
+  Settings,
+  Sparkles,
 } from "lucide-react";
+import type * as React from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import { PromptLibrarySettingsItem } from "./prompt-library-dialog";
@@ -70,46 +79,58 @@ export function SettingsDialog() {
           <DialogDescription>Application settings</DialogDescription>
         </DialogHeader>
 
-        <div className="divide-y divide-border/40">
-          <SleepBlockModeSelect />
-          <DockBadgeForAttentionToggle />
-          <DockBounceOnAttentionToggle />
-          <MachineStatsSettings />
+        <Accordion type="multiple" className="-mx-1">
+          <AccordionItem value="general">
+            <SettingsSectionTrigger icon={Settings}>
+              General
+            </SettingsSectionTrigger>
+            <AccordionContent className="divide-y divide-border/40">
+              <SleepBlockModeSelect />
+              <DockBadgeForAttentionToggle />
+              <DockBounceOnAttentionToggle />
+            </AccordionContent>
+          </AccordionItem>
 
-          <TitleGenerationSettings />
+          <AccordionItem value="sidebar">
+            <SettingsSectionTrigger icon={Activity}>
+              Sidebar
+            </SettingsSectionTrigger>
+            <AccordionContent>
+              <MachineStatsSettings />
+            </AccordionContent>
+          </AccordionItem>
 
-          <PromptLibrarySettingsItem />
+          <AccordionItem value="ai-prompts">
+            <SettingsSectionTrigger icon={Sparkles}>
+              AI & prompts
+            </SettingsSectionTrigger>
+            <AccordionContent className="divide-y divide-border/40">
+              <TitleGenerationSettings />
+              <PromptLibrarySettingsItem />
+            </AccordionContent>
+          </AccordionItem>
 
-          <OpenLogFolder />
-          <OpenStatePluginFolder />
-          <OpenSessionFilesFolder />
-          <OpenHandoffsFolder />
+          <AccordionItem value="files-folders">
+            <SettingsSectionTrigger icon={FolderOpen}>
+              Files & folders
+            </SettingsSectionTrigger>
+            <AccordionContent className="divide-y divide-border/40">
+              <OpenLogFolder />
+              <OpenStatePluginFolder />
+              <OpenSessionFilesFolder />
+              <OpenHandoffsFolder />
+            </AccordionContent>
+          </AccordionItem>
 
-          <div className="py-2.5">
-            <div className="mb-2 flex items-center gap-2">
-              <Keyboard className="size-3.5 text-muted-foreground" />
-              <div className="text-xs font-medium text-muted-foreground">
-                Keyboard shortcuts
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              {SHORTCUT_DEFINITIONS.map((shortcut) => (
-                <div
-                  key={shortcut.id}
-                  className="flex items-center justify-between"
-                >
-                  <span className="text-xs text-muted-foreground">
-                    {shortcut.label}
-                  </span>
-                  <KbdGroup>
-                    <Kbd>&#8984;</Kbd>
-                    <Kbd>{shortcut.key}</Kbd>
-                  </KbdGroup>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+          <AccordionItem value="keyboard-shortcuts">
+            <SettingsSectionTrigger icon={Keyboard}>
+              Keyboard shortcuts
+            </SettingsSectionTrigger>
+            <AccordionContent>
+              <KeyboardShortcutsSettings />
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
 
         <DialogFooter className="sm:justify-between" showCloseButton>
           <div className="flex items-center gap-2 self-center">
@@ -121,6 +142,41 @@ export function SettingsDialog() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SettingsSectionTrigger({
+  icon: Icon,
+  children,
+}: {
+  icon: LucideIcon;
+  children: React.ReactNode;
+}) {
+  return (
+    <AccordionTrigger className="py-3 hover:no-underline">
+      <span className="flex items-center gap-2">
+        <Icon className="size-3.5 text-muted-foreground" />
+        {children}
+      </span>
+    </AccordionTrigger>
+  );
+}
+
+function KeyboardShortcutsSettings() {
+  return (
+    <div className="space-y-1.5">
+      {SHORTCUT_DEFINITIONS.map((shortcut) => (
+        <div key={shortcut.id} className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            {shortcut.label}
+          </span>
+          <KbdGroup>
+            <Kbd>&#8984;</Kbd>
+            <Kbd>{shortcut.key}</Kbd>
+          </KbdGroup>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -312,79 +368,71 @@ function MachineStatsSettings() {
   );
 
   return (
-    <div className="py-2.5">
-      <div className="mb-2 flex items-center gap-2">
-        <Activity className="size-3.5 text-muted-foreground" />
-        <div className="text-xs font-medium text-muted-foreground">
-          System status
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-0.5">
+          <div className="text-sm font-medium">Show sidebar status</div>
+          <div className="text-xs text-muted-foreground">
+            Display CPU, temperature, and memory usage in the sidebar
+          </div>
         </div>
+        <Switch
+          checked={settings.enabled}
+          onCheckedChange={(enabled) => mutate({ ...settings, enabled })}
+        />
       </div>
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <div className="text-sm font-medium">Show sidebar status</div>
-            <div className="text-xs text-muted-foreground">
-              Display CPU, temperature, and memory usage in the sidebar
-            </div>
-          </div>
-          <Switch
-            checked={settings.enabled}
-            onCheckedChange={(enabled) => mutate({ ...settings, enabled })}
-          />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">CPU and memory</Label>
+          <Select
+            value={`${settings.cpuMemoryPollIntervalSeconds}`}
+            disabled={!settings.enabled}
+            onValueChange={(value) =>
+              mutate({
+                ...settings,
+                cpuMemoryPollIntervalSeconds: Number(
+                  value,
+                ) as MachineStatsIntervalSeconds,
+              })
+            }
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {machineStatsIntervalOptions.map((seconds) => (
+                <SelectItem key={seconds} value={`${seconds}`}>
+                  {formatInterval(seconds)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">CPU and memory</Label>
-            <Select
-              value={`${settings.cpuMemoryPollIntervalSeconds}`}
-              disabled={!settings.enabled}
-              onValueChange={(value) =>
-                mutate({
-                  ...settings,
-                  cpuMemoryPollIntervalSeconds: Number(
-                    value,
-                  ) as MachineStatsIntervalSeconds,
-                })
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {machineStatsIntervalOptions.map((seconds) => (
-                  <SelectItem key={seconds} value={`${seconds}`}>
-                    {formatInterval(seconds)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">Temperature</Label>
-            <Select
-              value={`${settings.temperaturePollIntervalSeconds}`}
-              disabled={!settings.enabled}
-              onValueChange={(value) =>
-                mutate({
-                  ...settings,
-                  temperaturePollIntervalSeconds: Number(
-                    value,
-                  ) as MachineStatsIntervalSeconds,
-                })
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {machineStatsIntervalOptions.map((seconds) => (
-                  <SelectItem key={seconds} value={`${seconds}`}>
-                    {formatInterval(seconds)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-2">
+          <Label className="text-sm font-medium">Temperature</Label>
+          <Select
+            value={`${settings.temperaturePollIntervalSeconds}`}
+            disabled={!settings.enabled}
+            onValueChange={(value) =>
+              mutate({
+                ...settings,
+                temperaturePollIntervalSeconds: Number(
+                  value,
+                ) as MachineStatsIntervalSeconds,
+              })
+            }
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {machineStatsIntervalOptions.map((seconds) => (
+                <SelectItem key={seconds} value={`${seconds}`}>
+                  {formatInterval(seconds)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
     </div>
@@ -412,63 +460,55 @@ function TitleGenerationSettings() {
   const recentCursorModels = lastSessionOptions.cursor?.recentModels ?? [];
 
   return (
-    <div className="py-2.5">
-      <div className="mb-2 flex items-center gap-2">
-        <Type className="size-3.5 text-muted-foreground" />
-        <div className="text-xs font-medium text-muted-foreground">
-          LLM generation
-        </div>
+    <div className="space-y-3 py-2.5">
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">LLM provider</Label>
+        <Select
+          value={titleGeneration.provider}
+          onValueChange={(value) => {
+            setTitleGeneration.mutate({
+              provider: value as typeof titleGeneration.provider,
+              model: titleGeneration.model,
+            });
+          }}
+        >
+          <SelectTrigger className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {titleGenerationProviders.map((provider) => (
+              <SelectItem key={provider} value={provider}>
+                {titleGenerationProviderLabels[provider]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          Used to autogenerate session titles and commit messages.
+        </p>
       </div>
-      <div className="space-y-3">
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">LLM provider</Label>
-          <Select
-            value={titleGeneration.provider}
-            onValueChange={(value) => {
-              setTitleGeneration.mutate({
-                provider: value as typeof titleGeneration.provider,
-                model: titleGeneration.model,
-              });
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {titleGenerationProviders.map((provider) => (
-                <SelectItem key={provider} value={provider}>
-                  {titleGenerationProviderLabels[provider]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Used to autogenerate session titles and commit messages.
-          </p>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Model</Label>
-          <CursorModelPicker
-            value={titleGeneration.model}
-            recentModels={recentCursorModels}
-            includeAuto
-            onChange={(model) => {
-              setTitleGeneration.mutate({
-                provider: titleGeneration.provider,
-                model,
-              });
-              setLastSessionOptions.mutate({
-                ...lastSessionOptions,
-                cursor: {
-                  ...lastSessionOptions.cursor,
-                  permissionMode:
-                    lastSessionOptions.cursor?.permissionMode ?? "default",
-                  recentModels: addRecentCursorModel(recentCursorModels, model),
-                },
-              });
-            }}
-          />
-        </div>
+      <div className="space-y-2">
+        <Label className="text-sm font-medium">Model</Label>
+        <CursorModelPicker
+          value={titleGeneration.model}
+          recentModels={recentCursorModels}
+          includeAuto
+          onChange={(model) => {
+            setTitleGeneration.mutate({
+              provider: titleGeneration.provider,
+              model,
+            });
+            setLastSessionOptions.mutate({
+              ...lastSessionOptions,
+              cursor: {
+                ...lastSessionOptions.cursor,
+                permissionMode:
+                  lastSessionOptions.cursor?.permissionMode ?? "default",
+                recentModels: addRecentCursorModel(recentCursorModels, model),
+              },
+            });
+          }}
+        />
       </div>
     </div>
   );
