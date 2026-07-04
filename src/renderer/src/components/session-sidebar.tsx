@@ -13,6 +13,7 @@ import {
 } from "@renderer/components/ui/dropdown-menu";
 import { UsagePanel } from "@renderer/components/usage-panel";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
+import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
@@ -496,10 +497,11 @@ function SortableProjectGroup({
   onNewSession: () => void;
 }) {
   const locked = group.interactionDisabled;
+  const isMobile = useIsMobile();
   const { ref, handleRef, isDragging } = useSortable({
     id: group.path,
     index,
-    disabled: locked,
+    disabled: locked || isMobile,
   });
   const projectMeta = [group.gitBranch];
   if (group.isWorktree && group.worktreeOriginName) {
