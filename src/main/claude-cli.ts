@@ -24,6 +24,7 @@ export interface BuildClaudeArgsInput {
   haikuModelOverride?: ClaudeModel;
   subagentModelOverride?: ClaudeModel;
   systemPrompt?: string;
+  remoteControl?: boolean;
   stateFilePath: string;
   initialPrompt?: string;
   start: ClaudeStartOptions;
@@ -76,6 +77,10 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): {
 
   if (input.systemPrompt?.trim()) {
     args.push("--system-prompt", shellQuote(input.systemPrompt));
+  }
+
+  if (input.remoteControl) {
+    args.push("--remote-control");
   }
 
   args.push(...buildStartArgs(input.start));

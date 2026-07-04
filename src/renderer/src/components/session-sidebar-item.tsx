@@ -414,7 +414,7 @@ export const SessionSidebarItemTrigger = forwardRef<
           useMobileNavStore.getState().closeSidebar();
         }}
         className={cn(
-          "flex w-full items-center justify-start gap-1.5 py-1 pl-5 pr-[3rem] text-sm transition pointer-coarse:py-2 pointer-coarse:pr-[5.75rem]",
+          "flex w-full items-center justify-start gap-1.5 py-1 pl-5 pr-[3rem] text-sm transition pointer-coarse:py-2 pointer-coarse:pr-[4.75rem]",
           isActive
             ? "bg-white/15 text-white"
             : session.status === "stopped"
@@ -496,7 +496,9 @@ export const SidebarIconButton = forwardRef<
       }}
       className={cn(
         "pointer-events-auto inline-flex items-center justify-center text-zinc-300 transition",
-        size === "sm" ? "size-5 rounded" : "size-6 rounded-md",
+        size === "sm"
+          ? "size-5 rounded pointer-coarse:size-8 pointer-coarse:rounded-md"
+          : "size-6 rounded-md pointer-coarse:size-8",
         disabled
           ? "cursor-not-allowed opacity-40"
           : variant === "destructive"
@@ -509,7 +511,12 @@ export const SidebarIconButton = forwardRef<
       title={label}
       {...props}
     >
-      <Icon className={size === "sm" ? "size-3" : "size-3.5"} />
+      <Icon
+        className={cn(
+          size === "sm" ? "size-3" : "size-3.5",
+          "pointer-coarse:size-4",
+        )}
+      />
     </button>
   );
 });
@@ -554,13 +561,13 @@ export function BaseSessionSidebarItem({
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="pointer-events-auto hidden size-7 items-center justify-center rounded-md text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:flex"
+                className="pointer-events-auto hidden size-8 items-center justify-center rounded-md text-zinc-300 transition hover:bg-white/10 hover:text-white pointer-coarse:flex"
                 aria-label="Session actions"
                 title="Session actions"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
               >
-                <MoreHorizontal className="size-4" aria-hidden="true" />
+                <MoreHorizontal className="size-4.5" aria-hidden="true" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -573,6 +580,7 @@ export function BaseSessionSidebarItem({
             variant="destructive"
             disabled={deleteDisabled}
             onClick={onDelete}
+            className="pointer-coarse:hidden"
           />
         </SessionSidebarItemTrigger>
       </ContextMenuTrigger>

@@ -29,6 +29,7 @@ export interface LastClaudeSessionOptions {
   haikuModelOverride?: ClaudeModel;
   subagentModelOverride?: ClaudeModel;
   systemPrompt?: string;
+  remoteControl?: boolean;
 }
 
 export interface LastCodexSessionOptions {
@@ -64,6 +65,7 @@ export const lastClaudeSessionOptionsSchema = z.object({
   haikuModelOverride: claudeModelSchema.optional().catch(undefined),
   subagentModelOverride: claudeModelSchema.optional().catch(undefined),
   systemPrompt: z.string().optional().catch(undefined),
+  remoteControl: z.boolean().optional().catch(undefined),
 });
 
 export const lastCodexSessionOptionsSchema = z.object({
@@ -105,6 +107,7 @@ export function defaultClaudeSessionOptions(): LastClaudeSessionOptions {
     haikuModelOverride: undefined,
     subagentModelOverride: undefined,
     systemPrompt: undefined,
+    remoteControl: undefined,
   };
 }
 

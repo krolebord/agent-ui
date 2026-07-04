@@ -134,7 +134,7 @@ describe("ProjectTerminalsManager", () => {
     expect(manager.liveTerminals.size).toBe(0);
   });
 
-  it("restarts the selected terminal when the workspace is ensured again", () => {
+  it("restarts the selected terminal when the workspace is ensured again", async () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
@@ -142,7 +142,9 @@ describe("ProjectTerminalsManager", () => {
     const firstTerminalId = state["/tmp/project"]?.selectedTerminalId as string;
 
     terminalSessionSpies.callbacks[0]?.onExit({ exitCode: 0 });
-    expect(manager.liveTerminals.has(firstTerminalId)).toBe(false);
+    await vi.waitFor(() => {
+      expect(manager.liveTerminals.has(firstTerminalId)).toBe(false);
+    });
 
     manager.ensureWorkspace({ cwd: "/tmp/project" });
 

@@ -54,6 +54,7 @@ export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
     haikuModelOverride: claudeModelSchema.optional().catch(undefined),
     subagentModelOverride: claudeModelSchema.optional().catch(undefined),
     systemPrompt: z.string().optional().catch(undefined),
+    remoteControl: z.boolean().optional().catch(undefined),
     initialPrompt: z
       .string()
       .optional()
@@ -79,6 +80,7 @@ const startClaudeSessionSchema = z.object({
   haikuModelOverride: claudeModelSchema.optional(),
   subagentModelOverride: claudeModelSchema.optional(),
   systemPrompt: z.string().optional(),
+  remoteControl: z.boolean().optional(),
   initialPrompt: z
     .string()
     .optional()
@@ -92,6 +94,7 @@ const resumeClaudeSessionSchema = z.object({
   sessionId: z.string(),
   cols: z.number().optional(),
   rows: z.number().optional(),
+  remoteControl: z.boolean().optional(),
 });
 type ResumeClaudeSessionInput = z.infer<typeof resumeClaudeSessionSchema>;
 
@@ -271,6 +274,7 @@ export class SessionsServiceNew {
       haikuModelOverride: sessionInput.haikuModelOverride,
       subagentModelOverride: sessionInput.subagentModelOverride,
       systemPrompt: sessionInput.systemPrompt,
+      remoteControl: sessionInput.remoteControl,
       permissionMode: sessionInput.permissionMode ?? "default",
       pluginDir: this.pluginDir,
       initialPrompt: sessionInput.initialPrompt,
@@ -290,6 +294,7 @@ export class SessionsServiceNew {
         haikuModelOverride: startupOptions.haikuModelOverride,
         subagentModelOverride: startupOptions.subagentModelOverride,
         systemPrompt: startupOptions.systemPrompt,
+        remoteControl: startupOptions.remoteControl,
         permissionMode: startupOptions.permissionMode,
         cwd: startupOptions.cwd,
       },
@@ -310,6 +315,7 @@ export class SessionsServiceNew {
       haikuModelOverride: sessionInput.haikuModelOverride,
       subagentModelOverride: sessionInput.subagentModelOverride,
       systemPrompt: sessionInput.systemPrompt,
+      remoteControl: sessionInput.remoteControl,
       initialPrompt: sessionInput.initialPrompt,
       start: {
         type: "start-new",
@@ -346,6 +352,18 @@ export class SessionsServiceNew {
     }
     const session = this.getSessionState(input.sessionId);
 
+    if (
+      input.remoteControl !== undefined &&
+      input.remoteControl !== session.startupConfig.remoteControl
+    ) {
+      this.sessionsState.updateState((state) => {
+        const draft = state[input.sessionId];
+        if (draft?.type === "claude-local-terminal") {
+          draft.startupConfig.remoteControl = input.remoteControl;
+        }
+      });
+    }
+
     await this.createLiveSession({
       sessionId: session.sessionId,
       cols: input.cols,
@@ -357,6 +375,7 @@ export class SessionsServiceNew {
       haikuModelOverride: session.startupConfig.haikuModelOverride,
       subagentModelOverride: session.startupConfig.subagentModelOverride,
       systemPrompt: session.startupConfig.systemPrompt,
+      remoteControl: input.remoteControl ?? session.startupConfig.remoteControl,
       start: {
         type: "resume",
         sessionId: input.sessionId,
@@ -381,6 +400,7 @@ export class SessionsServiceNew {
         haikuModelOverride: session.startupConfig.haikuModelOverride,
         subagentModelOverride: session.startupConfig.subagentModelOverride,
         systemPrompt: session.startupConfig.systemPrompt,
+        remoteControl: session.startupConfig.remoteControl,
         permissionMode: session.startupConfig.permissionMode,
         cwd: session.startupConfig.cwd,
       },
@@ -402,6 +422,7 @@ export class SessionsServiceNew {
       haikuModelOverride: session.startupConfig.haikuModelOverride,
       subagentModelOverride: session.startupConfig.subagentModelOverride,
       systemPrompt: session.startupConfig.systemPrompt,
+      remoteControl: session.startupConfig.remoteControl,
       start: {
         type: "start-new",
         sessionId: sessionId,
@@ -422,6 +443,7 @@ export class SessionsServiceNew {
     haikuModelOverride?: ClaudeModel;
     subagentModelOverride?: ClaudeModel;
     systemPrompt?: string;
+    remoteControl?: boolean;
     initialPrompt?: string;
     start: ClaudeStartOptions;
   }) {
@@ -502,6 +524,7 @@ export class SessionsServiceNew {
       haikuModelOverride: opts.haikuModelOverride,
       subagentModelOverride: opts.subagentModelOverride,
       systemPrompt: opts.systemPrompt,
+      remoteControl: opts.remoteControl,
       stateFilePath,
       initialPrompt: effectiveInitialPrompt,
     });

@@ -36,6 +36,7 @@ import {
   GitBranch,
   GitFork,
   LoaderCircle,
+  MonitorSmartphone,
   PlayIcon,
   Plus,
   RefreshCw,
@@ -570,7 +571,7 @@ function SortableProjectGroup({
           }}
           disabled={locked}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-1.5 py-1 pl-1.5 pr-[3rem] text-left transition hover:bg-white/8 pointer-coarse:py-2",
+            "flex min-w-0 flex-1 items-center gap-1.5 py-1 pl-1.5 pr-[3rem] text-left transition hover:bg-white/8 pointer-coarse:py-2 pointer-coarse:pr-[4.75rem]",
             locked
               ? "cursor-not-allowed"
               : "cursor-grab active:cursor-grabbing",
@@ -829,6 +830,26 @@ function ClaudeLocalTerminalSessionSidebarItem({
     },
   });
 
+  const remoteControlMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await orpc.sessions.localClaude.stopLiveSession.call({ sessionId: id });
+      const { cols, rows } = getTerminalSize();
+      await orpc.sessions.localClaude.resumeSession.call({
+        sessionId: id,
+        cols,
+        rows,
+        remoteControl: true,
+      });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to resume session with remote control",
+      );
+    },
+  });
+
   const extraMenuActions: SessionMenuAction[] = [
     {
       type: "item",
@@ -837,6 +858,14 @@ function ClaudeLocalTerminalSessionSidebarItem({
       icon: GitFork,
       onSelect: () => forkMutation.mutate(sessionId),
       disabled: forkMutation.isPending,
+    },
+    {
+      type: "item",
+      key: "resume-remote-control",
+      label: "Resume with remote control",
+      icon: MonitorSmartphone,
+      onSelect: () => remoteControlMutation.mutate(sessionId),
+      disabled: remoteControlMutation.isPending,
     },
   ];
 

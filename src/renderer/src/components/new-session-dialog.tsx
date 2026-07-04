@@ -41,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@renderer/components/ui/select";
+import { Switch } from "@renderer/components/ui/switch";
 import { Textarea } from "@renderer/components/ui/textarea";
 import {
   ToggleGroup,
@@ -492,6 +493,7 @@ function LocalClaudeSessionForm({
           haikuModelOverride: options.haikuModelOverride,
           subagentModelOverride: options.subagentModelOverride,
           systemPrompt: options.systemPrompt || undefined,
+          remoteControl: options.remoteControl || undefined,
           permissionMode: options.permissionMode,
         });
       },
@@ -557,6 +559,25 @@ function LocalClaudeSessionForm({
           value={selectedHandoff}
           onChange={onHandoffChange}
           disabled={isPending}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <Label htmlFor="new-session-remote-control">Remote control</Label>
+          <p className="text-xs text-muted-foreground">
+            Control this session from claude.ai or the mobile app
+          </p>
+        </div>
+        <Switch
+          id="new-session-remote-control"
+          checked={options.remoteControl ?? false}
+          onCheckedChange={(checked) => {
+            setOptions((current) => ({
+              ...current,
+              remoteControl: checked || undefined,
+            }));
+          }}
         />
       </div>
 
