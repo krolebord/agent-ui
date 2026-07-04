@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@renderer/components/ui/dropdown-menu";
+import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import { UsagePanel } from "@renderer/components/usage-panel";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
@@ -320,104 +321,98 @@ export function SessionSidebar() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div>
-          <DragDropProvider
-            sensors={projectDragSensors}
-            onDragEnd={handleDragEnd}
-          >
-            {visibleProjectGroups.map((group, index) => (
-              <SortableProjectGroup
-                key={group.path}
-                group={group}
-                index={index}
-                onToggleCollapsed={() =>
-                  toggleProjectCollapsed.mutate({
+      <ScrollArea className="min-h-0 flex-1">
+        <DragDropProvider
+          sensors={projectDragSensors}
+          onDragEnd={handleDragEnd}
+        >
+          {visibleProjectGroups.map((group, index) => (
+            <SortableProjectGroup
+              key={group.path}
+              group={group}
+              index={index}
+              onToggleCollapsed={() =>
+                toggleProjectCollapsed.mutate({
+                  path: group.path,
+                  collapsed: !group.collapsed,
+                })
+              }
+              onCreateWorktree={() => setOpenProjectWorktreePath(group.path)}
+              canCreateWorktree={Boolean(group.gitBranch) && !group.isWorktree}
+              onOpenSettings={() => setOpenProjectCwd(group.path)}
+              onOpenFolder={() => openFolderMutation.mutate(group.path)}
+              onDelete={() => {
+                if (group.isWorktree) {
+                  openWorktreeDeleteDialog({
                     path: group.path,
-                    collapsed: !group.collapsed,
-                  })
-                }
-                onCreateWorktree={() => setOpenProjectWorktreePath(group.path)}
-                canCreateWorktree={
-                  Boolean(group.gitBranch) && !group.isWorktree
-                }
-                onOpenSettings={() => setOpenProjectCwd(group.path)}
-                onOpenFolder={() => openFolderMutation.mutate(group.path)}
-                onDelete={() => {
-                  if (group.isWorktree) {
-                    openWorktreeDeleteDialog({
-                      path: group.path,
-                      displayName: group.displayName,
-                      gitBranch: group.gitBranch,
-                    });
-                    return;
-                  }
-
-                  const sessionCount = group.sessions.length;
-                  const sessionLabel =
-                    sessionCount === 1
-                      ? "1 session"
-                      : `${sessionCount} sessions`;
-
-                  useConfirmDialogStore.getState().confirm({
-                    title: "Delete project",
-                    description:
-                      sessionCount > 0
-                        ? `Delete "${group.displayName}" and its ${sessionLabel}? This will also delete the project's sessions from Agent UI.`
-                        : `Delete "${group.displayName}" from Agent UI? This cannot be undone.`,
-                    confirmLabel: "Delete",
-                    onConfirm: async () => {
-                      await deleteProjectMutation.mutateAsync({
-                        path: group.path,
-                      });
-                    },
+                    displayName: group.displayName,
+                    gitBranch: group.gitBranch,
                   });
-                }}
-                isDeleting={deleteProjectMutation.isPending}
-                onToggleHidden={() =>
-                  toggleProjectHidden.mutate({
-                    path: group.path,
-                    hidden: !group.hidden,
-                  })
+                  return;
                 }
-                isTogglingHidden={toggleProjectHidden.isPending}
-                onNewSession={() => setOpenNewSessionDialogCwd(group.path)}
-              />
-            ))}
-            {untrackedGroups.map((group) => (
-              <section
-                key={group.path}
-                className="group/project border-b border-border/40"
-              >
-                <div className="flex items-center">
-                  <button
-                    type="button"
-                    className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition pointer-coarse:py-2"
-                  >
-                    <span className="inline-flex w-4 shrink-0" />
-                    <FolderOpen
-                      className={cn(
-                        "size-4 shrink-0",
-                        groupHasAwaitingUserInput(group)
-                          ? "text-violet-400"
-                          : "text-zinc-300",
-                      )}
-                    />
-                    <span className="truncate">{group.displayName}</span>
-                    <ProjectActiveSessionsPill
-                      projectPath={group.path}
-                      sessions={group.sessions}
-                    />
-                  </button>
-                </div>
-                {!group.collapsed ? (
-                  <GroupSessionsList sessions={group.sessions} />
-                ) : null}
-              </section>
-            ))}
-          </DragDropProvider>
-        </div>
-      </div>
+
+                const sessionCount = group.sessions.length;
+                const sessionLabel =
+                  sessionCount === 1 ? "1 session" : `${sessionCount} sessions`;
+
+                useConfirmDialogStore.getState().confirm({
+                  title: "Delete project",
+                  description:
+                    sessionCount > 0
+                      ? `Delete "${group.displayName}" and its ${sessionLabel}? This will also delete the project's sessions from Agent UI.`
+                      : `Delete "${group.displayName}" from Agent UI? This cannot be undone.`,
+                  confirmLabel: "Delete",
+                  onConfirm: async () => {
+                    await deleteProjectMutation.mutateAsync({
+                      path: group.path,
+                    });
+                  },
+                });
+              }}
+              isDeleting={deleteProjectMutation.isPending}
+              onToggleHidden={() =>
+                toggleProjectHidden.mutate({
+                  path: group.path,
+                  hidden: !group.hidden,
+                })
+              }
+              isTogglingHidden={toggleProjectHidden.isPending}
+              onNewSession={() => setOpenNewSessionDialogCwd(group.path)}
+            />
+          ))}
+          {untrackedGroups.map((group) => (
+            <section
+              key={group.path}
+              className="group/project border-b border-border/40"
+            >
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 cursor-default items-center gap-1.5 px-1.5 py-1 text-left text-sm font-medium text-zinc-100 opacity-90 transition pointer-coarse:py-2"
+                >
+                  <span className="inline-flex w-4 shrink-0" />
+                  <FolderOpen
+                    className={cn(
+                      "size-4 shrink-0",
+                      groupHasAwaitingUserInput(group)
+                        ? "text-violet-400"
+                        : "text-zinc-300",
+                    )}
+                  />
+                  <span className="truncate">{group.displayName}</span>
+                  <ProjectActiveSessionsPill
+                    projectPath={group.path}
+                    sessions={group.sessions}
+                  />
+                </button>
+              </div>
+              {!group.collapsed ? (
+                <GroupSessionsList sessions={group.sessions} />
+              ) : null}
+            </section>
+          ))}
+        </DragDropProvider>
+      </ScrollArea>
       <UsagePanel />
       <MachineStatsLine />
       <RenameSessionDialog />
