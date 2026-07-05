@@ -4,6 +4,7 @@ import {
   type TerminalPaneHandle,
 } from "@renderer/components/terminal-pane";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
+import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -65,7 +66,7 @@ export function LiveTerminalSurface({
     }
 
     terminalRef.current?.autofit();
-    if (!readOnly) {
+    if (!readOnly && shouldAutoFocus()) {
       terminalRef.current?.focus();
     }
   }, [active, readOnly]);

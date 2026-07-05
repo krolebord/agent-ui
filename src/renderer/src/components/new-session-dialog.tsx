@@ -49,6 +49,7 @@ import {
 } from "@renderer/components/ui/toggle-group";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
+import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
 import {
   getProjectDisplayName,
@@ -529,7 +530,7 @@ function LocalClaudeSessionForm({
         </Label>
         <Textarea
           id="new-session-initial-prompt"
-          autoFocus
+          autoFocus={shouldAutoFocus()}
           placeholder="What would you like Claude to do?"
           value={initialPrompt}
           onChange={(event) => {
@@ -904,7 +905,7 @@ function CodexSessionForm({
         </Label>
         <Textarea
           id="new-codex-initial-prompt"
-          autoFocus
+          autoFocus={shouldAutoFocus()}
           placeholder="What would you like Codex to do? (prefix with /plan for plan mode)"
           value={initialPrompt}
           onChange={(event) => {
@@ -1189,7 +1190,7 @@ function CursorAgentSessionForm({
         </Label>
         <Textarea
           id="new-cursor-agent-initial-prompt"
-          autoFocus
+          autoFocus={shouldAutoFocus()}
           placeholder="What would you like Cursor Agent to do?"
           value={initialPrompt}
           onChange={(event) => {

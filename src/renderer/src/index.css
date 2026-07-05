@@ -79,13 +79,17 @@
 body {
   @apply bg-background text-foreground antialiased;
   margin: 0;
-  min-height: 100vh;
+  /* dvh (not vh): on mobile Chrome 100vh includes the area behind the
+     collapsed URL bar, which makes the document itself scrollable. */
+  height: 100dvh;
   min-width: 320px;
+  overflow: hidden;
+  overscroll-behavior: none;
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
 }
 
 #root {
-  min-height: 100vh;
+  height: 100dvh;
 }
 
 .xterm-helper-textarea {

@@ -25,6 +25,7 @@ import {
 } from "@renderer/components/ui/dropdown-menu";
 import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
+import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { useHotkey } from "@tanstack/react-hotkeys";
@@ -843,6 +844,9 @@ function CommentDraftForm({
   const initialSelectionEndRef = useRef(body.length);
 
   useEffect(() => {
+    if (!shouldAutoFocus()) {
+      return;
+    }
     const handle = window.requestAnimationFrame(() => {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(

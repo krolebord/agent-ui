@@ -10,6 +10,7 @@ import {
 } from "@renderer/components/ui/dialog";
 import { Input } from "@renderer/components/ui/input";
 import { Label } from "@renderer/components/ui/label";
+import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -139,7 +140,7 @@ export function RenameSessionDialog() {
                 setTitle(event.target.value);
                 setError(null);
               }}
-              autoFocus
+              autoFocus={shouldAutoFocus()}
               maxLength={120}
               disabled={renameSessionMutation.isPending}
             />

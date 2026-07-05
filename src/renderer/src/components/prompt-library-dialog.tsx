@@ -12,6 +12,7 @@ import {
 import { Input } from "@renderer/components/ui/input";
 import { Label } from "@renderer/components/ui/label";
 import { Textarea } from "@renderer/components/ui/textarea";
+import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
 import type { PromptLibraryEntry } from "@shared/prompt-library";
 import { useMutation } from "@tanstack/react-query";
@@ -195,7 +196,7 @@ export function PromptLibraryDialog() {
                   setName(event.target.value);
                   setNameError(null);
                 }}
-                autoFocus
+                autoFocus={shouldAutoFocus()}
                 maxLength={120}
                 disabled={isSaving}
               />

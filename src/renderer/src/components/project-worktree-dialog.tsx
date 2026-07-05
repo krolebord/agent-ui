@@ -16,6 +16,7 @@ import {
   PopoverTrigger,
 } from "@renderer/components/ui/popover";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
+import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { getProjectDisplayName } from "@renderer/services/terminal-session-selectors";
@@ -389,6 +390,9 @@ export function ProjectWorktreeDialog() {
                 className="w-[var(--radix-popover-trigger-width)] p-0"
                 onOpenAutoFocus={(event) => {
                   event.preventDefault();
+                  if (!shouldAutoFocus()) {
+                    return;
+                  }
                   requestAnimationFrame(() => {
                     branchSearchInputRef.current?.focus();
                   });
@@ -508,7 +512,7 @@ export function ProjectWorktreeDialog() {
             <Label htmlFor="worktree-new-branch">New branch</Label>
             <Input
               id="worktree-new-branch"
-              autoFocus
+              autoFocus={shouldAutoFocus()}
               placeholder="feature/new-worktree"
               value={newBranch}
               onChange={(event) => {
