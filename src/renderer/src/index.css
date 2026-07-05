@@ -93,6 +93,7 @@ body {
 }
 
 .xterm-helper-textarea {
+  /* biome-ignore lint/complexity/noImportantStyles: Keep hidden terminal input at 16px to avoid mobile browser focus zoom. */
   font-size: 16px !important;
 }
 

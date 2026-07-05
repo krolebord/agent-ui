@@ -1,4 +1,3 @@
-import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { FolderPlus, MessageSquarePlus } from "lucide-react";
 
 export function WelcomePage({
@@ -13,9 +12,7 @@ export function WelcomePage({
         <p className="text-sm leading-relaxed text-zinc-400">
           {hasProjects
             ? "Select a session from the sidebar or start a new one to keep working."
-            : hasNativeDesktopShell
-              ? "Add a project from the sidebar, then start a new session to begin working with Claude."
-              : "Add a project from the desktop app, then use this browser view to keep working."}
+            : "Add a project from the sidebar, then start a new session to begin working with Claude."}
         </p>
         <div className="flex flex-col gap-3 text-left text-sm text-zinc-500">
           <div className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3">
@@ -26,14 +23,12 @@ export function WelcomePage({
                   Choose a project in the sidebar to inspect its sessions and
                   terminals
                 </>
-              ) : hasNativeDesktopShell ? (
+              ) : (
                 <>
                   Click{" "}
                   <strong className="text-zinc-300">Add new project</strong> to
                   register a working directory
                 </>
-              ) : (
-                <>Projects must be registered from the desktop app</>
               )}
             </span>
           </div>

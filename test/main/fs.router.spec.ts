@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const shellMock = vi.hoisted(() => ({
   openPath: vi.fn<(targetPath: string) => Promise<string>>(),
@@ -21,6 +24,7 @@ vi.mock("nano-spawn", () => ({
 }));
 
 import {
+  browseDirectories,
   openFolderInApp,
   openFolderInAppInputSchema,
 } from "../../src/main/fs.router";
@@ -116,5 +120,70 @@ describe("fs.router openFolderInApp", () => {
         app: "invalid-app",
       }),
     ).toThrow();
+  });
+});
+
+describe("fs.router browseDirectories", () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(path.join(os.tmpdir(), "agent-ui-fs-router-"));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns matching directories and excludes files", async () => {
+    await mkdir(path.join(tempDir, "alpha"));
+    await mkdir(path.join(tempDir, "alpine"));
+    await writeFile(path.join(tempDir, "alphabet.txt"), "ignore me");
+
+    const result = await browseDirectories({
+      partialPath: path.join(tempDir, "alp"),
+    });
+
+    expect(result).toEqual({
+      parentPath: tempDir,
+      entries: [
+        { name: "alpha", fullPath: path.join(tempDir, "alpha") },
+        { name: "alpine", fullPath: path.join(tempDir, "alpine") },
+      ],
+    });
+  });
+
+  it("shows hidden directories in directory mode and hidden-prefix mode", async () => {
+    await mkdir(path.join(tempDir, ".config"));
+    await mkdir(path.join(tempDir, "config"));
+
+    const directoryResult = await browseDirectories({
+      partialPath: `${tempDir}${path.sep}`,
+    });
+    const hiddenPrefixResult = await browseDirectories({
+      partialPath: path.join(tempDir, ".c"),
+    });
+
+    expect(directoryResult.entries.map((entry) => entry.name)).toEqual([
+      ".config",
+      "config",
+    ]);
+    expect(hiddenPrefixResult).toEqual({
+      parentPath: tempDir,
+      entries: [{ name: ".config", fullPath: path.join(tempDir, ".config") }],
+    });
+  });
+
+  it("resolves explicit relative paths against cwd", async () => {
+    await mkdir(path.join(tempDir, "packages"));
+
+    const result = await browseDirectories({
+      cwd: tempDir,
+      partialPath: "./pack",
+    });
+
+    expect(result).toEqual({
+      parentPath: tempDir,
+      entries: [{ name: "packages", fullPath: path.join(tempDir, "packages") }],
+    });
   });
 });

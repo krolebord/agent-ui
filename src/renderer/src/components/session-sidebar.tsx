@@ -36,7 +36,6 @@ import {
   FolderPlus,
   GitBranch,
   GitFork,
-  LoaderCircle,
   MonitorSmartphone,
   PlayIcon,
   Plus,
@@ -47,6 +46,7 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useAddProjectDialogStore } from "./add-project-dialog";
 import { useConfirmDialogStore } from "./confirm-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
@@ -168,6 +168,7 @@ export function SessionSidebar() {
   const [showHiddenProjects, setShowHiddenProjects] = useState(false);
 
   const openSettingsDialog = useSettingsStore((x) => x.openSettingsDialog);
+  const openAddProjectDialog = useAddProjectDialogStore((x) => x.open);
 
   const groups: ProjectSessionGroup[] = useMemo(
     () =>
@@ -196,14 +197,6 @@ export function SessionSidebar() {
     (x) => x.setOpenProjectPath,
   );
   const openWorktreeDeleteDialog = useWorktreeDeleteDialogStore((x) => x.open);
-
-  const createProjectMutation = useMutation({
-    mutationFn: async () => {
-      const cwd = await orpc.fs.selectFolder.call();
-      if (!cwd) return;
-      await orpc.projects.addProject.call({ path: cwd });
-    },
-  });
 
   const toggleProjectCollapsed = useMutation(
     orpc.projects.setProjectCollapsed.mutationOptions(),
@@ -302,26 +295,15 @@ export function SessionSidebar() {
           >
             <Settings className="size-3.5" />
           </Button>
-          {hasNativeDesktopShell ? (
-            <Button
-              variant="flat"
-              className="h-full w-9 shrink-0 px-0"
-              onClick={() => createProjectMutation.mutate()}
-              disabled={createProjectMutation.isPending}
-              aria-label="Add new project"
-              title={
-                createProjectMutation.isPending
-                  ? "Selecting project..."
-                  : "Add new project"
-              }
-            >
-              {createProjectMutation.isPending ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
-              ) : (
-                <FolderPlus className="size-3.5" />
-              )}
-            </Button>
-          ) : null}
+          <Button
+            variant="flat"
+            className="h-full w-9 shrink-0 px-0"
+            onClick={openAddProjectDialog}
+            aria-label="Add new project"
+            title="Add new project"
+          >
+            <FolderPlus className="size-3.5" />
+          </Button>
         </div>
       </div>
 

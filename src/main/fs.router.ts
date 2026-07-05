@@ -1,3 +1,6 @@
+import type { Dirent } from "node:fs";
+import { readdir } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { app, dialog, shell } from "electron";
 import spawn from "nano-spawn";
@@ -16,6 +19,11 @@ export const openFolderInAppInputSchema = z.object({
   app: openInAppTargetSchema,
 });
 
+export const browseDirectoriesInputSchema = z.object({
+  partialPath: pathSchema,
+  cwd: pathSchema.optional(),
+});
+
 const macAppNames: Record<Exclude<OpenInAppTarget, "finder">, string> = {
   cursor: "Cursor",
   "github-desktop": "GitHub Desktop",
@@ -28,6 +36,81 @@ function getErrorMessage(error: unknown) {
   }
 
   return "Unknown error";
+}
+
+function expandHomePath(input: string) {
+  if (input === "~") {
+    return os.homedir();
+  }
+  if (input.startsWith("~/") || input.startsWith("~\\")) {
+    return path.join(os.homedir(), input.slice(2));
+  }
+  return input;
+}
+
+function isExplicitRelativePath(input: string) {
+  return (
+    input === "." ||
+    input === ".." ||
+    input.startsWith("./") ||
+    input.startsWith("../") ||
+    input.startsWith(".\\") ||
+    input.startsWith("..\\")
+  );
+}
+
+function isPermissionDeniedError(error: unknown) {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EACCES" || code === "EPERM";
+}
+
+export async function browseDirectories({
+  partialPath,
+  cwd,
+}: z.infer<typeof browseDirectoriesInputSchema>) {
+  const inputPath = partialPath.trim();
+  const basePath = cwd?.trim();
+  const resolvedInputPath = isExplicitRelativePath(inputPath)
+    ? path.resolve(expandHomePath(basePath ?? ""), inputPath)
+    : path.resolve(expandHomePath(inputPath));
+
+  const isDirectoryMode = /[\\/]$/.test(inputPath) || inputPath === "~";
+  const parentPath = isDirectoryMode
+    ? resolvedInputPath
+    : path.dirname(resolvedInputPath);
+  const prefix = isDirectoryMode ? "" : path.basename(resolvedInputPath);
+
+  let dirents: Dirent<string>[];
+  try {
+    dirents = await readdir(parentPath, {
+      encoding: "utf8",
+      withFileTypes: true,
+    });
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      return { parentPath, entries: [] };
+    }
+    throw new Error(
+      `Failed to browse folder "${parentPath}": ${getErrorMessage(error)}`,
+    );
+  }
+
+  const lowerPrefix = prefix.toLowerCase();
+  const showHidden = isDirectoryMode || prefix.startsWith(".");
+  const entries = dirents
+    .filter(
+      (dirent) =>
+        dirent.isDirectory() &&
+        dirent.name.toLowerCase().startsWith(lowerPrefix) &&
+        (showHidden || !dirent.name.startsWith(".")),
+    )
+    .map((dirent) => ({
+      name: dirent.name,
+      fullPath: path.join(parentPath, dirent.name),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  return { parentPath, entries };
 }
 
 export async function openFolderInApp({
@@ -65,6 +148,11 @@ export const fsRouter = {
     .input(openFolderInAppInputSchema)
     .handler(async ({ input }) => {
       await openFolderInApp(input);
+    }),
+  browseDirectories: procedure
+    .input(browseDirectoriesInputSchema)
+    .handler(async ({ input }) => {
+      return browseDirectories(input);
     }),
   selectFolder: procedure.handler(async ({ context }) => {
     const dialogOptions: Electron.OpenDialogOptions = {
