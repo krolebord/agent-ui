@@ -96,8 +96,13 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): {
     CLAUDE_CODE_DISABLE_TERMINAL_TITLE: "1",
     DISABLE_BUG_COMMAND: "1",
     DISABLE_ERROR_REPORTING: "1",
-    DISABLE_TELEMETRY: "1",
   };
+
+  // Remote Control depends on feature-flag evaluation, which DISABLE_TELEMETRY
+  // turns off — leaving it set makes the CLI silently ignore --remote-control.
+  if (!input.remoteControl) {
+    env.DISABLE_TELEMETRY = "1";
+  }
 
   if (input.haikuModelOverride) {
     env.ANTHROPIC_DEFAULT_HAIKU_MODEL = input.haikuModelOverride;

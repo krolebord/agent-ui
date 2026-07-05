@@ -830,25 +830,39 @@ function ClaudeLocalTerminalSessionSidebarItem({
     },
   });
 
-  const remoteControlMutation = useMutation({
+  const isRunning = session.status !== "stopped";
+  const isRemote =
+    session.type === "claude-local-terminal"
+      ? (session.startupConfig.remoteControl ?? false)
+      : false;
+
+  const toggleRemoteControlMutation = useMutation({
     mutationFn: async (id: string) => {
-      await orpc.sessions.localClaude.stopLiveSession.call({ sessionId: id });
+      const nextRemote = !isRemote;
+      if (isRunning) {
+        await orpc.sessions.localClaude.stopLiveSession.call({ sessionId: id });
+      }
       const { cols, rows } = getTerminalSize();
       await orpc.sessions.localClaude.resumeSession.call({
         sessionId: id,
         cols,
         rows,
-        remoteControl: true,
+        remoteControl: nextRemote,
       });
     },
     onError: (error) => {
       toast.error(
         error instanceof Error
           ? error.message
-          : "Failed to resume session with remote control",
+          : "Failed to toggle remote control",
       );
     },
   });
+
+  const verb = isRunning ? "Restart" : "Start";
+  const remoteControlLabel = isRemote
+    ? `${verb} without remote control`
+    : `${verb} with remote control`;
 
   const extraMenuActions: SessionMenuAction[] = [
     {
@@ -861,11 +875,11 @@ function ClaudeLocalTerminalSessionSidebarItem({
     },
     {
       type: "item",
-      key: "resume-remote-control",
-      label: "Resume with remote control",
+      key: "toggle-remote-control",
+      label: remoteControlLabel,
       icon: MonitorSmartphone,
-      onSelect: () => remoteControlMutation.mutate(sessionId),
-      disabled: remoteControlMutation.isPending,
+      onSelect: () => toggleRemoteControlMutation.mutate(sessionId),
+      disabled: toggleRemoteControlMutation.isPending,
     },
   ];
 

@@ -41,4 +41,18 @@ describe("buildClaudeArgs", () => {
     expect(args).toContain("--remote-control");
     expect(args).toContain("--resume");
   });
+
+  it("sets DISABLE_TELEMETRY by default", () => {
+    const { env } = buildClaudeArgs(makeInput());
+
+    expect(env.DISABLE_TELEMETRY).toBe("1");
+  });
+
+  it("omits DISABLE_TELEMETRY when remote control is enabled", () => {
+    const { env } = buildClaudeArgs(makeInput({ remoteControl: true }));
+
+    // DISABLE_TELEMETRY disables feature-flag evaluation, which Remote Control
+    // requires — otherwise the CLI silently ignores --remote-control.
+    expect(env.DISABLE_TELEMETRY).toBeUndefined();
+  });
 });
