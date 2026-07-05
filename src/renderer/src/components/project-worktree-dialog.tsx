@@ -17,6 +17,7 @@ import {
 } from "@renderer/components/ui/popover";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
+import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { getProjectDisplayName } from "@renderer/services/terminal-session-selectors";
@@ -540,18 +541,20 @@ export function ProjectWorktreeDialog() {
               <Label htmlFor="worktree-destination-path">
                 Destination path
               </Label>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  void handlePickParentFolder();
-                }}
-                disabled={!creationData || isPending}
-              >
-                <FolderSearch className="size-3.5" />
-                Choose parent folder
-              </Button>
+              {hasNativeDesktopShell ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    void handlePickParentFolder();
+                  }}
+                  disabled={!creationData || isPending}
+                >
+                  <FolderSearch className="size-3.5" />
+                  Choose parent folder
+                </Button>
+              ) : null}
             </div>
             <Input
               id="worktree-destination-path"

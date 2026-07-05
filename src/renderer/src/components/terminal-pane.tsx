@@ -1,4 +1,5 @@
 import { useTerminalSizeStore } from "@renderer/hooks/use-terminal-size";
+import { attachTouchScroll } from "@renderer/lib/terminal-touch-scroll";
 import { cn } from "@renderer/lib/utils";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -100,6 +101,7 @@ export function TerminalPane({
     );
     terminal.open(container);
     terminalRef.current = terminal;
+    const detachTouchScroll = attachTouchScroll(terminal, container);
 
     const flushResize = () => {
       const pending = pendingResizeRef.current;
@@ -197,6 +199,7 @@ export function TerminalPane({
     fitAndNotify();
 
     return () => {
+      detachTouchScroll();
       onDataDisposable.dispose();
       onResizeDisposable.dispose();
       resizeObserver.disconnect();
@@ -220,5 +223,10 @@ export function TerminalPane({
     terminalRef.current.options.disableStdin = readOnly;
   }, [readOnly]);
 
-  return <div ref={containerRef} className={cn("h-full w-full", className)} />;
+  return (
+    <div
+      ref={containerRef}
+      className={cn("h-full w-full touch-none", className)}
+    />
+  );
 }

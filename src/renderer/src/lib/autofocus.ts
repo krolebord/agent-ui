@@ -1,4 +1,4 @@
-const coarsePointerQuery = window.matchMedia("(pointer: coarse)");
+import { isCoarsePointer } from "@renderer/lib/pointer";
 
 /**
  * On touch devices, programmatically focusing an input summons the on-screen
@@ -6,7 +6,7 @@ const coarsePointerQuery = window.matchMedia("(pointer: coarse)");
  * keyboard only appears when the user taps a field.
  */
 export function shouldAutoFocus(): boolean {
-  return !coarsePointerQuery.matches;
+  return !isCoarsePointer();
 }
 
 /**

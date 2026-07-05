@@ -50,6 +50,7 @@ import {
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
+import { isCoarsePointer } from "@renderer/lib/pointer";
 import { orpc } from "@renderer/orpc-client";
 import {
   getProjectDisplayName,
@@ -537,7 +538,11 @@ function LocalClaudeSessionForm({
             setInitialPrompt(event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !isCoarsePointer()
+            ) {
               event.preventDefault();
               handleSubmit();
             }
@@ -912,7 +917,11 @@ function CodexSessionForm({
             setInitialPrompt(event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !isCoarsePointer()
+            ) {
               event.preventDefault();
               handleSubmit();
             }
@@ -1197,7 +1206,11 @@ function CursorAgentSessionForm({
             setInitialPrompt(event.target.value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !isCoarsePointer()
+            ) {
               event.preventDefault();
               handleSubmit();
             }

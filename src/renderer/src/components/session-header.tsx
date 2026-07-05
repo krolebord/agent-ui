@@ -1,5 +1,6 @@
 import type { Session } from "@main/sessions/state";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
+import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import {
@@ -300,52 +301,54 @@ export function SessionHeader({ session }: { session: Session }) {
           </Button>
         ))}
       </div>
-      <div className="flex max-md:hidden shrink-0 items-center">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={openFolderInAppMutation.isPending || projectLocked}
-          className="rounded-r-none border-r-0 text-xs"
-          onClick={() => {
-            openFolder(preferredApp);
-          }}
-        >
-          <PreferredAppIcon className="size-3.5 text-muted-foreground" />
-          <span>Open</span>
-        </Button>
-        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={openFolderInAppMutation.isPending || projectLocked}
-              className="rounded-l-none px-2 text-xs"
-            >
-              <ChevronDown className="size-3.5 text-muted-foreground" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-40">
-            <DropdownMenuLabel>Open in</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {openInAppItems.map(({ app, icon: AppIcon }) => (
-              <DropdownMenuItem
-                key={app}
+      {hasNativeDesktopShell ? (
+        <div className="flex max-md:hidden shrink-0 items-center">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={openFolderInAppMutation.isPending || projectLocked}
+            className="rounded-r-none border-r-0 text-xs"
+            onClick={() => {
+              openFolder(preferredApp);
+            }}
+          >
+            <PreferredAppIcon className="size-3.5 text-muted-foreground" />
+            <span>Open</span>
+          </Button>
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
                 disabled={openFolderInAppMutation.isPending || projectLocked}
-                onClick={() => {
-                  setPreferredApp(app);
-                  setMenuOpen(false);
-                  openFolder(app);
-                }}
+                className="rounded-l-none px-2 text-xs"
               >
-                <AppIcon className="size-4" />
-                {openInAppTargetLabels[app]}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+                <ChevronDown className="size-3.5 text-muted-foreground" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-40">
+              <DropdownMenuLabel>Open in</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {openInAppItems.map(({ app, icon: AppIcon }) => (
+                <DropdownMenuItem
+                  key={app}
+                  disabled={openFolderInAppMutation.isPending || projectLocked}
+                  onClick={() => {
+                    setPreferredApp(app);
+                    setMenuOpen(false);
+                    openFolder(app);
+                  }}
+                >
+                  <AppIcon className="size-4" />
+                  {openInAppTargetLabels[app]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : null}
     </header>
   );
 }

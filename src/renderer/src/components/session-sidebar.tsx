@@ -17,6 +17,7 @@ import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
+import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import type { ProjectSessionGroup } from "@renderer/services/terminal-session-selectors";
@@ -301,24 +302,26 @@ export function SessionSidebar() {
           >
             <Settings className="size-3.5" />
           </Button>
-          <Button
-            variant="flat"
-            className="h-full w-9 shrink-0 px-0"
-            onClick={() => createProjectMutation.mutate()}
-            disabled={createProjectMutation.isPending}
-            aria-label="Add new project"
-            title={
-              createProjectMutation.isPending
-                ? "Selecting project..."
-                : "Add new project"
-            }
-          >
-            {createProjectMutation.isPending ? (
-              <LoaderCircle className="size-3.5 animate-spin" />
-            ) : (
-              <FolderPlus className="size-3.5" />
-            )}
-          </Button>
+          {hasNativeDesktopShell ? (
+            <Button
+              variant="flat"
+              className="h-full w-9 shrink-0 px-0"
+              onClick={() => createProjectMutation.mutate()}
+              disabled={createProjectMutation.isPending}
+              aria-label="Add new project"
+              title={
+                createProjectMutation.isPending
+                  ? "Selecting project..."
+                  : "Add new project"
+              }
+            >
+              {createProjectMutation.isPending ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <FolderPlus className="size-3.5" />
+              )}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -670,10 +673,12 @@ function SortableProjectGroup({
                 <Settings className="size-3.5" />
                 Settings
               </DropdownMenuItem>
-              <DropdownMenuItem disabled={locked} onClick={onOpenFolder}>
-                <FolderOpen className="size-3.5" />
-                Open project folder
-              </DropdownMenuItem>
+              {hasNativeDesktopShell ? (
+                <DropdownMenuItem disabled={locked} onClick={onOpenFolder}>
+                  <FolderOpen className="size-3.5" />
+                  Open project folder
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 disabled={locked || refreshGitMutation.isPending}
                 onClick={() => refreshGitMutation.mutate({ path: group.path })}

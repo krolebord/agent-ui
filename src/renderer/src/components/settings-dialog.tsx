@@ -28,6 +28,7 @@ import {
 } from "@renderer/components/ui/select";
 import { Switch } from "@renderer/components/ui/switch";
 import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
+import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { orpc } from "@renderer/orpc-client";
 import { titleGenerationProviders } from "@shared/title-generation";
 import { useMutation } from "@tanstack/react-query";
@@ -110,17 +111,19 @@ export function SettingsDialog() {
             </AccordionContent>
           </AccordionItem>
 
-          <AccordionItem value="files-folders">
-            <SettingsSectionTrigger icon={FolderOpen}>
-              Files & folders
-            </SettingsSectionTrigger>
-            <AccordionContent className="divide-y divide-border/40">
-              <OpenLogFolder />
-              <OpenStatePluginFolder />
-              <OpenSessionFilesFolder />
-              <OpenHandoffsFolder />
-            </AccordionContent>
-          </AccordionItem>
+          {hasNativeDesktopShell ? (
+            <AccordionItem value="files-folders">
+              <SettingsSectionTrigger icon={FolderOpen}>
+                Files & folders
+              </SettingsSectionTrigger>
+              <AccordionContent className="divide-y divide-border/40">
+                <OpenLogFolder />
+                <OpenStatePluginFolder />
+                <OpenSessionFilesFolder />
+                <OpenHandoffsFolder />
+              </AccordionContent>
+            </AccordionItem>
+          ) : null}
 
           <AccordionItem value="keyboard-shortcuts">
             <SettingsSectionTrigger icon={Keyboard}>
@@ -137,7 +140,7 @@ export function SettingsDialog() {
             <span className="text-xs text-muted-foreground">
               v{__APP_VERSION__}
             </span>
-            <OpenDevToolsButton />
+            {hasNativeDesktopShell ? <OpenDevToolsButton /> : null}
           </div>
         </DialogFooter>
       </DialogContent>
