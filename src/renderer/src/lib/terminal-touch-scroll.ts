@@ -1,11 +1,12 @@
 import type { Terminal } from "@xterm/xterm";
 
 // xterm.js has no built-in touch scrolling. This translates vertical touch
-// pans into synthetic line-mode WheelEvents dispatched at xterm's screen
-// element, so xterm's own wheel routing applies in every mode: scrollback in
-// the normal buffer, arrow-key sequences in the alternate buffer (how Claude
-// CLI scrolls its transcript), and wheel mouse reporting when an app enables
-// mouse tracking.
+// pans into scroll actions: direct scrollLines() for normal-buffer scrollback
+// (see dispatchLines for why wheel events don't work there), and synthetic
+// line-mode WheelEvents dispatched at xterm's screen element otherwise, so
+// xterm's own wheel routing produces arrow-key sequences in the alternate
+// buffer (how Claude CLI scrolls its transcript) and wheel mouse reporting
+// when an app enables mouse tracking.
 //
 // Integer line-mode deltas are used instead of pixel deltas because xterm
 // damps small pixel deltas (×0.3 under 50px, tuned for physical mice), which
@@ -35,6 +36,18 @@ export function attachTouchScroll(
   };
 
   const dispatchLines = (lines: number) => {
+    // Normal-buffer scrollback can't be driven by synthetic wheel events:
+    // xterm 6's viewport reads Chromium's legacy wheelDeltaY (which Chromium
+    // derives as -deltaY, ignoring deltaMode), so a line-mode delta collapses
+    // to under a pixel of scroll. Scroll the buffer directly instead. When an
+    // app enables mouse tracking, keep the wheel path so it gets reported.
+    if (
+      terminal.buffer.active.type === "normal" &&
+      terminal.modes.mouseTrackingMode === "none"
+    ) {
+      terminal.scrollLines(lines);
+      return;
+    }
     const target =
       terminal.element?.querySelector(".xterm-screen") ?? terminal.element;
     target?.dispatchEvent(
