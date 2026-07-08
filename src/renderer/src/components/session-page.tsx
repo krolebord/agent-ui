@@ -1,11 +1,11 @@
 import { ProjectDiffPane } from "@renderer/components/diff-review-pane";
 import { ProjectGitHistoryPane } from "@renderer/components/git-history-pane";
 import { LiveTerminalSurface } from "@renderer/components/live-terminal-surface";
+import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigger";
 import { ProjectBottomPane } from "@renderer/components/project-bottom-pane";
 import { ProjectTerminalPane } from "@renderer/components/project-terminal-pane";
 import { SessionHeader } from "@renderer/components/session-header";
 import { TerminalKeyBar } from "@renderer/components/terminal-key-bar";
-import { Button } from "@renderer/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -18,7 +18,6 @@ import {
 } from "@renderer/components/ui/resizable";
 import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
-import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { cn } from "@renderer/lib/utils";
 import {
   AlertCircle,
@@ -28,7 +27,6 @@ import {
   FileDiff,
   History,
   LoaderCircle,
-  Menu,
   SquareTerminal,
   TerminalSquare,
 } from "lucide-react";
@@ -58,20 +56,9 @@ const mobileTabItems: Array<{
 ];
 
 function MobileWelcomeBar() {
-  const openSidebar = useMobileNavStore((state) => state.openSidebar);
-
   return (
     <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border/70 px-2 py-1.5 md:hidden">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="size-8 px-0"
-        onClick={openSidebar}
-        aria-label="Open sessions menu"
-      >
-        <Menu className="size-4" />
-      </Button>
+      <MobileSidebarTrigger />
       <span className="text-sm font-medium">Agent UI</span>
     </div>
   );

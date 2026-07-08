@@ -120,7 +120,12 @@ function App() {
       <SettingsDialog />
       <PromptLibraryDialog />
       <DiffReviewCommitDialog />
-      <Toaster closeButton />
+      <Toaster
+        closeButton
+        mobileOffset={{
+          bottom: "calc(env(safe-area-inset-bottom) + 4rem)",
+        }}
+      />
     </>
   );
 }
