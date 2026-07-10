@@ -78,6 +78,7 @@ export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
     permissionMode: z.enum(["default", "full-auto", "yolo"]).default("default"),
     initialPrompt: z.string().optional(),
     configOverrides: z.string().optional(),
+    mcpEnabled: z.boolean().optional().catch(undefined),
   }),
 });
 export type CodexLocalTerminalSessionData = z.infer<
@@ -101,6 +102,7 @@ const startCodexSessionSchema = z.object({
     .optional()
     .transform((value) => value?.trim() || undefined),
   configOverrides: z.string().optional(),
+  mcpEnabled: z.boolean().optional(),
 });
 
 const renameCodexSessionSchema = z.object({
@@ -158,6 +160,7 @@ export const codexSessionsRouter = {
           ? undefined
           : session.startupConfig.initialPrompt,
         configOverrides: session.startupConfig.configOverrides,
+        mcpEnabled: session.startupConfig.mcpEnabled,
         cols: input.cols,
         rows: input.rows,
       });
@@ -466,6 +469,7 @@ export class CodexSessionsManager {
         permissionMode: input.permissionMode,
         initialPrompt,
         configOverrides: input.configOverrides,
+        mcpEnabled: input.mcpEnabled,
       },
     };
 
@@ -648,6 +652,7 @@ export class CodexSessionsManager {
     permissionMode,
     initialPrompt,
     configOverrides,
+    mcpEnabled,
     cols,
     rows,
   }: {
@@ -661,6 +666,7 @@ export class CodexSessionsManager {
     permissionMode: CodexPermissionMode;
     initialPrompt?: string;
     configOverrides?: string;
+    mcpEnabled?: boolean;
     cols?: number;
     rows?: number;
   }): Promise<void> {
@@ -759,7 +765,8 @@ export class CodexSessionsManager {
       },
     });
     let tracker: CodexAppServerTracker | null = null;
-    const mcpServerUrl = this.getMcpServerUrl?.() ?? null;
+    const mcpServerUrl =
+      mcpEnabled === false ? null : (this.getMcpServerUrl?.() ?? null);
 
     try {
       await appServer.start({ cwd, mcpServerUrl });
@@ -908,6 +915,7 @@ export class CodexSessionsManager {
         permissionMode: sourceSession.startupConfig.permissionMode,
         initialPrompt: sourceSession.startupConfig.initialPrompt,
         configOverrides: sourceSession.startupConfig.configOverrides,
+        mcpEnabled: sourceSession.startupConfig.mcpEnabled,
       },
     };
 
@@ -925,6 +933,7 @@ export class CodexSessionsManager {
       fastMode: forkedSession.startupConfig.fastMode,
       permissionMode: forkedSession.startupConfig.permissionMode,
       configOverrides: forkedSession.startupConfig.configOverrides,
+      mcpEnabled: forkedSession.startupConfig.mcpEnabled,
       cols: input.cols,
       rows: input.rows,
     });

@@ -30,6 +30,7 @@ export interface LastClaudeSessionOptions {
   subagentModelOverride?: ClaudeModel;
   systemPrompt?: string;
   remoteControl?: boolean;
+  mcpEnabled?: boolean;
 }
 
 export interface LastCodexSessionOptions {
@@ -39,6 +40,7 @@ export interface LastCodexSessionOptions {
   fastMode: CodexFastMode;
   permissionMode: CodexPermissionMode;
   configOverrides?: string;
+  mcpEnabled?: boolean;
 }
 
 export interface LastCursorSessionOptions {
@@ -66,6 +68,7 @@ export const lastClaudeSessionOptionsSchema = z.object({
   subagentModelOverride: claudeModelSchema.optional().catch(undefined),
   systemPrompt: z.string().optional().catch(undefined),
   remoteControl: z.boolean().optional().catch(undefined),
+  mcpEnabled: z.boolean().optional().catch(undefined),
 });
 
 export const lastCodexSessionOptionsSchema = z.object({
@@ -79,6 +82,7 @@ export const lastCodexSessionOptionsSchema = z.object({
   fastMode: codexFastModeSchema.catch("default"),
   permissionMode: codexPermissionModeSchema.catch("default"),
   configOverrides: z.string().optional().catch(undefined),
+  mcpEnabled: z.boolean().optional().catch(undefined),
 });
 
 export const lastCursorSessionOptionsSchema = z.object({
@@ -108,6 +112,7 @@ export function defaultClaudeSessionOptions(): LastClaudeSessionOptions {
     subagentModelOverride: undefined,
     systemPrompt: undefined,
     remoteControl: undefined,
+    mcpEnabled: undefined,
   };
 }
 
@@ -119,6 +124,7 @@ export function defaultCodexSessionOptions(): LastCodexSessionOptions {
     fastMode: "default",
     permissionMode: "default",
     configOverrides: undefined,
+    mcpEnabled: undefined,
   };
 }
 
