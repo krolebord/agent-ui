@@ -475,7 +475,7 @@ export class CursorAgentSessionsManager {
     const terminal = this.terminalManager.startTerminal({
       terminalId: sessionId,
       launch: {
-        file: "cursor",
+        file: "cursor-agent",
         args: finalArgs,
         runWithShell: true,
         cwd,

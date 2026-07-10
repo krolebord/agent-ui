@@ -24,7 +24,7 @@ export function createCursorProvider(
       ];
 
       try {
-        const { output } = await spawn("cursor", args, {
+        const { output } = await spawn("cursor-agent", args, {
           preferLocal: true,
           timeout: options?.timeoutMs ?? 30_000,
           stdin: "ignore",
