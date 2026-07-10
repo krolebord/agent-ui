@@ -10,6 +10,7 @@
       "**",
       "!**/dist",
       "!**/dist-electron",
+      "!**/dist-headless",
       "!**/.vite",
       "!**/node_modules",
       "!**/.vscode",

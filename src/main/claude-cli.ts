@@ -4,6 +4,7 @@ import type {
   ClaudeModel,
   ClaudePermissionMode,
 } from "../shared/claude-types";
+import { buildClaudeMcpConfig } from "./mcp/client-config";
 
 export type ClaudeStartOptions =
   | {
@@ -27,6 +28,7 @@ export interface BuildClaudeArgsInput {
   remoteControl?: boolean;
   stateFilePath: string;
   initialPrompt?: string;
+  mcpServerUrl?: string | null;
   start: ClaudeStartOptions;
 }
 
@@ -65,6 +67,13 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): {
 
   if (input.pluginDir) {
     args.push("--plugin-dir", shellQuote(input.pluginDir));
+  }
+
+  if (input.mcpServerUrl) {
+    args.push(
+      "--mcp-config",
+      shellQuote(buildClaudeMcpConfig(input.mcpServerUrl)),
+    );
   }
 
   if (input.model) {

@@ -43,6 +43,7 @@ interface SessionServiceOptions {
   titleGeneration: TitleGenerationService;
   stateFileManager: SessionStateFileManager;
   state: SessionServiceState;
+  getMcpServerUrl?: () => string | null;
 }
 
 export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
@@ -226,11 +227,13 @@ export class SessionsServiceNew {
   private readonly pluginWarning: string | null;
   private readonly titleGeneration: TitleGenerationService;
   private readonly stateFileManager: SessionStateFileManager;
+  private readonly getMcpServerUrl: (() => string | null) | null;
   readonly terminalManager: TerminalManager;
 
   constructor(options: SessionServiceOptions) {
     this.pluginDir = options.pluginDir;
     this.pluginWarning = options.pluginWarning;
+    this.getMcpServerUrl = options.getMcpServerUrl ?? null;
     this.titleGeneration = options.titleGeneration;
     this.stateFileManager = options.stateFileManager;
     this.sessionsState = options.state;
@@ -527,6 +530,7 @@ export class SessionsServiceNew {
       remoteControl: opts.remoteControl,
       stateFilePath,
       initialPrompt: effectiveInitialPrompt,
+      mcpServerUrl: this.getMcpServerUrl?.() ?? null,
     });
 
     const runtime = this.terminalManager.startTerminal({

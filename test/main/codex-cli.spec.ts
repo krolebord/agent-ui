@@ -106,4 +106,26 @@ describe("buildCodexArgs", () => {
       }),
     ).toThrow("Codex sessions cannot resume and fork at the same time.");
   });
+
+  it("omits the mcp_servers override by default", () => {
+    const { args } = buildCodexArgs({ permissionMode: "default" });
+
+    expect(args.join(" ")).not.toContain("mcp_servers");
+  });
+
+  it("adds the agent-ui mcp_servers override when a URL is provided", () => {
+    const { args } = buildCodexArgs({
+      permissionMode: "default",
+      mcpServerUrl: "http://127.0.0.1:3420/mcp",
+    });
+
+    const overrideIndex = args.findIndex((arg) =>
+      arg.includes("mcp_servers.agent-ui.url"),
+    );
+    expect(overrideIndex).toBeGreaterThan(0);
+    expect(args[overrideIndex - 1]).toBe("-c");
+    expect(args[overrideIndex]).toBe(
+      `'mcp_servers.agent-ui.url="http://127.0.0.1:3420/mcp"'`,
+    );
+  });
 });

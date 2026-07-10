@@ -233,6 +233,7 @@ interface CodexSessionsManagerOptions {
   state: SessionServiceState;
   terminalManager?: TerminalManager;
   titleGeneration?: TitleGenerationService;
+  getMcpServerUrl?: () => string | null;
 }
 
 function getCodexSessionStatus(
@@ -405,6 +406,7 @@ export class CodexSessionsManager {
   private readonly sessionsState: SessionServiceState;
   private readonly terminalManager: TerminalManager;
   private readonly titleGeneration: TitleGenerationService | null;
+  private readonly getMcpServerUrl: (() => string | null) | null;
   private readonly subagentPruneTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -415,6 +417,7 @@ export class CodexSessionsManager {
       this.sessionsState = options;
       this.terminalManager = new TerminalManager();
       this.titleGeneration = null;
+      this.getMcpServerUrl = null;
       for (const [sessionId, session] of Object.entries(
         this.sessionsState.state,
       )) {
@@ -430,6 +433,7 @@ export class CodexSessionsManager {
     this.sessionsState = options.state;
     this.terminalManager = options.terminalManager ?? new TerminalManager();
     this.titleGeneration = options.titleGeneration ?? null;
+    this.getMcpServerUrl = options.getMcpServerUrl ?? null;
     for (const [sessionId, session] of Object.entries(
       this.sessionsState.state,
     )) {
@@ -755,9 +759,10 @@ export class CodexSessionsManager {
       },
     });
     let tracker: CodexAppServerTracker | null = null;
+    const mcpServerUrl = this.getMcpServerUrl?.() ?? null;
 
     try {
-      await appServer.start({ cwd });
+      await appServer.start({ cwd, mcpServerUrl });
 
       tracker = new CodexAppServerTracker({
         sessionId,
@@ -808,6 +813,7 @@ export class CodexSessionsManager {
       modelReasoningEffort,
       fastMode,
       configOverrides,
+      mcpServerUrl,
       initialPrompt: isPlanMode ? undefined : initialPrompt,
     });
 

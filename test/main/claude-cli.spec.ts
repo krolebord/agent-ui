@@ -55,4 +55,22 @@ describe("buildClaudeArgs", () => {
     // requires — otherwise the CLI silently ignores --remote-control.
     expect(env.DISABLE_TELEMETRY).toBeUndefined();
   });
+
+  it("omits --mcp-config by default", () => {
+    const { args } = buildClaudeArgs(makeInput());
+
+    expect(args).not.toContain("--mcp-config");
+  });
+
+  it("adds --mcp-config with the agent-ui server when a URL is provided", () => {
+    const { args } = buildClaudeArgs(
+      makeInput({ mcpServerUrl: "http://127.0.0.1:3420/mcp" }),
+    );
+
+    const flagIndex = args.indexOf("--mcp-config");
+    expect(flagIndex).toBeGreaterThanOrEqual(0);
+    expect(args[flagIndex + 1]).toBe(
+      `'{"mcpServers":{"agent-ui":{"type":"http","url":"http://127.0.0.1:3420/mcp"}}}'`,
+    );
+  });
 });

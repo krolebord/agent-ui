@@ -12,6 +12,7 @@ import type { WebSocket } from "ws";
 import { WebSocketServer } from "ws";
 import type { Services } from "./create-services";
 import log from "./logger";
+import { handleMcpHttpRequest, MCP_PATH } from "./mcp/server";
 import { orpcRouter } from "./orpc-router";
 
 interface WebAppServerOptions {
@@ -57,6 +58,11 @@ function sendText(
     "content-length": Buffer.byteLength(body),
   });
   res.end(body);
+}
+
+function isMcpRequest(req: IncomingMessage) {
+  const pathname = new URL(req.url ?? "/", "http://agent-ui.local").pathname;
+  return pathname === MCP_PATH;
 }
 
 function getWebSocketUrl(req: IncomingMessage, port: number) {
@@ -167,6 +173,16 @@ export async function startWebAppServer(options: WebAppServerOptions) {
   const server = createServer((req, res) => {
     if (req.url?.startsWith("/rpc")) {
       sendText(res, 426, "WebSocket upgrade required");
+      return;
+    }
+
+    if (isMcpRequest(req)) {
+      const services = options.getServices();
+      if (!services) {
+        sendText(res, 503, "Service unavailable");
+        return;
+      }
+      void handleMcpHttpRequest(req, res, services);
       return;
     }
 

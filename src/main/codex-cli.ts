@@ -4,6 +4,7 @@ import type {
   CodexModelReasoningEffort,
   CodexPermissionMode,
 } from "../shared/codex-types";
+import { buildCodexMcpConfigOverride } from "./mcp/client-config";
 
 export interface BuildCodexArgsInput {
   remoteWsUrl?: string;
@@ -12,6 +13,7 @@ export interface BuildCodexArgsInput {
   modelReasoningEffort?: CodexModelReasoningEffort;
   fastMode?: CodexFastMode;
   configOverrides?: string;
+  mcpServerUrl?: string | null;
   initialPrompt?: string;
   resumeSessionId?: string;
   forkSessionId?: string;
@@ -58,6 +60,13 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
   args.push("-c", `model_reasoning_effort=${modelReasoningEffort}`);
   if (input.fastMode === "fast") {
     args.push("-c", "service_tier=fast");
+  }
+
+  if (input.mcpServerUrl) {
+    args.push(
+      "-c",
+      shellQuote(buildCodexMcpConfigOverride(input.mcpServerUrl)),
+    );
   }
 
   if (input.configOverrides?.trim()) {
