@@ -2,14 +2,10 @@ import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { app, dialog, shell } from "electron";
-import spawn from "nano-spawn";
+import { ORPCError } from "@orpc/server";
 import { z } from "zod";
-import {
-  type OpenInAppTarget,
-  openInAppTargetLabels,
-  openInAppTargetSchema,
-} from "../shared/open-in-app";
+import { openInAppTargetSchema } from "../shared/open-in-app";
+import type { AppHost, DesktopHost } from "./app-host";
 import { procedure } from "./orpc";
 
 const pathSchema = z.string().trim().min(1);
@@ -23,12 +19,6 @@ export const browseDirectoriesInputSchema = z.object({
   partialPath: pathSchema,
   cwd: pathSchema.optional(),
 });
-
-const macAppNames: Record<Exclude<OpenInAppTarget, "finder">, string> = {
-  cursor: "Cursor",
-  "github-desktop": "GitHub Desktop",
-  terminal: "Terminal",
-};
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
@@ -113,41 +103,28 @@ export async function browseDirectories({
   return { parentPath, entries };
 }
 
-export async function openFolderInApp({
-  path: targetPath,
-  app: targetApp,
-}: z.infer<typeof openFolderInAppInputSchema>) {
-  if (targetApp === "finder") {
-    const errorMessage = await shell.openPath(targetPath);
-    if (errorMessage) {
-      throw new Error(
-        `Failed to open folder in ${openInAppTargetLabels[targetApp]}: ${errorMessage}`,
-      );
-    }
-    return;
-  }
-
-  try {
-    await spawn("open", ["-a", macAppNames[targetApp], targetPath], {
-      stdin: "ignore",
+function requireDesktopHost(host: AppHost): DesktopHost {
+  if (!host.desktop) {
+    throw new ORPCError("METHOD_NOT_SUPPORTED", {
+      message: "This operation is only available in the Electron app.",
     });
-  } catch (error) {
-    throw new Error(
-      `Failed to open folder in ${openInAppTargetLabels[targetApp]}: ${getErrorMessage(error)}`,
-    );
   }
+  return host.desktop;
 }
 
 export const fsRouter = {
   openFolder: procedure
     .input(z.object({ path: pathSchema }))
-    .handler(async ({ input }) => {
-      await shell.openPath(input.path);
+    .handler(async ({ context, input }) => {
+      await requireDesktopHost(context.host).openPath(input.path);
     }),
   openFolderInApp: procedure
     .input(openFolderInAppInputSchema)
-    .handler(async ({ input }) => {
-      await openFolderInApp(input);
+    .handler(async ({ context, input }) => {
+      await requireDesktopHost(context.host).openFolderInApp(
+        input.path,
+        input.app,
+      );
     }),
   browseDirectories: procedure
     .input(browseDirectoriesInputSchema)
@@ -155,20 +132,9 @@ export const fsRouter = {
       return browseDirectories(input);
     }),
   selectFolder: procedure.handler(async ({ context }) => {
-    const dialogOptions: Electron.OpenDialogOptions = {
+    return await requireDesktopHost(context.host).selectDirectory({
       title: "Select Project Folder",
-      properties: ["openDirectory"],
-    };
-    const mainWindow = context.getMainWindow();
-    const result = mainWindow
-      ? await dialog.showOpenDialog(mainWindow, dialogOptions)
-      : await dialog.showOpenDialog(dialogOptions);
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-
-    return result.filePaths[0] ?? null;
+    });
   }),
   selectFolderWithOptions: procedure
     .input(
@@ -178,45 +144,31 @@ export const fsRouter = {
       }),
     )
     .handler(async ({ context, input }) => {
-      const dialogOptions: Electron.OpenDialogOptions = {
+      return await requireDesktopHost(context.host).selectDirectory({
         title: input.title ?? "Select Folder",
         defaultPath: input.defaultPath,
-        properties: ["openDirectory", "createDirectory"],
-      };
-      const mainWindow = context.getMainWindow();
-      const result = mainWindow
-        ? await dialog.showOpenDialog(mainWindow, dialogOptions)
-        : await dialog.showOpenDialog(dialogOptions);
-
-      if (result.canceled || result.filePaths.length === 0) {
-        return null;
-      }
-
-      return result.filePaths[0] ?? null;
+        canCreateDirectories: true,
+      });
     }),
-  openLogFolder: procedure.handler(async () => {
-    const logPath = app.getPath("logs");
-    await shell.openPath(logPath);
+  openLogFolder: procedure.handler(async ({ context }) => {
+    await requireDesktopHost(context.host).openPath(context.host.paths.logs);
   }),
-  openStatePluginFolder: procedure.handler(async () => {
+  openStatePluginFolder: procedure.handler(async ({ context }) => {
     const pluginPath = path.join(
-      app.getPath("userData"),
+      context.host.paths.userData,
       "claude-state-plugin",
     );
-    await shell.openPath(pluginPath);
+    await requireDesktopHost(context.host).openPath(pluginPath);
   }),
-  openSessionFilesFolder: procedure.handler(async () => {
-    const stateDir = path.join(app.getPath("userData"), "claude-state");
-    await shell.openPath(stateDir);
+  openSessionFilesFolder: procedure.handler(async ({ context }) => {
+    const stateDir = path.join(context.host.paths.userData, "claude-state");
+    await requireDesktopHost(context.host).openPath(stateDir);
   }),
-  openHandoffsFolder: procedure.handler(async () => {
-    const handoffsDir = path.join(app.getPath("userData"), "handoffs");
-    await shell.openPath(handoffsDir);
+  openHandoffsFolder: procedure.handler(async ({ context }) => {
+    const handoffsDir = path.join(context.host.paths.userData, "handoffs");
+    await requireDesktopHost(context.host).openPath(handoffsDir);
   }),
   openDevTools: procedure.handler(async ({ context }) => {
-    const mainWindow = context.getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.openDevTools({ mode: "detach" });
-    }
+    requireDesktopHost(context.host).openDevTools();
   }),
 };

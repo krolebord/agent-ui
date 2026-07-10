@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/headless", "src/main", "src/shared"],
+  "exclude": [
+    "src/main/index.ts",
+    "src/main/electron-host.ts",
+    "src/main/desktop-integration-manager.ts"
+  ],
+  "references": []
+}

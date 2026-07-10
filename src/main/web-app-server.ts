@@ -38,13 +38,12 @@ const contentTypes: Record<string, string> = {
 };
 
 function getConfig() {
-  const host = process.env.AGENT_UI_WEB_HOST?.trim() || DEFAULT_HOST;
   const requestedPort = Number(process.env.AGENT_UI_WEB_PORT);
   const port =
     Number.isInteger(requestedPort) && requestedPort > 0
       ? requestedPort
       : DEFAULT_PORT;
-  return { host, port };
+  return { host: DEFAULT_HOST, port };
 }
 
 function sendText(
@@ -243,7 +242,7 @@ export async function startWebAppServer(options: WebAppServerOptions) {
       await new Promise<void>((resolve) => {
         wss.close(() => resolve());
       });
-      await new Promise<void>((resolve, reject) => {
+      const closePromise = new Promise<void>((resolve, reject) => {
         server.close((error) => {
           if (error) {
             reject(error);
@@ -252,6 +251,9 @@ export async function startWebAppServer(options: WebAppServerOptions) {
           resolve();
         });
       });
+      server.closeIdleConnections();
+      server.closeAllConnections();
+      await closePromise;
     },
   };
 }

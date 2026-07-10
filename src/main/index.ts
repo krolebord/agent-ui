@@ -7,17 +7,18 @@ fixPath();
 import { onError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/message-port";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { createServices } from "./create-services";
-import log from "./logger";
+import type { AppRuntime } from "./app-runtime";
+import { startAppRuntime } from "./app-runtime";
+import { DesktopIntegrationManager } from "./desktop-integration-manager";
+import { createElectronHost } from "./electron-host";
+import log, { configureLogger } from "./logger";
 import { orpcRouter } from "./orpc-router";
-import { startWebAppServer } from "./web-app-server";
 
 if (process.platform !== "darwin") {
   throw new Error("Only macOS is supported");
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 const appRoot = path.join(__dirname, "../..");
 const rendererDist = path.join(appRoot, "dist");
 const viteDevServerUrl = process.env.VITE_DEV_SERVER_URL;
@@ -33,8 +34,8 @@ const preload = path.join(__dirname, "../preload/index.mjs");
 const indexHtml = path.join(rendererDist, "index.html");
 
 let mainWindow: BrowserWindow | null = null;
-let services: Awaited<ReturnType<typeof createServices>> | null = null;
-let webAppServer: Awaited<ReturnType<typeof startWebAppServer>> | null = null;
+let runtime: AppRuntime | null = null;
+let desktopIntegrationManager: DesktopIntegrationManager | null = null;
 
 async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
@@ -85,47 +86,37 @@ async function createWindow(): Promise<void> {
 const handler = new RPCHandler(orpcRouter, {
   interceptors: [
     onError((error) => {
-      console.error(error);
+      log.error("Electron RPC error", { error });
     }),
   ],
 });
 
-const disposeController = new AbortController();
-
-app.whenReady().then(async () => {
-  const userDataPath = app.getPath("userData");
-  log.info("App starting", {
-    platform: process.platform,
-    userDataPath,
+async function initializeElectronApp() {
+  const host = createElectronHost({ getMainWindow: () => mainWindow });
+  configureLogger({
+    logsPath: host.paths.logs,
+    fileName: "main.log",
+    consoleLevel: viteDevServerUrl ? "debug" : "warn",
   });
 
-  services = await createServices({
-    userDataPath,
-    getMainWindow: () => mainWindow,
-    disposeSignal: disposeController.signal,
-  });
-
-  log.info("Plugin initialization result", {
-    pluginDir: services.managedPluginDir,
-    pluginWarning: services.pluginWarning,
-  });
-
-  log.info("Session service created");
-
-  webAppServer = await startWebAppServer({
+  runtime = await startAppRuntime({
+    host,
     rendererDist,
     viteDevServerUrl,
-    getServices: () => services,
   });
+  desktopIntegrationManager = new DesktopIntegrationManager(
+    runtime.services.sessions.state,
+    runtime.services.appSettingsState,
+  );
 
   ipcMain.on("start-orpc-server", async (event) => {
-    if (!services) {
+    if (!runtime) {
       return;
     }
 
     const [serverPort] = event.ports;
     handler.upgrade(serverPort, {
-      context: services,
+      context: runtime.services,
     });
     serverPort.start();
   });
@@ -137,7 +128,16 @@ app.whenReady().then(async () => {
       void createWindow();
     }
   });
-});
+}
+
+void app
+  .whenReady()
+  .then(initializeElectronApp)
+  .catch(async (error) => {
+    log.error("Failed to start Electron app", { error });
+    await runtime?.shutdown();
+    app.exit(1);
+  });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -147,7 +147,7 @@ app.on("window-all-closed", () => {
 
 let isHandlingBeforeQuit = false;
 let hasCompletedShutdown = false;
-// biome-ignore lint/correctness/noUnusedVariables: assigned via ??= to ensure shutdown runs at most once
+// biome-ignore lint/correctness/noUnusedVariables: assigned via ??= to keep shutdown alive once
 let shutdownPromise: Promise<void> | null = null;
 
 app.on("before-quit", (event) => {
@@ -156,20 +156,17 @@ app.on("before-quit", (event) => {
   }
 
   event.preventDefault();
-
   if (isHandlingBeforeQuit) {
     return;
   }
   isHandlingBeforeQuit = true;
 
-  disposeController.abort();
-
   shutdownPromise ??= (async () => {
     try {
-      await webAppServer?.close();
-      await services?.shutdown();
+      desktopIntegrationManager?.dispose();
+      await runtime?.shutdown();
     } catch (error) {
-      log.error("Failed during app shutdown", { error });
+      log.error("Failed during Electron app shutdown", { error });
     } finally {
       hasCompletedShutdown = true;
       app.quit();

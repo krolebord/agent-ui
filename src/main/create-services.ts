@@ -1,5 +1,6 @@
 import path from "node:path";
 import { createDisposable } from "@shared/utils";
+import type { AppHost } from "./app-host";
 import {
   defineAppSettingsPersistence,
   defineAppSettingsState,
@@ -7,12 +8,14 @@ import {
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
-import { DesktopIntegrationManager } from "./desktop-integration-manager";
 import { defineHandoffsState, HandoffsService } from "./handoffs-service";
 import log from "./logger";
 import { defineMachineStatsState, MachineStatsMonitor } from "./machine-stats";
 import { ensureManagedSkills } from "./managed-skills";
-import { PersistenceOrchestrator } from "./persistence-orchestrator";
+import {
+  createPersistenceStore,
+  PersistenceOrchestrator,
+} from "./persistence-orchestrator";
 import { ProjectGitService } from "./project-git-service";
 import {
   defineProjectState,
@@ -43,8 +46,7 @@ import { TitleGenerationService } from "./title-generation-service";
 const STORAGE_SCHEMA_VERSION = 3;
 
 interface CreateServicesOptions {
-  userDataPath: string;
-  getMainWindow: () => Electron.BrowserWindow | null;
+  host: AppHost;
   disposeSignal: AbortSignal;
 }
 
@@ -117,7 +119,8 @@ async function initializeManagedCursorHooks(
 export type CreateServicesResult = Awaited<ReturnType<typeof createServices>>;
 
 export async function createServices(options: CreateServicesOptions) {
-  const { userDataPath, getMainWindow, disposeSignal } = options;
+  const { host, disposeSignal } = options;
+  const userDataPath = host.paths.userData;
   const [
     { managedPluginDir, pluginWarning },
     { cursorConfigDir, cursorHooksWarning },
@@ -147,6 +150,7 @@ export async function createServices(options: CreateServicesOptions) {
 
   const persistenceService = new PersistenceOrchestrator({
     schemaVersion: STORAGE_SCHEMA_VERSION,
+    store: createPersistenceStore(userDataPath),
   });
 
   const appSettingsState = defineAppSettingsState();
@@ -235,11 +239,6 @@ export async function createServices(options: CreateServicesOptions) {
     sessionsState,
     disposeSignal,
   );
-  const desktopIntegrationManager = new DesktopIntegrationManager(
-    sessionsState,
-    appSettingsState,
-  );
-
   const stateService = new StateOrchestrator({
     serviceStates: {
       appSettings: appSettingsState,
@@ -275,7 +274,6 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(
     async () => await worktreeSetupSessionsManager.dispose(),
   );
-  shutdownDisposable.addDisposable(() => desktopIntegrationManager.dispose());
   shutdownDisposable.addDisposable(() => machineStatsMonitor.dispose());
   shutdownDisposable.addDisposable(() => handoffsService.dispose());
   shutdownDisposable.addDisposable(() => stateService.dispose());
@@ -287,7 +285,7 @@ export async function createServices(options: CreateServicesOptions) {
     projectsState,
     projectTerminalsState,
     projectGitService,
-    getMainWindow,
+    host,
     sessionsService,
     terminalManager,
     projectTerminalsManager,

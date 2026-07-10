@@ -1,4 +1,4 @@
-import Store from "electron-store";
+import Conf from "conf";
 import type { ZodIssue, ZodType } from "zod";
 import type { ServiceState } from "../shared/service-state";
 import { withDebouncedRunner } from "./debounce-runner";
@@ -33,6 +33,18 @@ interface RegisteredPersistence {
   unsubscribe: () => void;
 }
 
+export interface PersistenceStore {
+  get(key: string): unknown;
+  set(key: string, value: unknown): void;
+}
+
+export function createPersistenceStore(userDataPath: string): PersistenceStore {
+  return new Conf<Record<string, unknown>>({
+    cwd: userDataPath,
+    configName: STORE_NAME,
+  });
+}
+
 function reportPersistenceError(
   registration: Pick<PersistenceRegistration, "onError">,
   event: PersistenceErrorEvent,
@@ -54,19 +66,16 @@ export function defineStatePersistence<
 
 export class PersistenceOrchestrator {
   private readonly registrations = new Map<string, RegisteredPersistence>();
-  private readonly store: Store<Record<string, unknown>>;
+  private readonly store: PersistenceStore;
   private readonly schemaVersion: number | null;
 
-  constructor(options: { schemaVersion: number }) {
+  constructor(options: {
+    schemaVersion: number;
+    store: PersistenceStore;
+  }) {
     this.schemaVersion =
       typeof options.schemaVersion === "number" ? options.schemaVersion : null;
-
-    this.store = new Store<Record<string, unknown>>({
-      name: STORE_NAME,
-      defaults: {
-        [SCHEMA_VERSION_KEY]: this.schemaVersion,
-      },
-    });
+    this.store = options.store;
 
     this.ensureSchemaVersion();
   }

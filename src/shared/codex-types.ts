@@ -22,6 +22,8 @@ export const codexModelReasoningEffortSchema = z.enum([
   "medium",
   "high",
   "xhigh",
+  "max",
+  "ultra",
 ]);
 
 export type CodexModelReasoningEffort = z.infer<

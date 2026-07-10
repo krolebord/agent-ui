@@ -81,16 +81,18 @@ export function SettingsDialog() {
         </DialogHeader>
 
         <Accordion type="multiple" className="-mx-1">
-          <AccordionItem value="general">
-            <SettingsSectionTrigger icon={Settings}>
-              General
-            </SettingsSectionTrigger>
-            <AccordionContent className="divide-y divide-border/40">
-              <SleepBlockModeSelect />
-              <DockBadgeForAttentionToggle />
-              <DockBounceOnAttentionToggle />
-            </AccordionContent>
-          </AccordionItem>
+          {hasNativeDesktopShell ? (
+            <AccordionItem value="general">
+              <SettingsSectionTrigger icon={Settings}>
+                General
+              </SettingsSectionTrigger>
+              <AccordionContent className="divide-y divide-border/40">
+                <SleepBlockModeSelect />
+                <DockBadgeForAttentionToggle />
+                <DockBounceOnAttentionToggle />
+              </AccordionContent>
+            </AccordionItem>
+          ) : null}
 
           <AccordionItem value="sidebar">
             <SettingsSectionTrigger icon={Activity}>

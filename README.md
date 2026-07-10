@@ -68,6 +68,23 @@ pnpm install
 pnpm dev
 ```
 
+### Run Headless on macOS
+
+Build the browser renderer and Node server, then start it:
+
+```sh
+pnpm build:headless
+pnpm start:headless
+```
+
+Headless mode binds to `127.0.0.1` and prints the selected URL. It starts at
+port `3420` and automatically tries subsequent ports when that port is in use.
+Set `AGENT_UI_WEB_PORT` to request a different starting port.
+
+By default, headless mode shares application state with the Electron app at
+`~/Library/Application Support/agent-ui/agent-ui.json`. Set
+`AGENT_UI_DATA_DIR` to use an isolated data directory.
+
 ### Build
 
 ```sh

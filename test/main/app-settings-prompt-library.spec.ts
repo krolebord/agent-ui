@@ -1,55 +1,37 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   defineAppSettingsPersistence,
   defineAppSettingsState,
 } from "../../src/main/app-settings";
-import { PersistenceOrchestrator } from "../../src/main/persistence-orchestrator";
+import {
+  PersistenceOrchestrator,
+  type PersistenceStore,
+} from "../../src/main/persistence-orchestrator";
 import { promptLibrarySchema } from "../../src/shared/prompt-library";
 
-const storeMock = vi.hoisted(() => {
-  const data = new Map<string, unknown>();
-  return {
-    data,
-    reset() {
-      data.clear();
-    },
-    seed(values: Record<string, unknown>) {
-      for (const [key, value] of Object.entries(values)) {
-        data.set(key, structuredClone(value));
-      }
-    },
-  };
-});
+const storeData = new Map<string, unknown>();
+const storeMock: PersistenceStore = {
+  get(key) {
+    return storeData.get(key);
+  },
+  set(key, value) {
+    storeData.set(key, structuredClone(value));
+  },
+};
 
-vi.mock("electron-store", () => {
-  class MockStore {
-    constructor(options?: { defaults?: Record<string, unknown> }) {
-      if (!options?.defaults) {
-        return;
-      }
-
-      for (const [key, value] of Object.entries(options.defaults)) {
-        if (!storeMock.data.has(key)) {
-          storeMock.data.set(key, structuredClone(value));
-        }
-      }
-    }
-
-    get(key: string): unknown {
-      return storeMock.data.get(key);
-    }
-
-    set(key: string, value: unknown): void {
-      storeMock.data.set(key, structuredClone(value));
-    }
+function seedStore(values: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(values)) {
+    storeData.set(key, structuredClone(value));
   }
+}
 
-  return { default: MockStore };
-});
+function createOrchestrator() {
+  return new PersistenceOrchestrator({ schemaVersion: 3, store: storeMock });
+}
 
 describe("app settings prompt library", () => {
   beforeEach(() => {
-    storeMock.reset();
+    storeData.clear();
   });
 
   it("defaults to an empty prompt library", () => {
@@ -72,7 +54,7 @@ describe("app settings prompt library", () => {
   });
 
   it("hydrates persisted machine stats settings", () => {
-    storeMock.seed({
+    seedStore({
       appSettings: {
         machineStats: {
           enabled: false,
@@ -83,7 +65,7 @@ describe("app settings prompt library", () => {
     });
 
     const state = defineAppSettingsState();
-    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    const orchestrator = createOrchestrator();
     orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
 
     expect(state.state.machineStats).toEqual({
@@ -94,7 +76,7 @@ describe("app settings prompt library", () => {
   });
 
   it("falls back for invalid persisted machine stats intervals", () => {
-    storeMock.seed({
+    seedStore({
       appSettings: {
         machineStats: {
           enabled: false,
@@ -105,7 +87,7 @@ describe("app settings prompt library", () => {
     });
 
     const state = defineAppSettingsState();
-    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    const orchestrator = createOrchestrator();
     orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
 
     expect(state.state.machineStats).toEqual({
@@ -116,49 +98,49 @@ describe("app settings prompt library", () => {
   });
 
   it("hydrates persisted sleep block mode", () => {
-    storeMock.seed({
+    seedStore({
       appSettings: {
         sleepBlockMode: "always",
       },
     });
 
     const state = defineAppSettingsState();
-    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    const orchestrator = createOrchestrator();
     orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
 
     expect(state.state.sleepBlockMode).toBe("always");
   });
 
   it("migrates legacy enabled prevent sleep setting to working mode", () => {
-    storeMock.seed({
+    seedStore({
       appSettings: {
         preventSleep: true,
       },
     });
 
     const state = defineAppSettingsState();
-    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    const orchestrator = createOrchestrator();
     orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
 
     expect(state.state.sleepBlockMode).toBe("working");
   });
 
   it("migrates legacy disabled prevent sleep setting to off mode", () => {
-    storeMock.seed({
+    seedStore({
       appSettings: {
         preventSleep: false,
       },
     });
 
     const state = defineAppSettingsState();
-    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    const orchestrator = createOrchestrator();
     orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
 
     expect(state.state.sleepBlockMode).toBe("off");
   });
 
   it("rejects invalid prompt library entries during hydration", () => {
-    storeMock.seed({
+    seedStore({
       appSettings: {
         promptLibrary: [
           { id: "bad", name: "", body: "", createdAt: 0, updatedAt: 0 },
@@ -167,7 +149,7 @@ describe("app settings prompt library", () => {
     });
 
     const state = defineAppSettingsState();
-    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    const orchestrator = createOrchestrator();
     orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
 
     expect(state.state.promptLibrary).toEqual([]);
@@ -175,7 +157,7 @@ describe("app settings prompt library", () => {
 
   it("persists valid prompt library entries", () => {
     const now = 1_700_000_000_000;
-    storeMock.seed({
+    seedStore({
       appSettings: {
         promptLibrary: [
           {
@@ -190,7 +172,7 @@ describe("app settings prompt library", () => {
     });
 
     const state = defineAppSettingsState();
-    const orchestrator = new PersistenceOrchestrator({ schemaVersion: 3 });
+    const orchestrator = createOrchestrator();
     orchestrator.registerAndHydrate(defineAppSettingsPersistence(state));
 
     expect(state.state.promptLibrary).toEqual([

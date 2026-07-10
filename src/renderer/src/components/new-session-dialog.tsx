@@ -121,6 +121,8 @@ const CODEX_MODEL_REASONING_EFFORT_OPTIONS: {
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
   { value: "xhigh", label: "XHigh" },
+  { value: "max", label: "Max" },
+  { value: "ultra", label: "Ultra" },
 ];
 
 const CODEX_FAST_MODE_OPTIONS: { value: CodexFastMode; label: string }[] = [
