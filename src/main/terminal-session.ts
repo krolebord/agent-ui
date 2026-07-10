@@ -1,3 +1,4 @@
+import path from "node:path";
 import {
   concatAndTruncate,
   createDeferredPromise,
@@ -54,11 +55,19 @@ function resolveLaunchCommand(launch: TerminalStartOpts): LaunchCommand {
     const shell =
       process.env.SHELL ??
       (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
+    const bashRcFile = launch.env?.AGENT_UI_BASH_RCFILE;
+    const bashArgs =
+      path.basename(shell) === "bash" && bashRcFile
+        ? ["--rcfile", bashRcFile]
+        : [];
     if (launch.file) {
       const command = ["exec", launch.file, ...(launch.args ?? [])].join(" ");
       return {
         file: shell,
-        args: ["-ilc", command],
+        args:
+          bashArgs.length > 0
+            ? [...bashArgs, "-ic", command]
+            : ["-ilc", command],
         cwd: launch.cwd,
         env: {
           ...process.env,
@@ -69,7 +78,7 @@ function resolveLaunchCommand(launch: TerminalStartOpts): LaunchCommand {
     }
     return {
       file: shell,
-      args: ["-il"],
+      args: bashArgs.length > 0 ? [...bashArgs, "-i"] : ["-il"],
       cwd: launch.cwd,
       env: {
         ...process.env,

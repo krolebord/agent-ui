@@ -1,45 +1,14 @@
 import { access } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AppHost } from "../main/app-host";
 import { type AppRuntime, startAppRuntime } from "../main/app-runtime";
 import log, { configureLogger } from "../main/logger";
+import { resolveHeadlessPaths } from "./paths";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.join(__dirname, "..");
 const rendererDist = path.join(appRoot, "dist");
-
-function resolveUserPath(input: string) {
-  if (input === "~") {
-    return os.homedir();
-  }
-  if (input.startsWith("~/")) {
-    return path.join(os.homedir(), input.slice(2));
-  }
-  return path.resolve(input);
-}
-
-function resolveHeadlessPaths() {
-  const configuredDataPath = process.env.AGENT_UI_DATA_DIR?.trim();
-  if (configuredDataPath) {
-    const userData = resolveUserPath(configuredDataPath);
-    return {
-      userData,
-      logs: path.join(userData, "logs"),
-    };
-  }
-
-  return {
-    userData: path.join(
-      os.homedir(),
-      "Library",
-      "Application Support",
-      "agent-ui",
-    ),
-    logs: path.join(os.homedir(), "Library", "Logs", "agent-ui"),
-  };
-}
 
 function registerFatalErrorLogging() {
   process.on("uncaughtException", (error, origin) => {
@@ -75,8 +44,8 @@ async function main() {
   });
   registerFatalErrorLogging();
 
-  if (process.platform !== "darwin") {
-    throw new Error("Headless mode currently supports macOS only.");
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    throw new Error("Headless mode currently supports macOS and Linux only.");
   }
 
   await access(path.join(rendererDist, "index.html")).catch(() => {

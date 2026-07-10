@@ -68,7 +68,7 @@ pnpm install
 pnpm dev
 ```
 
-### Run Headless on macOS
+### Run Headless on macOS or Linux
 
 Build the browser renderer and Node server, then start it:
 
@@ -81,9 +81,12 @@ Headless mode binds to `127.0.0.1` and prints the selected URL. It starts at
 port `3420` and automatically tries subsequent ports when that port is in use.
 Set `AGENT_UI_WEB_PORT` to request a different starting port.
 
-By default, headless mode shares application state with the Electron app at
-`~/Library/Application Support/agent-ui/agent-ui.json`. Set
-`AGENT_UI_DATA_DIR` to use an isolated data directory.
+On macOS, headless mode shares application state with the Electron app at
+`~/Library/Application Support/agent-ui/agent-ui.json`. On Linux, application
+state is stored under `$XDG_CONFIG_HOME/agent-ui` (defaulting to
+`~/.config/agent-ui`) and logs under `$XDG_STATE_HOME/agent-ui/logs` (defaulting
+to `~/.local/state/agent-ui/logs`). Set `AGENT_UI_DATA_DIR` to use an isolated
+data directory with logs stored below it.
 
 ### Build
 

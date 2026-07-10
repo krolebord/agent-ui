@@ -182,18 +182,31 @@ async function collectSystemStats() {
   return { currentLoad, mem };
 }
 
-async function collectCpuTemperatureCelsius(): Promise<number | null> {
-  if (process.platform !== "darwin") {
-    return null;
+export async function collectCpuTemperatureCelsius(): Promise<number | null> {
+  if (process.platform === "linux") {
+    try {
+      const si = await import("systeminformation");
+      const temperature = await si.cpuTemperature();
+      return (
+        normalizeMetric(temperature.main) ?? normalizeMetric(temperature.max)
+      );
+    } catch (error) {
+      log.debug("CPU temperature unavailable", error);
+      return null;
+    }
   }
 
-  try {
-    const macosTemperatureSensor = await import("macos-temperature-sensor");
-    return normalizeMetric(macosTemperatureSensor.temperature().cpu);
-  } catch (error) {
-    log.debug("CPU temperature unavailable", error);
-    return null;
+  if (process.platform === "darwin") {
+    try {
+      const macosTemperatureSensor = await import("macos-temperature-sensor");
+      return normalizeMetric(macosTemperatureSensor.temperature().cpu);
+    } catch (error) {
+      log.debug("CPU temperature unavailable", error);
+      return null;
+    }
   }
+
+  return null;
 }
 
 function normalizeMetric(value: number | null | undefined): number | null {

@@ -43,6 +43,27 @@ add-zsh-hook precmd _agent_ui_precmd
 add-zsh-hook preexec _agent_ui_preexec
 `;
 
+const BASH_INTEGRATION_SCRIPT = `\
+# Agent UI shell integration - do not edit, this file is regenerated on launch.
+
+# Load the user's normal interactive configuration before installing our hooks.
+if [ -f "$HOME/.bashrc" ]; then
+  source "$HOME/.bashrc"
+fi
+
+_agent_ui_precmd() {
+  builtin printf '\\033]133;A\\007'
+}
+
+case ";\${PROMPT_COMMAND-};" in
+  *";_agent_ui_precmd;"*) ;;
+  *) PROMPT_COMMAND="_agent_ui_precmd\${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+esac
+
+# Bash expands PS0 immediately before executing an interactive command.
+PS0=$'\\033]133;C\\007'
+`;
+
 export interface ShellIntegrationScripts {
   env: Record<string, string>;
 }
@@ -52,13 +73,22 @@ export async function ensureShellIntegrationScripts(
 ): Promise<ShellIntegrationScripts> {
   const shellIntegrationDir = path.join(userDataPath, "shell-integration");
   const zshDir = path.join(shellIntegrationDir, "zsh");
+  const bashDir = path.join(shellIntegrationDir, "bash");
+  const bashRcFile = path.join(bashDir, ".bashrc");
 
-  await mkdir(zshDir, { recursive: true });
-  await writeFile(path.join(zshDir, ".zshrc"), ZSH_INTEGRATION_SCRIPT, "utf8");
+  await Promise.all([
+    mkdir(zshDir, { recursive: true }),
+    mkdir(bashDir, { recursive: true }),
+  ]);
+  await Promise.all([
+    writeFile(path.join(zshDir, ".zshrc"), ZSH_INTEGRATION_SCRIPT, "utf8"),
+    writeFile(bashRcFile, BASH_INTEGRATION_SCRIPT, "utf8"),
+  ]);
 
-  log.info("Shell integration scripts written", { zshDir });
+  log.info("Shell integration scripts written", { bashRcFile, zshDir });
 
   const env: Record<string, string> = {
+    AGENT_UI_BASH_RCFILE: bashRcFile,
     ZDOTDIR: zshDir,
   };
 
