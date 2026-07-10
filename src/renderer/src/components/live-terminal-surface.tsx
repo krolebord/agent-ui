@@ -1,5 +1,6 @@
 import { consumeEventIterator } from "@orpc/client";
 import {
+  type PastedImage,
   TerminalPane,
   type TerminalPaneHandle,
 } from "@renderer/components/terminal-pane";
@@ -98,6 +99,29 @@ export function LiveTerminalSurface({
     [active, readOnly, terminalId],
   );
 
+  const handlePasteImage = useCallback(
+    async (image: PastedImage) => {
+      if (!active || readOnly) {
+        return null;
+      }
+
+      try {
+        const { filePath } = await orpc.terminals.uploadPastedImage.call({
+          terminalId,
+          base64Data: image.base64Data,
+          mimeType: image.mimeType,
+        });
+        return filePath;
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to paste image: ${message}`);
+        return null;
+      }
+    },
+    [active, readOnly, terminalId],
+  );
+
   const handleResize = useCallback(
     (cols: number, rows: number) => {
       if (!active) {
@@ -117,6 +141,7 @@ export function LiveTerminalSurface({
     <TerminalPane
       ref={terminalRef}
       onInput={handleInput}
+      onPasteImage={handlePasteImage}
       onResize={handleResize}
       readOnly={readOnly}
       trackGlobalSize={trackGlobalSize}

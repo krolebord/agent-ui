@@ -19,14 +19,25 @@ function registerFatalErrorLogging() {
   });
 }
 
+// Some terminals forward Ctrl+C to the whole foreground process group, so a
+// single keypress can deliver more than one signal to this process. Ignore
+// duplicate signals that arrive within this window so one Ctrl+C performs a
+// full graceful shutdown; a deliberate second press after the window forces an
+// immediate exit.
+const FORCE_EXIT_GRACE_MS = 1000;
+
 function registerSignalHandlers(runtime: AppRuntime) {
-  let isShuttingDown = false;
+  let shutdownStartedAt: number | null = null;
   const handleSignal = (signal: NodeJS.Signals) => {
-    if (isShuttingDown) {
+    if (shutdownStartedAt !== null) {
+      if (Date.now() - shutdownStartedAt < FORCE_EXIT_GRACE_MS) {
+        log.debug("Ignoring duplicate termination signal", { signal });
+        return;
+      }
       log.warn("Second termination signal received; forcing exit", { signal });
       process.exit(1);
     }
-    isShuttingDown = true;
+    shutdownStartedAt = Date.now();
     log.info("Shutting down", { signal });
     void runtime.shutdown().then(() => process.exit(0));
   };

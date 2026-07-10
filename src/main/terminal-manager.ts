@@ -4,7 +4,9 @@ import { createDisposable } from "@shared/utils";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import headlessXterm from "@xterm/headless";
 import { z } from "zod";
+import { supportedPastedImageMimeTypes } from "../shared/pasted-images";
 import { procedure } from "./orpc";
+import { MAX_PASTED_IMAGE_BYTES, savePastedImage } from "./pasted-images";
 import { assertProjectPathInteractionAllowed } from "./project-service";
 import {
   createTerminalSession,
@@ -104,6 +106,30 @@ export const terminalsRouter = {
       );
       assertProjectPathInteractionAllowed(interactionCwd, context);
       context.terminalManager.writeToTerminal(input.terminalId, input.data);
+    }),
+  uploadPastedImage: procedure
+    .input(
+      z.object({
+        terminalId: z.string(),
+        // Base64 is ~4/3 of the decoded size; savePastedImage enforces the
+        // exact byte limit after decoding.
+        base64Data: z
+          .string()
+          .min(1)
+          .max(Math.ceil((MAX_PASTED_IMAGE_BYTES * 4) / 3) + 4),
+        mimeType: z.enum(supportedPastedImageMimeTypes),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const interactionCwd = context.terminalManager.resolveInteractionCwd(
+        input.terminalId,
+      );
+      assertProjectPathInteractionAllowed(interactionCwd, context);
+      const filePath = await savePastedImage({
+        base64Data: input.base64Data,
+        mimeType: input.mimeType,
+      });
+      return { filePath };
     }),
   resizeTerminal: procedure
     .input(
