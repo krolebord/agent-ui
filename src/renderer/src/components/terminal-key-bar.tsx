@@ -7,9 +7,10 @@ import {
   DialogTitle,
 } from "@renderer/components/ui/dialog";
 import { Textarea } from "@renderer/components/ui/textarea";
+import { useTerminalFileUpload } from "@renderer/hooks/use-terminal-file-upload";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
-import { MessageSquareText, SendHorizontal } from "lucide-react";
+import { MessageSquareText, Paperclip, SendHorizontal } from "lucide-react";
 import type React from "react";
 import { useRef, useState } from "react";
 
@@ -32,6 +33,8 @@ const TAP_MOVE_THRESHOLD = 10;
 export function TerminalKeyBar({ terminalId }: { terminalId: string }) {
   const [inputOpen, setInputOpen] = useState(false);
   const [inputText, setInputText] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadFile = useTerminalFileUpload(terminalId);
   // Tracks the pointer-down position and pending action so we can tell taps
   // apart from scrolls of the key bar.
   const pending = useRef<{
@@ -81,6 +84,22 @@ export function TerminalKeyBar({ terminalId }: { terminalId: string }) {
     pending.current = null;
   };
 
+  // Uploads each picked file and pastes the resulting host paths into the
+  // terminal (space-separated), the same tokens a drag-drop would produce.
+  const handleFilesSelected = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+
+    const paths = (
+      await Promise.all(Array.from(fileList).map((file) => uploadFile(file)))
+    ).filter((path): path is string => path != null);
+
+    if (paths.length > 0) {
+      send(`${paths.join(" ")} `);
+    }
+  };
+
   const submitInput = () => {
     if (!inputText) {
       return;
@@ -110,6 +129,22 @@ export function TerminalKeyBar({ terminalId }: { terminalId: string }) {
         >
           <MessageSquareText className="size-4" />
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          tabIndex={-1}
+          className="min-w-10 shrink-0 px-2"
+          aria-label="Attach file"
+          title="Attach file"
+          onPointerDown={(event) => {
+            handlePointerDown(event, () => fileInputRef.current?.click());
+          }}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
+        >
+          <Paperclip className="size-4" />
+        </Button>
         {TERMINAL_KEYS.map(({ label, data }) => (
           <Button
             key={label}
@@ -128,6 +163,18 @@ export function TerminalKeyBar({ terminalId }: { terminalId: string }) {
           </Button>
         ))}
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          void handleFilesSelected(event.target.files);
+          // Reset so selecting the same file again re-triggers change.
+          event.target.value = "";
+        }}
+      />
 
       <Dialog open={inputOpen} onOpenChange={setInputOpen}>
         <DialogContent className="top-auto bottom-[1rem] max-w-[calc(100%-1rem)] gap-3 sm:max-w-sm">

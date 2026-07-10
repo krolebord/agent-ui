@@ -1,10 +1,6 @@
 import { useTerminalSizeStore } from "@renderer/hooks/use-terminal-size";
 import { attachTouchScroll } from "@renderer/lib/terminal-touch-scroll";
 import { cn } from "@renderer/lib/utils";
-import {
-  isPastedImageMimeType,
-  type PastedImageMimeType,
-} from "@shared/pasted-images";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
@@ -16,11 +12,6 @@ const PTY_RESIZE_DEBOUNCE_MS = 75;
 const isMacPlatform =
   typeof navigator !== "undefined" &&
   /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || "");
-
-export interface PastedImage {
-  base64Data: string;
-  mimeType: PastedImageMimeType;
-}
 
 export interface TerminalPaneHandle {
   write: (chunk: string) => void;
@@ -35,42 +26,29 @@ interface TerminalPaneProps {
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
   /**
-   * Called when the user pastes an image. Should persist the image and
-   * return an absolute file path to paste into the terminal, or null to
-   * ignore the paste.
+   * Called when the user pastes a file. Should persist the file and return
+   * an absolute file path to paste into the terminal, or null to ignore the
+   * paste.
    */
-  onPasteImage?: (image: PastedImage) => Promise<string | null>;
+  onPasteFile?: (file: File) => Promise<string | null>;
   readOnly?: boolean;
   trackGlobalSize?: boolean;
   ref: React.RefObject<TerminalPaneHandle | null>;
 }
 
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      resolve(dataUrl.slice(dataUrl.indexOf(",") + 1));
-    };
-    reader.onerror = () =>
-      reject(reader.error ?? new Error("Failed to read pasted image"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function getPastedImageFile(clipboardData: DataTransfer | null): File | null {
+function getPastedFile(clipboardData: DataTransfer | null): File | null {
   if (!clipboardData) {
     return null;
   }
 
   // If the clipboard also carries plain text (e.g. copied spreadsheet
-  // cells), let the normal text paste win.
+  // cells or a file path), let the normal text paste win.
   if (clipboardData.getData("text/plain")) {
     return null;
   }
 
   for (const item of clipboardData.items) {
-    if (item.kind === "file" && isPastedImageMimeType(item.type)) {
+    if (item.kind === "file") {
       const file = item.getAsFile();
       if (file) {
         return file;
@@ -85,7 +63,7 @@ export function TerminalPane({
   className,
   onInput,
   onResize,
-  onPasteImage,
+  onPasteFile,
   readOnly = false,
   trackGlobalSize = true,
   ref,
@@ -95,7 +73,7 @@ export function TerminalPane({
   const fitRef = useRef<() => void>(() => {});
   const onInputRef = useRef(onInput);
   const onResizeRef = useRef(onResize);
-  const onPasteImageRef = useRef(onPasteImage);
+  const onPasteFileRef = useRef(onPasteFile);
   const lastReportedSizeRef = useRef<{ cols: number; rows: number } | null>(
     null,
   );
@@ -111,8 +89,8 @@ export function TerminalPane({
   }, [onResize]);
 
   useEffect(() => {
-    onPasteImageRef.current = onPasteImage;
-  }, [onPasteImage]);
+    onPasteFileRef.current = onPasteFile;
+  }, [onPasteFile]);
 
   useImperativeHandle(ref, () => ({
     write: (chunk: string) => {
@@ -256,25 +234,23 @@ export function TerminalPane({
     });
 
     // Capture-phase so this runs before xterm's own paste handler, which
-    // only understands text. Images are persisted host-side (they can't
+    // only understands text. Files are persisted host-side (they can't
     // travel through the PTY stream) and their file path is pasted instead.
     const onPaste = (event: ClipboardEvent) => {
-      const pasteImage = onPasteImageRef.current;
-      if (!pasteImage || terminal.options.disableStdin) {
+      const pasteFile = onPasteFileRef.current;
+      if (!pasteFile || terminal.options.disableStdin) {
         return;
       }
 
-      const file = getPastedImageFile(event.clipboardData);
-      if (!file || !isPastedImageMimeType(file.type)) {
+      const file = getPastedFile(event.clipboardData);
+      if (!file) {
         return;
       }
-      const mimeType = file.type;
 
       event.preventDefault();
       event.stopPropagation();
       void (async () => {
-        const base64Data = await readFileAsBase64(file);
-        const filePath = await pasteImage({ base64Data, mimeType });
+        const filePath = await pasteFile(file);
         if (filePath && terminalRef.current === terminal) {
           terminal.paste(filePath);
         }

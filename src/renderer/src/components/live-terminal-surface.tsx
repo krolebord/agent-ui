@@ -1,9 +1,9 @@
 import { consumeEventIterator } from "@orpc/client";
 import {
-  type PastedImage,
   TerminalPane,
   type TerminalPaneHandle,
 } from "@renderer/components/terminal-pane";
+import { useTerminalFileUpload } from "@renderer/hooks/use-terminal-file-upload";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
@@ -26,6 +26,7 @@ export function LiveTerminalSurface({
   attachKey?: string;
 }) {
   const terminalRef = useRef<TerminalPaneHandle | null>(null);
+  const uploadFile = useTerminalFileUpload(terminalId);
 
   useEffect(() => {
     attachKey;
@@ -99,27 +100,14 @@ export function LiveTerminalSurface({
     [active, readOnly, terminalId],
   );
 
-  const handlePasteImage = useCallback(
-    async (image: PastedImage) => {
+  const handlePasteFile = useCallback(
+    async (file: File) => {
       if (!active || readOnly) {
         return null;
       }
-
-      try {
-        const { filePath } = await orpc.terminals.uploadPastedImage.call({
-          terminalId,
-          base64Data: image.base64Data,
-          mimeType: image.mimeType,
-        });
-        return filePath;
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unknown error";
-        toast.error(`Failed to paste image: ${message}`);
-        return null;
-      }
+      return uploadFile(file);
     },
-    [active, readOnly, terminalId],
+    [active, readOnly, uploadFile],
   );
 
   const handleResize = useCallback(
@@ -141,7 +129,7 @@ export function LiveTerminalSurface({
     <TerminalPane
       ref={terminalRef}
       onInput={handleInput}
-      onPasteImage={handlePasteImage}
+      onPasteFile={handlePasteFile}
       onResize={handleResize}
       readOnly={readOnly}
       trackGlobalSize={trackGlobalSize}
