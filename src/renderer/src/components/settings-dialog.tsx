@@ -45,7 +45,7 @@ import {
 import type * as React from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
-import { PromptLibrarySettingsItem } from "./prompt-library-dialog";
+import { SkillsSettingsItem } from "./skills-dialog";
 import { useAppState } from "./sync-state-provider";
 
 export const useSettingsStore = create(
@@ -105,11 +105,11 @@ export function SettingsDialog() {
 
           <AccordionItem value="ai-prompts">
             <SettingsSectionTrigger icon={Sparkles}>
-              AI & prompts
+              AI & skills
             </SettingsSectionTrigger>
             <AccordionContent className="divide-y divide-border/40">
               <TitleGenerationSettings />
-              <PromptLibrarySettingsItem />
+              <SkillsSettingsItem />
             </AccordionContent>
           </AccordionItem>
 

@@ -39,6 +39,7 @@ import {
 } from "./sessions/state";
 import { WorktreeSetupSessionsManager } from "./sessions/worktree-setup.session";
 import { ensureShellIntegrationScripts } from "./shell-integration/scripts";
+import { defineSkillsState, SkillsService } from "./skills-service";
 import { StateOrchestrator } from "./state-orchestrator";
 import { TerminalManager } from "./terminal-manager";
 import { TitleGenerationService } from "./title-generation-service";
@@ -132,9 +133,11 @@ export async function createServices(options: CreateServicesOptions) {
   ]);
 
   let handoffsDir = path.join(userDataPath, "handoffs");
+  let managedSkillsRoot: string | null = null;
   try {
     const result = await ensureManagedSkills(userDataPath, managedPluginDir);
     handoffsDir = result.handoffsDir;
+    managedSkillsRoot = result.managedSkillsRoot;
   } catch (error) {
     log.error("Managed skills setup failed", error);
   }
@@ -197,6 +200,14 @@ export async function createServices(options: CreateServicesOptions) {
   const projectGitService = new ProjectGitService(projectsState);
   projectGitService.start();
 
+  const skillsState = defineSkillsState();
+  const skillsService = new SkillsService({
+    state: skillsState,
+    projectsState,
+    builtinSkillsRoot: managedSkillsRoot,
+  });
+  await skillsService.start();
+
   const sessionsState = defineSessionServiceState();
   persistenceService.registerAndHydrate(
     defineSessionStatePersistence(sessionsState),
@@ -247,6 +258,7 @@ export async function createServices(options: CreateServicesOptions) {
       sessions: sessionsState,
       handoffs: handoffsState,
       machineStats: machineStatsState,
+      skills: skillsState,
     },
   });
 
@@ -276,6 +288,7 @@ export async function createServices(options: CreateServicesOptions) {
   );
   shutdownDisposable.addDisposable(() => machineStatsMonitor.dispose());
   shutdownDisposable.addDisposable(() => handoffsService.dispose());
+  shutdownDisposable.addDisposable(() => skillsService.dispose());
   shutdownDisposable.addDisposable(() => stateService.dispose());
   shutdownDisposable.addDisposable(() => persistenceService.dispose());
 
@@ -294,6 +307,7 @@ export async function createServices(options: CreateServicesOptions) {
     managedPluginDir,
     pluginWarning,
     handoffsService,
+    skillsService,
     sessions: {
       state: sessionsState,
       localTerminal: localTerminalSessionsManager,

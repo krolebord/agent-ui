@@ -29,6 +29,7 @@ function buildSkills(ctx: ManagedSkillContext): ManagedSkill[] {
       contents: `---
 name: agent-ui-handoff
 description: Summarize the current session into a handoff document that Agent UI can use to start a fresh session continuing this work. Use whenever the user asks to hand off, save state, pause for a new session, or finish a session.
+managed-by: agent-ui-builtin
 ---
 
 When the user asks to hand off the session, write a handoff document to this directory:
@@ -49,17 +50,24 @@ export interface ManagedSkillsResult {
   warnings: string[];
 }
 
-async function ensureSymlink(target: string, linkPath: string): Promise<void> {
+async function ensureSymlink(
+  target: string,
+  linkPath: string,
+  warnings: string[],
+): Promise<void> {
   try {
     const stat = await lstat(linkPath);
     if (stat.isSymbolicLink()) {
       const existing = await readlink(linkPath);
       if (existing === target) return;
       await unlink(linkPath);
-    } else if (stat.isDirectory()) {
-      await rm(linkPath, { recursive: true, force: true });
     } else {
-      await unlink(linkPath);
+      // A real file/directory exists where the link should go. It isn't
+      // ours — leave it alone rather than destroy user content.
+      const message = `Not overwriting existing path with managed skill link: ${linkPath}`;
+      log.warn(message);
+      warnings.push(message);
+      return;
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -81,7 +89,7 @@ async function writeSkillSource(
   return dir;
 }
 
-async function pruneStaleLinks(
+async function pruneManagedLinks(
   destDir: string,
   validNames: Set<string>,
   managedSkillsRoot: string,
@@ -131,31 +139,24 @@ async function pruneStaleSources(
   }
 }
 
-async function linkSkillInto(
-  source: string,
-  destDir: string,
-  linkName: string,
-  scope: string,
-  warnings: string[],
-): Promise<void> {
-  try {
-    await mkdir(destDir, { recursive: true });
-    await ensureSymlink(source, path.join(destDir, linkName));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log.error(`Failed to link managed skill into ${scope}`, {
-      skill: linkName,
-      destDir,
-      error: message,
-    });
-    warnings.push(`Failed to link "${linkName}" into ${scope}: ${message}`);
-  }
-}
-
+/**
+ * Installs code-defined (builtin) skills.
+ *
+ * Sources are written to <userData>/managed-skills/<name> (their contents
+ * embed machine-specific paths) and symlinked into ~/.agents/skills — the
+ * canonical skills directory. From there the SkillsService picks them up
+ * like any other skill and links them into ~/.claude/skills.
+ *
+ * Also removes legacy links this app used to create in ~/.codex/skills,
+ * ~/.cursor/skills and the managed Claude plugin's skills dir (Codex and
+ * Cursor read .agents/skills and .claude/skills directly now).
+ */
 export async function ensureManagedSkills(
   userDataPath: string,
   claudePluginRoot: string | null,
+  homeDirOverride?: string,
 ): Promise<ManagedSkillsResult> {
+  const home = homeDirOverride ?? homedir();
   const managedSkillsRoot = path.join(userDataPath, "managed-skills");
   const handoffsDir = path.join(userDataPath, "handoffs");
   await Promise.all([
@@ -166,47 +167,46 @@ export async function ensureManagedSkills(
   const skills = buildSkills({ handoffsDir });
 
   const warnings: string[] = [];
-  const codexSkillsDir = path.join(homedir(), ".codex", "skills");
-  const cursorSkillsDir = path.join(homedir(), ".cursor", "skills");
-  const claudeSkillsDir = claudePluginRoot
-    ? path.join(claudePluginRoot, "skills")
-    : null;
+  const agentsSkillsDir = path.join(home, ".agents", "skills");
 
   for (const skill of skills) {
     const source = await writeSkillSource(managedSkillsRoot, skill);
-
-    if (claudeSkillsDir) {
-      await linkSkillInto(
+    try {
+      await ensureSymlink(
         source,
-        claudeSkillsDir,
-        skill.name,
-        "Claude plugin",
+        path.join(agentsSkillsDir, skill.name),
         warnings,
       );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error("Failed to link managed skill into .agents/skills", {
+        skill: skill.name,
+        error: message,
+      });
+      warnings.push(`Failed to link "${skill.name}": ${message}`);
     }
-    await linkSkillInto(
-      source,
-      codexSkillsDir,
-      skill.name,
-      "Codex global skills",
-      warnings,
-    );
-    await linkSkillInto(
-      source,
-      cursorSkillsDir,
-      skill.name,
-      "Cursor global skills",
-      warnings,
-    );
   }
 
   const validNames = new Set(skills.map((s) => s.name));
   await pruneStaleSources(managedSkillsRoot, validNames);
-  if (claudeSkillsDir) {
-    await pruneStaleLinks(claudeSkillsDir, validNames, managedSkillsRoot);
+  await pruneManagedLinks(agentsSkillsDir, validNames, managedSkillsRoot);
+
+  // Legacy destinations — remove every link that points at our sources.
+  const legacyDirs = [
+    path.join(home, ".codex", "skills"),
+    path.join(home, ".cursor", "skills"),
+    ...(claudePluginRoot ? [path.join(claudePluginRoot, "skills")] : []),
+  ];
+  for (const legacyDir of legacyDirs) {
+    try {
+      await pruneManagedLinks(legacyDir, new Set(), managedSkillsRoot);
+    } catch (err) {
+      log.warn("Failed to clean up legacy managed-skill links", {
+        legacyDir,
+        err,
+      });
+    }
   }
-  await pruneStaleLinks(codexSkillsDir, validNames, managedSkillsRoot);
-  await pruneStaleLinks(cursorSkillsDir, validNames, managedSkillsRoot);
 
   log.info("Managed skills installed", {
     managedSkillsRoot,

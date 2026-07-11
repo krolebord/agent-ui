@@ -10,6 +10,7 @@ import { codexSessionsRouter } from "./sessions/codex.session";
 import { cursorAgentSessionsRouter } from "./sessions/cursor-agent.session";
 import { localTerminalRouter } from "./sessions/local-terminal.session";
 import { worktreeSetupSessionsRouter } from "./sessions/worktree-setup.session";
+import { skillsRouter } from "./skills-service";
 import { stateSyncRouter } from "./state-orchestrator";
 import { terminalsRouter } from "./terminal-manager";
 
@@ -63,4 +64,5 @@ export const orpcRouter = {
   fs: fsRouter,
   stateSync: stateSyncRouter,
   sessions: sessionsRouter,
+  skills: skillsRouter,
 };
