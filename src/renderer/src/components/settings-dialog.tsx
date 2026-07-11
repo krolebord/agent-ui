@@ -45,7 +45,7 @@ import {
 import type * as React from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
-import { SkillsSettingsItem } from "./skills-dialog";
+import { SkillsSettingsItem } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
 
 export const useSettingsStore = create(
@@ -109,7 +109,7 @@ export function SettingsDialog() {
             </SettingsSectionTrigger>
             <AccordionContent className="divide-y divide-border/40">
               <TitleGenerationSettings />
-              <SkillsSettingsItem />
+              <SkillsSettingsItem onNavigate={closeSettingsDialog} />
             </AccordionContent>
           </AccordionItem>
 

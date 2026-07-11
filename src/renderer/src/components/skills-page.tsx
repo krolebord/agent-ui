@@ -1,15 +1,8 @@
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
+import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigger";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@renderer/components/ui/dialog";
 import { Input } from "@renderer/components/ui/input";
 import { Label } from "@renderer/components/ui/label";
 import {
@@ -21,6 +14,7 @@ import {
 } from "@renderer/components/ui/select";
 import { Switch } from "@renderer/components/ui/switch";
 import { Textarea } from "@renderer/components/ui/textarea";
+import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -36,21 +30,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { create } from "zustand";
-import { combine } from "zustand/middleware";
 
 type EditorTarget = { mode: "create" } | { mode: "edit"; entry: SkillEntry };
-
-export const useSkillsDialogStore = create(
-  combine({ isOpen: false }, (set) => ({
-    open: () => {
-      set({ isOpen: true });
-    },
-    close: () => {
-      set({ isOpen: false });
-    },
-  })),
-);
 
 const GLOBAL_SCOPE = "global" as const;
 
@@ -70,8 +51,7 @@ interface SkillGroup {
   entries: SkillEntry[];
 }
 
-export function SkillsDialog() {
-  const { isOpen, close } = useSkillsDialogStore();
+export function SkillsPage() {
   const skills = useAppState((state) => state.skills);
   const projects = useAppState((state) => state.projects);
 
@@ -116,15 +96,11 @@ export function SkillsDialog() {
   const rescanMutation = useMutation(orpc.skills.rescan.mutationOptions());
   const { mutate: rescan } = rescanMutation;
 
-  // Skills state is pulled, not watched: refresh when the dialog opens and
+  // Skills state is pulled, not watched: refresh when the page mounts and
   // when the app regains focus (rescans are throttled in the main process).
   useEffect(() => {
-    if (!isOpen) {
-      setEditorTarget(null);
-      return;
-    }
     rescan(undefined);
-  }, [isOpen, rescan]);
+  }, [rescan]);
 
   useEffect(() => {
     let wasBlurred = false;
@@ -181,65 +157,63 @@ export function SkillsDialog() {
   };
 
   return (
-    <Dialog
-      open={isOpen}
-      onOpenChange={(nextOpen) => {
-        if (!nextOpen) {
-          close();
-        }
-      }}
-    >
-      <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Skills</DialogTitle>
-          <DialogDescription>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-11 shrink-0 items-center gap-2 border-b border-border/70 px-2 py-1.5">
+        <MobileSidebarTrigger className="md:hidden" />
+        <Sparkles className="size-3.5 text-muted-foreground max-md:hidden" />
+        <span className="text-sm font-medium">Skills</span>
+        {editorTarget ? null : (
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="size-8 px-0"
+              aria-label="Refresh skills"
+              title="Refresh skills"
+              disabled={rescanMutation.isPending}
+              onClick={() => {
+                rescan(undefined);
+              }}
+            >
+              <RefreshCw
+                className={cn(
+                  "size-3.5",
+                  rescanMutation.isPending && "animate-spin",
+                )}
+              />
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => {
+                setEditorTarget({ mode: "create" });
+              }}
+            >
+              <Plus className="mr-1.5 size-3.5" />
+              Add skill
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 p-4">
+          <p className="text-muted-foreground text-sm">
             Reusable agent skills stored in <code>.agents/skills</code> and
             linked into <code>.claude/skills</code>. Changes apply to newly
             started sessions.
-          </DialogDescription>
-        </DialogHeader>
+          </p>
 
-        {editorTarget ? (
-          <SkillEditor
-            target={editorTarget}
-            onDone={() => {
-              setEditorTarget(null);
-            }}
-          />
-        ) : (
-          <div className="flex min-h-0 flex-col gap-3">
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="size-8 px-0"
-                aria-label="Refresh skills"
-                title="Refresh skills"
-                disabled={rescanMutation.isPending}
-                onClick={() => {
-                  rescan(undefined);
-                }}
-              >
-                <RefreshCw
-                  className={cn(
-                    "size-3.5",
-                    rescanMutation.isPending && "animate-spin",
-                  )}
-                />
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => {
-                  setEditorTarget({ mode: "create" });
-                }}
-              >
-                <Plus className="mr-1.5 size-3.5" />
-                Add skill
-              </Button>
-            </div>
-            <div className="max-h-[min(460px,55vh)] overflow-y-auto rounded-md border border-border/60">
+          {editorTarget ? (
+            <SkillEditor
+              target={editorTarget}
+              onDone={() => {
+                setEditorTarget(null);
+              }}
+            />
+          ) : (
+            <div className="rounded-md border border-border/60">
               {groups.length === 0 ? (
                 <div className="text-muted-foreground p-6 text-center text-sm">
                   No skills yet.
@@ -330,10 +304,10 @@ export function SkillsDialog() {
                 ))
               )}
             </div>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -525,7 +499,7 @@ function SkillEditor({
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-      <DialogFooter className="gap-2 sm:justify-between">
+      <div className="flex items-center justify-between gap-2">
         <Button
           type="button"
           variant="outline"
@@ -537,13 +511,17 @@ function SkillEditor({
         <Button type="submit" disabled={isSaving}>
           {target.mode === "edit" ? "Save changes" : "Create skill"}
         </Button>
-      </DialogFooter>
+      </div>
     </form>
   );
 }
 
-export function SkillsSettingsItem() {
-  const openDialog = useSkillsDialogStore((state) => state.open);
+export function SkillsSettingsItem({
+  onNavigate,
+}: {
+  onNavigate?: () => void;
+}) {
+  const showSkills = useMainViewStore((state) => state.showSkills);
   const skillCount = useAppState((state) => Object.keys(state.skills).length);
 
   return (
@@ -556,7 +534,15 @@ export function SkillsSettingsItem() {
             : `${skillCount} skill${skillCount === 1 ? "" : "s"}`}
         </div>
       </div>
-      <Button type="button" variant="outline" size="sm" onClick={openDialog}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          showSkills();
+          onNavigate?.();
+        }}
+      >
         Manage
       </Button>
     </div>
@@ -564,15 +550,17 @@ export function SkillsSettingsItem() {
 }
 
 export function SidebarSkillsButton() {
-  const openDialog = useSkillsDialogStore((state) => state.open);
+  const isActive = useMainViewStore((state) => state.view === "skills");
+  const toggleSkills = useMainViewStore((state) => state.toggleSkills);
   return (
     <Button
       type="button"
       variant="flat"
-      className="h-full w-9 shrink-0 px-0"
+      className={cn("h-full w-9 shrink-0 px-0", isActive && "text-zinc-100")}
       aria-label="Skills"
+      aria-pressed={isActive}
       title="Skills"
-      onClick={openDialog}
+      onClick={toggleSkills}
     >
       <Sparkles className="size-3.5" />
     </Button>

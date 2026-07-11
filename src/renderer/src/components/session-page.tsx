@@ -18,6 +18,7 @@ import {
 } from "@renderer/components/ui/resizable";
 import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
+import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import { cn } from "@renderer/lib/utils";
 import {
   AlertCircle,
@@ -31,6 +32,7 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { SkillsPage } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
 import { WelcomePage } from "./welcome-page";
 
@@ -67,6 +69,11 @@ function MobileWelcomeBar() {
 export function SessionPage() {
   const session = useActiveSession();
   const projectCount = useAppState((state) => state.projects.length);
+  const mainView = useMainViewStore((state) => state.view);
+
+  if (mainView === "skills") {
+    return <SkillsPage />;
+  }
 
   if (!session) {
     return (

@@ -1,6 +1,7 @@
 import { orpc } from "@renderer/orpc-client";
 import { create } from "zustand";
 import { combine, persist } from "zustand/middleware";
+import { useMainViewStore } from "./use-main-view";
 
 export function useActiveSessionId() {
   return useActiveSessionStore((state) => state.activeSessionId);
@@ -28,6 +29,11 @@ export const useActiveSessionStore = create(
       (set) => ({
         setActiveSessionId: (activeSessionId: string | null) => {
           set({ activeSessionId });
+          // Activating a session always brings the session view back, even
+          // when a standalone page (e.g. skills) currently fills the main pane.
+          if (activeSessionId) {
+            useMainViewStore.getState().showSessions();
+          }
         },
       }),
     ),

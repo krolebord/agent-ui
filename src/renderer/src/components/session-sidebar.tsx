@@ -60,7 +60,7 @@ import {
   statusIndicatorMeta,
 } from "./session-sidebar-item";
 import { useSettingsStore } from "./settings-dialog";
-import { SidebarSkillsButton } from "./skills-dialog";
+import { SidebarSkillsButton } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
 import { useWorktreeDeleteDialogStore } from "./worktree-delete-dialog";
 

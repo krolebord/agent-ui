@@ -10,7 +10,6 @@ import { ProjectWorktreeDialog } from "@renderer/components/project-worktree-dia
 import { SessionPage } from "@renderer/components/session-page";
 import { SessionSidebar } from "@renderer/components/session-sidebar";
 import { SettingsDialog } from "@renderer/components/settings-dialog";
-import { SkillsDialog } from "@renderer/components/skills-dialog";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -118,7 +117,6 @@ function App() {
       <WorktreeDeleteDialog />
       <ProjectDeletionToastListener />
       <SettingsDialog />
-      <SkillsDialog />
       <DiffReviewCommitDialog />
       <Toaster
         closeButton
