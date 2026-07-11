@@ -1,5 +1,4 @@
-import type { Dirent, FSWatcher } from "node:fs";
-import { watch } from "node:fs";
+import type { Dirent } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -31,6 +30,7 @@ import {
   parseSkillMd,
   serializeSkillMd,
 } from "./skill-frontmatter";
+import { withThrottledAsyncRunner } from "./throttle-runner";
 
 export const defineSkillsState = () =>
   defineServiceState({
@@ -40,7 +40,7 @@ export const defineSkillsState = () =>
 
 export type SkillsServiceState = ReturnType<typeof defineSkillsState>;
 
-const RESCAN_DEBOUNCE_MS = 200;
+const SKILLS_REFRESH_THROTTLE_MS = 3_000;
 const AGENTS_SKILLS_SEGMENTS = [".agents", "skills"] as const;
 const CLAUDE_SKILLS_SEGMENTS = [".claude", "skills"] as const;
 
@@ -59,12 +59,6 @@ interface SkillsRoot {
   claudeSkillsDir: string;
   /** Project roots use relative symlinks to keep repos portable. */
   relativeLinks: boolean;
-}
-
-interface RootWatchers {
-  agents: FSWatcher | null;
-  /** Fallback watcher on the project root, waiting for .agents to appear. */
-  parent: FSWatcher | null;
 }
 
 export interface SkillsServiceOptions {
@@ -96,10 +90,21 @@ export class SkillsService {
   private readonly builtinSkillsRoot: string | null;
   private readonly homeDir: string;
 
-  private readonly watchers = new Map<string, RootWatchers>();
-  private readonly pendingRescans = new Map<string, NodeJS.Timeout>();
+  private knownRootIds = new Set<string>();
   private unsubscribeProjects: (() => void) | null = null;
   private disposed = false;
+
+  /**
+   * There is no filesystem watching — skills state is pulled, like git
+   * status: at startup, before a session spawns (`ensureFreshForPath`), on
+   * app focus / dialog open / manual refresh (`refresh`, throttled), and
+   * after every mutation.
+   */
+  private readonly refreshRunner = withThrottledAsyncRunner(
+    () => this.rescanAll(),
+    SKILLS_REFRESH_THROTTLE_MS,
+    { leading: true, trailing: true },
+  );
 
   constructor(options: SkillsServiceOptions) {
     this.state = options.state;
@@ -140,10 +145,6 @@ export class SkillsService {
     ];
   }
 
-  private rootById(id: string): SkillsRoot | null {
-    return this.currentRoots().find((root) => root.id === id) ?? null;
-  }
-
   rootForScope(scope: SkillScope): SkillsRoot {
     if (scope.type === "global") return this.globalRoot();
     const known = this.projectsState.state.some(
@@ -163,7 +164,7 @@ export class SkillsService {
     }
 
     const projectsListener = () => {
-      this.reconcileWatchedRoots();
+      this.handleProjectsChanged();
     };
     this.projectsState.eventTarget.addEventListener(
       "state-update",
@@ -176,7 +177,6 @@ export class SkillsService {
       );
     };
 
-    this.reconcileWatchedRoots();
     await this.rescanAll();
   }
 
@@ -184,9 +184,7 @@ export class SkillsService {
     this.disposed = true;
     this.unsubscribeProjects?.();
     this.unsubscribeProjects = null;
-    for (const timer of this.pendingRescans.values()) clearTimeout(timer);
-    this.pendingRescans.clear();
-    for (const [id] of this.watchers) this.closeWatchers(id);
+    this.refreshRunner.dispose();
   }
 
   async rescanAll(): Promise<void> {
@@ -202,111 +200,67 @@ export class SkillsService {
       }
     });
     await Promise.all(roots.map((root) => this.rescanRoot(root)));
+    this.knownRootIds = rootIds;
   }
 
   // ---------------------------------------------------------------------
-  // Watching
+  // Refresh triggers
 
-  private reconcileWatchedRoots(): void {
+  /**
+   * Throttled full rescan for UI-driven triggers (app focus, skills dialog,
+   * manual refresh button). Rapid calls coalesce; a trailing run guarantees
+   * the last call is eventually served with fresh data.
+   */
+  refresh(): Promise<void> {
+    return this.refreshRunner.schedule();
+  }
+
+  /**
+   * Deterministic pre-spawn sync: rescans the global root and the project
+   * root containing `cwd` so .claude/skills links are consistent at the only
+   * moment a CLI reads them. Unthrottled — it's a couple of readdirs — and
+   * never throws: a failed scan must not block starting a session.
+   */
+  async ensureFreshForPath(cwd: string | null | undefined): Promise<void> {
+    const roots: SkillsRoot[] = [this.globalRoot()];
+    if (cwd) {
+      const projectRoot = this.currentRoots().find(
+        (root) =>
+          root.scope.type === "project" &&
+          (cwd === root.id || cwd.startsWith(`${root.id}${path.sep}`)),
+      );
+      if (projectRoot) roots.push(projectRoot);
+    }
+    await Promise.all(
+      roots.map((root) =>
+        this.rescanRoot(root).catch((err) => {
+          log.warn("Pre-session skills rescan failed", { root: root.id, err });
+        }),
+      ),
+    );
+  }
+
+  private handleProjectsChanged(): void {
     if (this.disposed) return;
     const roots = this.currentRoots();
     const rootIds = new Set(roots.map((r) => r.id));
 
-    for (const id of [...this.watchers.keys()]) {
+    for (const id of this.knownRootIds) {
       if (!rootIds.has(id)) {
-        this.closeWatchers(id);
         this.removeRootEntries(id);
       }
     }
-
     for (const root of roots) {
-      if (!this.watchers.has(root.id)) {
-        this.attachWatchers(root);
-        this.scheduleRescan(root.id);
+      if (!this.knownRootIds.has(root.id)) {
+        void this.rescanRoot(root).catch((err) => {
+          log.warn("Skills rescan failed for new project", {
+            root: root.id,
+            err,
+          });
+        });
       }
     }
-  }
-
-  private closeWatchers(id: string): void {
-    const watchers = this.watchers.get(id);
-    if (!watchers) return;
-    watchers.agents?.close();
-    watchers.parent?.close();
-    this.watchers.delete(id);
-  }
-
-  private attachWatchers(root: SkillsRoot): void {
-    const watchers: RootWatchers = { agents: null, parent: null };
-    this.watchers.set(root.id, watchers);
-    this.tryWatchAgentsDir(root, watchers);
-  }
-
-  private tryWatchAgentsDir(root: SkillsRoot, watchers: RootWatchers): void {
-    const agentsDir = path.dirname(root.agentsSkillsDir);
-    try {
-      watchers.agents = watch(
-        agentsDir,
-        { recursive: true, persistent: false },
-        () => {
-          this.scheduleRescan(root.id);
-        },
-      );
-      watchers.agents.on("error", (err) => {
-        log.warn("Skills watcher error", { root: root.id, err });
-      });
-      if (watchers.parent) {
-        watchers.parent.close();
-        watchers.parent = null;
-      }
-    } catch {
-      // .agents doesn't exist yet — watch the parent dir non-recursively so
-      // we notice when it's created (e.g. by an agent), then upgrade.
-      this.tryWatchParentDir(root, watchers, path.dirname(agentsDir));
-    }
-  }
-
-  private tryWatchParentDir(
-    root: SkillsRoot,
-    watchers: RootWatchers,
-    parentDir: string,
-  ): void {
-    if (watchers.parent) return;
-    try {
-      watchers.parent = watch(parentDir, { persistent: false }, (_, name) => {
-        if (name !== ".agents") return;
-        this.tryWatchAgentsDir(root, watchers);
-        this.scheduleRescan(root.id);
-      });
-      watchers.parent.on("error", (err) => {
-        log.warn("Skills parent watcher error", { root: root.id, err });
-      });
-    } catch (err) {
-      log.warn("Failed to watch for skills dir creation", {
-        root: root.id,
-        err,
-      });
-    }
-  }
-
-  private scheduleRescan(rootId: string): void {
-    if (this.disposed) return;
-    const existing = this.pendingRescans.get(rootId);
-    if (existing) clearTimeout(existing);
-    const timer = setTimeout(() => {
-      this.pendingRescans.delete(rootId);
-      const root = this.rootById(rootId);
-      if (!root) return;
-      // A rescan may reveal that .agents was created after the fallback
-      // watcher fired; retry the recursive watch if needed.
-      const watchers = this.watchers.get(rootId);
-      if (watchers && !watchers.agents) {
-        this.tryWatchAgentsDir(root, watchers);
-      }
-      void this.rescanRoot(root).catch((err) => {
-        log.warn("Skills rescan failed", { root: rootId, err });
-      });
-    }, RESCAN_DEBOUNCE_MS);
-    this.pendingRescans.set(rootId, timer);
+    this.knownRootIds = rootIds;
   }
 
   // ---------------------------------------------------------------------
@@ -694,6 +648,6 @@ export const skillsRouter = {
       await context.skillsService.deleteSkill(input);
     }),
   rescan: procedure.handler(async ({ context }) => {
-    await context.skillsService.rescanAll();
+    await context.skillsService.refresh();
   }),
 };

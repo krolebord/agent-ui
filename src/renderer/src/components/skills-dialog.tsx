@@ -22,10 +22,18 @@ import {
 import { Switch } from "@renderer/components/ui/switch";
 import { Textarea } from "@renderer/components/ui/textarea";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
+import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { SKILL_NAME_PATTERN, type SkillEntry } from "@shared/skills";
 import { useMutation } from "@tanstack/react-query";
-import { FolderOpen, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
+import {
+  FolderOpen,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -105,11 +113,36 @@ export function SkillsDialog() {
 
   const [editorTarget, setEditorTarget] = useState<EditorTarget | null>(null);
 
+  const rescanMutation = useMutation(orpc.skills.rescan.mutationOptions());
+  const { mutate: rescan } = rescanMutation;
+
+  // Skills state is pulled, not watched: refresh when the dialog opens and
+  // when the app regains focus (rescans are throttled in the main process).
   useEffect(() => {
     if (!isOpen) {
       setEditorTarget(null);
+      return;
     }
-  }, [isOpen]);
+    rescan(undefined);
+  }, [isOpen, rescan]);
+
+  useEffect(() => {
+    let wasBlurred = false;
+    const handleBlur = () => {
+      wasBlurred = true;
+    };
+    const handleFocus = () => {
+      if (!wasBlurred) return;
+      wasBlurred = false;
+      rescan(undefined);
+    };
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [rescan]);
 
   const deleteMutation = useMutation(
     orpc.skills.delete.mutationOptions({
@@ -175,7 +208,26 @@ export function SkillsDialog() {
           />
         ) : (
           <div className="flex min-h-0 flex-col gap-3">
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="size-8 px-0"
+                aria-label="Refresh skills"
+                title="Refresh skills"
+                disabled={rescanMutation.isPending}
+                onClick={() => {
+                  rescan(undefined);
+                }}
+              >
+                <RefreshCw
+                  className={cn(
+                    "size-3.5",
+                    rescanMutation.isPending && "animate-spin",
+                  )}
+                />
+              </Button>
               <Button
                 type="button"
                 size="sm"

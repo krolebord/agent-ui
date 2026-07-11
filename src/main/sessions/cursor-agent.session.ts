@@ -100,6 +100,8 @@ export const cursorAgentSessionsRouter = {
         return;
       }
 
+      await context.skillsService.ensureFreshForPath(session.startupConfig.cwd);
+
       const pendingPrompt = session.initialPromptSent
         ? undefined
         : session.startupConfig.initialPrompt;

@@ -145,6 +145,8 @@ export const codexSessionsRouter = {
         return;
       }
 
+      await context.skillsService.ensureFreshForPath(session.startupConfig.cwd);
+
       await context.sessions.codex.startLiveSession({
         sessionId,
         codexSessionId: session.codexSessionId,
@@ -167,6 +169,12 @@ export const codexSessionsRouter = {
   forkSession: procedure
     .input(forkCodexSessionSchema)
     .handler(async ({ input, context }) => {
+      const source = context.sessions.state.state[input.sessionId];
+      await context.skillsService.ensureFreshForPath(
+        source?.type === "codex-local-terminal"
+          ? source.startupConfig.cwd
+          : null,
+      );
       return await context.sessions.codex.forkSession(input);
     }),
   stopLiveSession: procedure

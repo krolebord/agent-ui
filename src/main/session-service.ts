@@ -118,20 +118,37 @@ const renameClaudeSessionSchema = z.object({
   title: z.string().trim().min(1),
 });
 
+function claudeSessionCwd(
+  state: SessionServiceState,
+  sessionId: string,
+): string | null {
+  const session = state.state[sessionId];
+  return session?.type === "claude-local-terminal"
+    ? session.startupConfig.cwd
+    : null;
+}
+
 export const claudeSessionsRouter = {
   startSession: procedure
     .input(startClaudeSessionSchema)
     .handler(async ({ input, context }) => {
+      await context.skillsService.ensureFreshForPath(input.cwd);
       return await context.sessionsService.startNewSession(input);
     }),
   resumeSession: procedure
     .input(resumeClaudeSessionSchema)
     .handler(async ({ input, context }) => {
+      await context.skillsService.ensureFreshForPath(
+        claudeSessionCwd(context.sessions.state, input.sessionId),
+      );
       return await context.sessionsService.resumeSession(input);
     }),
   forkSession: procedure
     .input(forkClaudeSessionSchema)
     .handler(async ({ input, context }) => {
+      await context.skillsService.ensureFreshForPath(
+        claudeSessionCwd(context.sessions.state, input.sessionId),
+      );
       return await context.sessionsService.forkSession(input);
     }),
   stopLiveSession: procedure

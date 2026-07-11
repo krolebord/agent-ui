@@ -332,4 +332,40 @@ describe("SkillsService", () => {
       false,
     );
   });
+
+  it("ensureFreshForPath syncs the global root and the project containing cwd", async () => {
+    await writeSkill(globalAgentsSkills(), "review", `name: review`);
+    await writeSkill(projectAgentsSkills(), "deploy", `name: deploy`);
+
+    await service.ensureFreshForPath(path.join(projectDir, "src", "nested"));
+
+    expect(existsSync(path.join(globalClaudeSkills(), "review"))).toBe(true);
+    expect(existsSync(path.join(projectClaudeSkills(), "deploy"))).toBe(true);
+    expect(Object.values(state.state)).toHaveLength(2);
+  });
+
+  it("ensureFreshForPath ignores paths outside tracked projects", async () => {
+    await writeSkill(projectAgentsSkills(), "deploy", `name: deploy`);
+
+    await service.ensureFreshForPath(path.join(tempDir, "untracked"));
+
+    expect(existsSync(path.join(projectClaudeSkills(), "deploy"))).toBe(false);
+  });
+
+  it("refresh runs immediately on the leading edge and throttles follow-ups", async () => {
+    const skillDir = await writeSkill(
+      globalAgentsSkills(),
+      "review",
+      `name: review`,
+    );
+
+    await service.refresh();
+    expect(state.state[skillDir]).toBeDefined();
+
+    // Within the throttle window a second refresh must not run synchronously;
+    // the deletion is only picked up by the (cancelled-on-dispose) trailing run.
+    await rm(skillDir, { recursive: true, force: true });
+    void service.refresh();
+    expect(state.state[skillDir]).toBeDefined();
+  });
 });
