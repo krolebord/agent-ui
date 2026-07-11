@@ -215,7 +215,12 @@ function TerminalPage({
               attachKey={`${session.sessionId}:${terminalAttachmentState}`}
             />
           </div>
-          {isMobile ? <TerminalKeyBar terminalId={session.sessionId} /> : null}
+          {isMobile ? (
+            <TerminalKeyBar
+              terminalId={session.sessionId}
+              sessionType={session.type}
+            />
+          ) : null}
         </div>
       }
     />

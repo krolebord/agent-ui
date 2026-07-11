@@ -14,23 +14,37 @@ import { MessageSquareText, Paperclip, SendHorizontal } from "lucide-react";
 import type React from "react";
 import { useRef, useState } from "react";
 
-const TERMINAL_KEYS = [
-  { label: "Esc", data: "\x1b" },
-  { label: "Tab", data: "\t" },
-  { label: "Shift-Tab", data: "\x1b[Z" },
-  { label: "Shift-Enter", data: "\\" },
-  { label: "Up", data: "\x1b[A" },
-  { label: "Down", data: "\x1b[B" },
-  { label: "Left", data: "\x1b[D" },
-  { label: "Right", data: "\x1b[C" },
-  { label: "Ctrl-C", data: "\x03" },
-] as const;
+// Codex's TUI speaks the Kitty keyboard protocol, where Shift+Enter is encoded
+// as CSI 13 ; 2 u (13 = Enter keycode, 2 = shift modifier). Claude and plain
+// shells instead treat a trailing backslash as a soft newline, so a bare "\\"
+// is the right sequence for them.
+const shiftEnterData = (sessionType: string | undefined): string =>
+  sessionType === "codex-local-terminal" ? "\x1b[13;2u" : "\\";
+
+const terminalKeys = (sessionType: string | undefined) =>
+  [
+    { label: "Esc", data: "\x1b" },
+    { label: "Tab", data: "\t" },
+    { label: "Shift-Tab", data: "\x1b[Z" },
+    { label: "Shift-Enter", data: shiftEnterData(sessionType) },
+    { label: "Up", data: "\x1b[A" },
+    { label: "Down", data: "\x1b[B" },
+    { label: "Left", data: "\x1b[D" },
+    { label: "Right", data: "\x1b[C" },
+    { label: "Ctrl-C", data: "\x03" },
+  ] as const;
 
 // Max distance (px) a pointer may travel between down and up before the
 // gesture is treated as a scroll rather than a tap.
 const TAP_MOVE_THRESHOLD = 10;
 
-export function TerminalKeyBar({ terminalId }: { terminalId: string }) {
+export function TerminalKeyBar({
+  terminalId,
+  sessionType,
+}: {
+  terminalId: string;
+  sessionType?: string;
+}) {
   const [inputOpen, setInputOpen] = useState(false);
   const [inputText, setInputText] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -145,7 +159,7 @@ export function TerminalKeyBar({ terminalId }: { terminalId: string }) {
         >
           <Paperclip className="size-4" />
         </Button>
-        {TERMINAL_KEYS.map(({ label, data }) => (
+        {terminalKeys(sessionType).map(({ label, data }) => (
           <Button
             key={label}
             type="button"
