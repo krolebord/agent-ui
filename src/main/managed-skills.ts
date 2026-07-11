@@ -12,10 +12,12 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import log from "./logger";
+import { OPENAI_POLICY_CONTENTS, OPENAI_POLICY_FILE } from "./skills-service";
 
 interface ManagedSkill {
   name: string;
-  contents: string;
+  /** Relative path within the skill dir -> file contents. */
+  files: Record<string, string>;
 }
 
 interface ManagedSkillContext {
@@ -26,7 +28,11 @@ function buildSkills(ctx: ManagedSkillContext): ManagedSkill[] {
   return [
     {
       name: "agent-ui-handoff",
-      contents: `---
+      files: {
+        // disable-model-invocation only covers Claude Code; the openai.yaml
+        // policy file is what keeps Codex from auto-invoking the skill.
+        [OPENAI_POLICY_FILE]: OPENAI_POLICY_CONTENTS,
+        "SKILL.md": `---
 name: agent-ui-handoff
 description: Summarize the current session into a handoff document that Agent UI can use to start a fresh session continuing this work. Use whenever the user asks to hand off, save state, pause for a new session, or finish a session.
 disable-model-invocation: true
@@ -41,10 +47,12 @@ Use a filename of the form \`YYYY-MM-DDTHH-mm-ss-<short-slug>.md\`, where the ti
 
 The body is up to you. Think about what a fresh agent — one with zero memory of this conversation — would need in order to pick up where you left off. Choose whichever sections, ordering, and level of detail serve that purpose; there is no required template.
 `,
+      },
     },
     {
       name: "agent-ui-skills",
-      contents: `---
+      files: {
+        "SKILL.md": `---
 name: agent-ui-skills
 description: How to create, edit, or delete skills (reusable instructions loaded into future agent sessions) on this machine. Use whenever the user asks to save a workflow or knowledge as a skill, create a new skill, or change or remove an existing one.
 managed-by: agent-ui-builtin
@@ -75,6 +83,15 @@ Instructions for the agent...
 
 Supporting files (scripts, reference docs) can live next to \`SKILL.md\` in the same directory; reference them from the body by relative path.
 
+\`disable-model-invocation: true\` is honored by Claude Code only. Codex ignores it — to make a skill user-invoke-only there as well, also create \`agents/openai.yaml\` inside the skill directory:
+
+\`\`\`yaml
+policy:
+  allow_implicit_invocation: false
+\`\`\`
+
+Always create both when the user wants a skill they alone can trigger; omit both for skills agents may load automatically.
+
 ## After creating or editing
 
 Call the \`list_skills\` tool on the \`agent-ui\` MCP server. Besides listing skills, it registers your changes: Agent UI rescans the skills directories, links new skills into \`.claude/skills\`, and shows them in its UI. Also call it before creating a skill, to check whether a similar one already exists — its output includes each skill's directory path.
@@ -85,6 +102,7 @@ Call the \`list_skills\` tool on the \`agent-ui\` MCP server. Besides listing sk
 - To delete a skill, remove its directory; Agent UI cleans up the links on its next rescan.
 - Don't edit skills whose frontmatter says \`managed-by: agent-ui-builtin\` — they are owned by Agent UI and your changes would be overwritten.
 `,
+      },
     },
   ];
 }
@@ -129,8 +147,14 @@ async function writeSkillSource(
   skill: ManagedSkill,
 ): Promise<string> {
   const dir = path.join(managedSkillsRoot, skill.name);
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, "SKILL.md"), skill.contents, "utf8");
+  // Sources live under userData and are fully app-owned; a clean rewrite
+  // keeps them exactly matching the definition (no stale extra files).
+  await rm(dir, { recursive: true, force: true });
+  for (const [relPath, contents] of Object.entries(skill.files)) {
+    const filePath = path.join(dir, relPath);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, contents, "utf8");
+  }
   return dir;
 }
 

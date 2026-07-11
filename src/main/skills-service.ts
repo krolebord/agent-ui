@@ -44,8 +44,10 @@ const SKILLS_REFRESH_THROTTLE_MS = 3_000;
 const AGENTS_SKILLS_SEGMENTS = [".agents", "skills"] as const;
 const CLAUDE_SKILLS_SEGMENTS = [".claude", "skills"] as const;
 
-const OPENAI_POLICY_FILE = path.join("agents", "openai.yaml");
-const OPENAI_POLICY_CONTENTS = `policy:
+// Codex ignores the disable-model-invocation frontmatter field; its
+// documented control for user-invoke-only skills is this policy file.
+export const OPENAI_POLICY_FILE = path.join("agents", "openai.yaml");
+export const OPENAI_POLICY_CONTENTS = `policy:
   allow_implicit_invocation: false
 `;
 
