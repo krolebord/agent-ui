@@ -322,6 +322,28 @@ export async function refreshTrackedProject(
   return { path: normalizedPath };
 }
 
+/**
+ * Pushes behind the per-project commit lock so a push requested while the
+ * auto-message flow is still generating waits for the pending amend instead
+ * of publishing the placeholder commit (which the amend would then rewrite,
+ * leaving the branch diverged from the remote it just pushed to).
+ */
+export async function pushProjectToRemote(
+  path: string,
+  context: {
+    projectGitService: {
+      pushToRemote(projectPath: string): Promise<void>;
+    };
+  },
+): Promise<void> {
+  const releaseCommitLock = await acquireProjectCommitLock(path);
+  try {
+    await context.projectGitService.pushToRemote(path);
+  } finally {
+    releaseCommitLock();
+  }
+}
+
 export const projectsRouter = {
   addProject: procedure
     .input(z.object({ path: projectPathSchema }))
@@ -388,7 +410,7 @@ export const projectsRouter = {
     .handler(async ({ input, context }) => {
       const path = normalizeProjectPath(input.path);
       assertProjectPathInteractionAllowed(path, context);
-      await context.projectGitService.pushToRemote(path);
+      await pushProjectToRemote(path, context);
     }),
   commitSelectedChanges: procedure
     .input(
