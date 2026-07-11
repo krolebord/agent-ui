@@ -3,17 +3,18 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Services } from "../create-services";
 import log from "../logger";
+import type { McpRequestContext } from "./session-token";
 import { mcpTools } from "./tools";
 
 export const MCP_PATH = "/mcp";
 
-function createMcpServer(services: Services) {
+function createMcpServer(services: Services, context: McpRequestContext) {
   const server = new McpServer({
     name: "agent-ui",
     version: "1.0.0",
   });
   for (const tool of mcpTools) {
-    tool.register(server, services);
+    tool.register(server, services, context);
   }
   return server;
 }
@@ -28,7 +29,14 @@ export async function handleMcpHttpRequest(
   res: ServerResponse,
   services: Services,
 ) {
-  const server = createMcpServer(services);
+  // A missing/invalid token still serves the request, just without a session
+  // context — tools that need the cwd degrade to global-only behavior.
+  const requestUrl = new URL(req.url ?? "/", "http://agent-ui.local");
+  const context = services.mcpSessionTokens.verify(
+    requestUrl.searchParams.get("token"),
+  ) ?? { cwd: null };
+
+  const server = createMcpServer(services, context);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,

@@ -17,6 +17,7 @@ import {
 } from "../codex-app-server-tracker";
 import { buildCodexArgs } from "../codex-cli";
 import { getCodexUsage } from "../codex-usage";
+import type { McpRequestContext } from "../mcp/session-token";
 import { procedure } from "../orpc";
 import { TerminalManager } from "../terminal-manager";
 import type { TerminalSessionStatus } from "../terminal-session";
@@ -244,7 +245,7 @@ interface CodexSessionsManagerOptions {
   state: SessionServiceState;
   terminalManager?: TerminalManager;
   titleGeneration?: TitleGenerationService;
-  getMcpServerUrl?: () => string | null;
+  getMcpServerUrl?: (context: McpRequestContext) => string | null;
 }
 
 function getCodexSessionStatus(
@@ -417,7 +418,9 @@ export class CodexSessionsManager {
   private readonly sessionsState: SessionServiceState;
   private readonly terminalManager: TerminalManager;
   private readonly titleGeneration: TitleGenerationService | null;
-  private readonly getMcpServerUrl: (() => string | null) | null;
+  private readonly getMcpServerUrl:
+    | ((context: McpRequestContext) => string | null)
+    | null;
   private readonly subagentPruneTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -774,7 +777,7 @@ export class CodexSessionsManager {
     });
     let tracker: CodexAppServerTracker | null = null;
     const mcpServerUrl =
-      mcpEnabled === false ? null : (this.getMcpServerUrl?.() ?? null);
+      mcpEnabled === false ? null : (this.getMcpServerUrl?.({ cwd }) ?? null);
 
     try {
       await appServer.start({ cwd, mcpServerUrl });

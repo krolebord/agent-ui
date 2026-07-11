@@ -42,6 +42,50 @@ Use a filename of the form \`YYYY-MM-DDTHH-mm-ss-<short-slug>.md\`, where the ti
 The body is up to you. Think about what a fresh agent — one with zero memory of this conversation — would need in order to pick up where you left off. Choose whichever sections, ordering, and level of detail serve that purpose; there is no required template.
 `,
     },
+    {
+      name: "agent-ui-skills",
+      contents: `---
+name: agent-ui-skills
+description: How to create, edit, or delete skills (reusable instructions loaded into future agent sessions) on this machine. Use whenever the user asks to save a workflow or knowledge as a skill, create a new skill, or change or remove an existing one.
+managed-by: agent-ui-builtin
+---
+
+Skills on this machine are managed by Agent UI. A skill is a directory containing a \`SKILL.md\`; you create and edit these files directly with your file tools.
+
+## Where skills live
+
+Always work in the canonical \`.agents/skills\` directories:
+
+- Project skills (specific to one repository): \`<project root>/.agents/skills/<skill-name>/SKILL.md\`
+- Global skills (useful everywhere): \`~/.agents/skills/<skill-name>/SKILL.md\`
+
+Never create or edit anything under \`.claude/skills\` — those are symlinks that Agent UI generates from \`.agents/skills\`. Prefer project scope unless the skill is clearly useful across all projects.
+
+## SKILL.md format
+
+\`\`\`markdown
+---
+name: <skill-name>               # must match the directory name
+description: <when to use this skill — what agents read when deciding to load it>
+disable-model-invocation: true   # optional: only the user can invoke it; omit to let agents load it automatically
+---
+
+Instructions for the agent...
+\`\`\`
+
+Supporting files (scripts, reference docs) can live next to \`SKILL.md\` in the same directory; reference them from the body by relative path.
+
+## After creating or editing
+
+Call the \`list_skills\` tool on the \`agent-ui\` MCP server. Besides listing skills, it registers your changes: Agent UI rescans the skills directories, links new skills into \`.claude/skills\`, and shows them in its UI. Also call it before creating a skill, to check whether a similar one already exists — its output includes each skill's directory path.
+
+## Rules
+
+- New or edited skills take effect in future sessions, not the current one — don't try to invoke a skill you just wrote.
+- To delete a skill, remove its directory; Agent UI cleans up the links on its next rescan.
+- Don't edit skills whose frontmatter says \`managed-by: agent-ui-builtin\` — they are owned by Agent UI and your changes would be overwritten.
+`,
+    },
   ];
 }
 

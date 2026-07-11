@@ -12,6 +12,7 @@ import { defineHandoffsState, HandoffsService } from "./handoffs-service";
 import log from "./logger";
 import { defineMachineStatsState, MachineStatsMonitor } from "./machine-stats";
 import { ensureManagedSkills } from "./managed-skills";
+import { type McpRequestContext, McpSessionTokens } from "./mcp/session-token";
 import {
   createPersistenceStore,
   PersistenceOrchestrator,
@@ -49,7 +50,8 @@ const STORAGE_SCHEMA_VERSION = 3;
 interface CreateServicesOptions {
   host: AppHost;
   disposeSignal: AbortSignal;
-  getMcpServerUrl?: () => string | null;
+  mcpSessionTokens?: McpSessionTokens;
+  getMcpServerUrl?: (context: McpRequestContext) => string | null;
 }
 
 interface ShellIntegrationInitResult {
@@ -122,6 +124,7 @@ export type CreateServicesResult = Awaited<ReturnType<typeof createServices>>;
 
 export async function createServices(options: CreateServicesOptions) {
   const { host, disposeSignal, getMcpServerUrl } = options;
+  const mcpSessionTokens = options.mcpSessionTokens ?? new McpSessionTokens();
   const userDataPath = host.paths.userData;
   const [
     { managedPluginDir, pluginWarning },
@@ -311,6 +314,7 @@ export async function createServices(options: CreateServicesOptions) {
     pluginWarning,
     handoffsService,
     skillsService,
+    mcpSessionTokens,
     sessions: {
       state: sessionsState,
       localTerminal: localTerminalSessionsManager,

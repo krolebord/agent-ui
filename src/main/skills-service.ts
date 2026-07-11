@@ -240,6 +240,22 @@ export class SkillsService {
     );
   }
 
+  /**
+   * Skills visible to a session running at `cwd`: global skills plus the
+   * containing project's skills. Rescans the relevant roots first so results
+   * reflect what is on disk right now.
+   */
+  async listSkillsForPath(cwd: string | null): Promise<SkillEntry[]> {
+    await this.ensureFreshForPath(cwd);
+    const entries = Object.values(this.state.state).filter((entry) => {
+      if (entry.scope.type === "global") return true;
+      if (!cwd) return false;
+      const projectPath = entry.scope.projectPath;
+      return cwd === projectPath || cwd.startsWith(`${projectPath}${path.sep}`);
+    });
+    return entries.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   private handleProjectsChanged(): void {
     if (this.disposed) return;
     const roots = this.currentRoots();

@@ -114,6 +114,46 @@ describe("SkillsService", () => {
     });
   });
 
+  it("lists global and containing-project skills for a cwd", async () => {
+    await writeSkill(
+      globalAgentsSkills(),
+      "review",
+      `name: review\ndescription: Reviews code`,
+    );
+    await writeSkill(
+      projectAgentsSkills(),
+      "deploy",
+      `name: deploy\ndescription: Deploys the app`,
+    );
+
+    const fromProjectSubdir = await service.listSkillsForPath(
+      path.join(projectDir, "src", "nested"),
+    );
+    expect(fromProjectSubdir.map((s) => s.name)).toEqual(["deploy", "review"]);
+
+    const fromOutside = await service.listSkillsForPath(
+      path.join(tempDir, "elsewhere"),
+    );
+    expect(fromOutside.map((s) => s.name)).toEqual(["review"]);
+
+    const withoutCwd = await service.listSkillsForPath(null);
+    expect(withoutCwd.map((s) => s.name)).toEqual(["review"]);
+  });
+
+  it("picks up on-disk changes when listing for a cwd", async () => {
+    await service.rescanAll();
+    expect(await service.listSkillsForPath(projectDir)).toEqual([]);
+
+    await writeSkill(
+      projectAgentsSkills(),
+      "deploy",
+      `name: deploy\ndescription: Deploys the app`,
+    );
+
+    const skills = await service.listSkillsForPath(projectDir);
+    expect(skills.map((s) => s.name)).toEqual(["deploy"]);
+  });
+
   it("links skills into .claude/skills (absolute for global, relative for projects)", async () => {
     const globalSkillDir = await writeSkill(
       globalAgentsSkills(),

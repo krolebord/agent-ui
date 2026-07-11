@@ -5,10 +5,15 @@ import type {
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { z } from "zod";
 import type { Services } from "../create-services";
+import type { McpRequestContext } from "./session-token";
 
 export interface McpTool {
   name: string;
-  register(server: McpServer, services: Services): void;
+  register(
+    server: McpServer,
+    services: Services,
+    context: McpRequestContext,
+  ): void;
 }
 
 export function textResult(text: string): CallToolResult {
@@ -22,11 +27,12 @@ export function defineMcpTool<Shape extends z.ZodRawShape>(tool: {
   handler: (
     input: z.output<z.ZodObject<Shape>>,
     services: Services,
+    context: McpRequestContext,
   ) => CallToolResult | Promise<CallToolResult>;
 }): McpTool {
   return {
     name: tool.name,
-    register(server, services) {
+    register(server, services, context) {
       server.registerTool(
         tool.name,
         {
@@ -37,7 +43,11 @@ export function defineMcpTool<Shape extends z.ZodRawShape>(tool: {
         // that TypeScript cannot resolve for an unbound generic; the SDK
         // still validates arguments against inputSchema at runtime.
         ((input: z.output<z.ZodObject<Shape>>) =>
-          tool.handler(input, services)) as unknown as ToolCallback<Shape>,
+          tool.handler(
+            input,
+            services,
+            context,
+          )) as unknown as ToolCallback<Shape>,
       );
     },
   };

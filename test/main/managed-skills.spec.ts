@@ -51,6 +51,18 @@ describe("ensureManagedSkills", () => {
     const linkPath = path.join(agentsSkillsDir(), "agent-ui-handoff");
     expect(await readlink(linkPath)).toBe(source);
     expect(result.warnings).toEqual([]);
+
+    const skillsSource = path.join(result.managedSkillsRoot, "agent-ui-skills");
+    const skillsContents = await readFile(
+      path.join(skillsSource, "SKILL.md"),
+      "utf8",
+    );
+    expect(skillsContents).toContain("managed-by: agent-ui-builtin");
+    expect(skillsContents).toContain(".agents/skills");
+    expect(skillsContents).toContain("list_skills");
+    expect(
+      await readlink(path.join(agentsSkillsDir(), "agent-ui-skills")),
+    ).toBe(skillsSource);
   });
 
   it("removes legacy links from codex, cursor and plugin skill dirs", async () => {

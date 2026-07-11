@@ -17,6 +17,7 @@ import {
 } from "./claude-cli";
 import { getUsage as getClaudeUsage } from "./claude-usage";
 import log from "./logger";
+import type { McpRequestContext } from "./mcp/session-token";
 import { procedure } from "./orpc";
 
 import type { SessionStateFileManager } from "./session-state-file-manager";
@@ -43,7 +44,7 @@ interface SessionServiceOptions {
   titleGeneration: TitleGenerationService;
   stateFileManager: SessionStateFileManager;
   state: SessionServiceState;
-  getMcpServerUrl?: () => string | null;
+  getMcpServerUrl?: (context: McpRequestContext) => string | null;
 }
 
 export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
@@ -250,7 +251,9 @@ export class SessionsServiceNew {
   private readonly pluginWarning: string | null;
   private readonly titleGeneration: TitleGenerationService;
   private readonly stateFileManager: SessionStateFileManager;
-  private readonly getMcpServerUrl: (() => string | null) | null;
+  private readonly getMcpServerUrl:
+    | ((context: McpRequestContext) => string | null)
+    | null;
   readonly terminalManager: TerminalManager;
 
   constructor(options: SessionServiceOptions) {
@@ -561,7 +564,9 @@ export class SessionsServiceNew {
       stateFilePath,
       initialPrompt: effectiveInitialPrompt,
       mcpServerUrl:
-        opts.mcpEnabled === false ? null : (this.getMcpServerUrl?.() ?? null),
+        opts.mcpEnabled === false
+          ? null
+          : (this.getMcpServerUrl?.({ cwd: opts.cwd }) ?? null),
     });
 
     const runtime = this.terminalManager.startTerminal({

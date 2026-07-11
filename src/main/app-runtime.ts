@@ -2,6 +2,7 @@ import type { AppHost } from "./app-host";
 import { createServices, type Services } from "./create-services";
 import log from "./logger";
 import { MCP_PATH } from "./mcp/server";
+import { McpSessionTokens } from "./mcp/session-token";
 import { startWebAppServer } from "./web-app-server";
 
 export interface AppRuntime {
@@ -47,13 +48,18 @@ export async function startAppRuntime(
       userDataPath: options.host.paths.userData,
     });
 
+    const mcpSessionTokens = new McpSessionTokens();
     services = await createServices({
       host: options.host,
       disposeSignal: disposeController.signal,
+      mcpSessionTokens,
       // Sessions only spawn once the UI is reachable, so by the time this
       // getter runs the web server URL (with its actual bound port) is set.
-      getMcpServerUrl: () =>
-        webAppServer ? `${webAppServer.url}${MCP_PATH}` : null,
+      // The token ties the request back to the session's cwd.
+      getMcpServerUrl: (context) =>
+        webAppServer
+          ? `${webAppServer.url}${MCP_PATH}?token=${mcpSessionTokens.sign(context)}`
+          : null,
     });
 
     log.info("Plugin initialization result", {
