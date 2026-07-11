@@ -61,58 +61,7 @@ describe("mcp server", () => {
     const client = await connectClient();
     try {
       const { tools } = await client.listTools();
-      const names = tools.map((tool) => tool.name);
-      expect(names).toContain("hello_world");
-      expect(names).toContain("list_skills");
-    } finally {
-      await client.close();
-    }
-  });
-
-  it("calls hello_world with a name", async () => {
-    const client = await connectClient();
-    try {
-      const result = await client.callTool({
-        name: "hello_world",
-        arguments: { name: "Kiril" },
-      });
-      expect(result.content).toEqual([
-        {
-          type: "text",
-          text: "Hello, Kiril! Agent UI is up and reachable over MCP.",
-        },
-      ]);
-    } finally {
-      await client.close();
-    }
-  });
-
-  it("calls hello_world with empty arguments", async () => {
-    const client = await connectClient();
-    try {
-      const result = await client.callTool({
-        name: "hello_world",
-        arguments: {},
-      });
-      expect(result.content).toEqual([
-        {
-          type: "text",
-          text: "Hello, world! Agent UI is up and reachable over MCP.",
-        },
-      ]);
-    } finally {
-      await client.close();
-    }
-  });
-
-  it("rejects invalid arguments", async () => {
-    const client = await connectClient();
-    try {
-      const result = await client.callTool({
-        name: "hello_world",
-        arguments: { name: 42 },
-      });
-      expect(result.isError).toBe(true);
+      expect(tools.map((tool) => tool.name)).toContain("list_skills");
     } finally {
       await client.close();
     }
