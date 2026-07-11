@@ -21,7 +21,7 @@ describe("createCursorProvider", () => {
 
     expect(result).toBe("Generated text");
     expect(spawnMock).toHaveBeenCalledWith(
-      "cursor",
+      "cursor-agent",
       [
         "agent",
         "-p",

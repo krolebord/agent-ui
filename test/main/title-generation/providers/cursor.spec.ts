@@ -23,7 +23,7 @@ describe("generateCursorTitle", () => {
 
     expect(result).toBe("Refactor auth flow");
     expect(spawnMock).toHaveBeenCalledWith(
-      "cursor",
+      "cursor-agent",
       [
         "agent",
         "-p",
