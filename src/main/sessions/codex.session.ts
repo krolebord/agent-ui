@@ -78,6 +78,7 @@ export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
     permissionMode: z.enum(["default", "full-auto", "yolo"]).default("default"),
     initialPrompt: z.string().optional(),
     configOverrides: z.string().optional(),
+    mcpEnabled: z.boolean().optional().catch(undefined),
   }),
 });
 export type CodexLocalTerminalSessionData = z.infer<
@@ -101,6 +102,7 @@ const startCodexSessionSchema = z.object({
     .optional()
     .transform((value) => value?.trim() || undefined),
   configOverrides: z.string().optional(),
+  mcpEnabled: z.boolean().optional(),
 });
 
 const renameCodexSessionSchema = z.object({
@@ -160,6 +162,7 @@ export const codexSessionsRouter = {
           ? undefined
           : session.startupConfig.initialPrompt,
         configOverrides: session.startupConfig.configOverrides,
+        mcpEnabled: session.startupConfig.mcpEnabled,
         cols: input.cols,
         rows: input.rows,
       });
@@ -241,6 +244,7 @@ interface CodexSessionsManagerOptions {
   state: SessionServiceState;
   terminalManager?: TerminalManager;
   titleGeneration?: TitleGenerationService;
+  getMcpServerUrl?: () => string | null;
 }
 
 function getCodexSessionStatus(
@@ -413,6 +417,7 @@ export class CodexSessionsManager {
   private readonly sessionsState: SessionServiceState;
   private readonly terminalManager: TerminalManager;
   private readonly titleGeneration: TitleGenerationService | null;
+  private readonly getMcpServerUrl: (() => string | null) | null;
   private readonly subagentPruneTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -423,6 +428,7 @@ export class CodexSessionsManager {
       this.sessionsState = options;
       this.terminalManager = new TerminalManager();
       this.titleGeneration = null;
+      this.getMcpServerUrl = null;
       for (const [sessionId, session] of Object.entries(
         this.sessionsState.state,
       )) {
@@ -438,6 +444,7 @@ export class CodexSessionsManager {
     this.sessionsState = options.state;
     this.terminalManager = options.terminalManager ?? new TerminalManager();
     this.titleGeneration = options.titleGeneration ?? null;
+    this.getMcpServerUrl = options.getMcpServerUrl ?? null;
     for (const [sessionId, session] of Object.entries(
       this.sessionsState.state,
     )) {
@@ -470,6 +477,7 @@ export class CodexSessionsManager {
         permissionMode: input.permissionMode,
         initialPrompt,
         configOverrides: input.configOverrides,
+        mcpEnabled: input.mcpEnabled,
       },
     };
 
@@ -652,6 +660,7 @@ export class CodexSessionsManager {
     permissionMode,
     initialPrompt,
     configOverrides,
+    mcpEnabled,
     cols,
     rows,
   }: {
@@ -665,6 +674,7 @@ export class CodexSessionsManager {
     permissionMode: CodexPermissionMode;
     initialPrompt?: string;
     configOverrides?: string;
+    mcpEnabled?: boolean;
     cols?: number;
     rows?: number;
   }): Promise<void> {
@@ -763,9 +773,11 @@ export class CodexSessionsManager {
       },
     });
     let tracker: CodexAppServerTracker | null = null;
+    const mcpServerUrl =
+      mcpEnabled === false ? null : (this.getMcpServerUrl?.() ?? null);
 
     try {
-      await appServer.start({ cwd });
+      await appServer.start({ cwd, mcpServerUrl });
 
       tracker = new CodexAppServerTracker({
         sessionId,
@@ -816,6 +828,7 @@ export class CodexSessionsManager {
       modelReasoningEffort,
       fastMode,
       configOverrides,
+      mcpServerUrl,
       initialPrompt: isPlanMode ? undefined : initialPrompt,
     });
 
@@ -910,6 +923,7 @@ export class CodexSessionsManager {
         permissionMode: sourceSession.startupConfig.permissionMode,
         initialPrompt: sourceSession.startupConfig.initialPrompt,
         configOverrides: sourceSession.startupConfig.configOverrides,
+        mcpEnabled: sourceSession.startupConfig.mcpEnabled,
       },
     };
 
@@ -927,6 +941,7 @@ export class CodexSessionsManager {
       fastMode: forkedSession.startupConfig.fastMode,
       permissionMode: forkedSession.startupConfig.permissionMode,
       configOverrides: forkedSession.startupConfig.configOverrides,
+      mcpEnabled: forkedSession.startupConfig.mcpEnabled,
       cols: input.cols,
       rows: input.rows,
     });

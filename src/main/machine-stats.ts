@@ -198,7 +198,12 @@ export async function collectCpuTemperatureCelsius(): Promise<number | null> {
 
   if (process.platform === "darwin") {
     try {
-      const macosTemperatureSensor = await import("macos-temperature-sensor");
+      // macos-temperature-sensor is a darwin-only optional dependency that is
+      // absent on other platforms, so its types can't be resolved there. Using
+      // an indirect specifier keeps TypeScript from statically resolving the
+      // module; this branch only runs on macOS where it is installed.
+      const specifier = "macos-temperature-sensor";
+      const macosTemperatureSensor = await import(specifier);
       return normalizeMetric(macosTemperatureSensor.temperature().cpu);
     } catch (error) {
       log.debug("CPU temperature unavailable", error);

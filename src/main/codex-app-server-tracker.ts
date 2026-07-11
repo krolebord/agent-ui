@@ -334,6 +334,10 @@ export class CodexAppServerTracker {
     return getPromptFromThreadReadResponse(response);
   }
 
+  async readAccountRateLimits(): Promise<unknown> {
+    return await this.call("account/rateLimits/read", {});
+  }
+
   private rejectPendingRequests(error: Error) {
     const requests = Array.from(this.pendingRequests.values());
     this.pendingRequests.clear();

@@ -498,6 +498,7 @@ function LocalClaudeSessionForm({
           subagentModelOverride: options.subagentModelOverride,
           systemPrompt: options.systemPrompt || undefined,
           remoteControl: options.remoteControl || undefined,
+          mcpEnabled: options.mcpEnabled,
           permissionMode: options.permissionMode,
         });
       },
@@ -570,25 +571,6 @@ function LocalClaudeSessionForm({
         />
       </div>
 
-      <div className="flex items-center justify-between gap-2">
-        <div className="space-y-0.5">
-          <Label htmlFor="new-session-remote-control">Remote control</Label>
-          <p className="text-xs text-muted-foreground">
-            Control this session from claude.ai or the mobile app
-          </p>
-        </div>
-        <Switch
-          id="new-session-remote-control"
-          checked={options.remoteControl ?? false}
-          onCheckedChange={(checked) => {
-            setOptions((current) => ({
-              ...current,
-              remoteControl: checked || undefined,
-            }));
-          }}
-        />
-      </div>
-
       <div className="flex items-end gap-3">
         <div className="min-w-0 flex-1 space-y-2">
           <Label>Model</Label>
@@ -644,6 +626,44 @@ function LocalClaudeSessionForm({
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <Label htmlFor="new-session-mcp">Agent UI MCP</Label>
+          <p className="text-xs text-muted-foreground">
+            Let this session use Agent UI tools over MCP
+          </p>
+        </div>
+        <Switch
+          id="new-session-mcp"
+          checked={options.mcpEnabled ?? true}
+          onCheckedChange={(checked) => {
+            setOptions((current) => ({
+              ...current,
+              mcpEnabled: checked ? undefined : false,
+            }));
+          }}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <Label htmlFor="new-session-remote-control">Remote control</Label>
+          <p className="text-xs text-muted-foreground">
+            Control this session from claude.ai or the mobile app
+          </p>
+        </div>
+        <Switch
+          id="new-session-remote-control"
+          checked={options.remoteControl ?? false}
+          onCheckedChange={(checked) => {
+            setOptions((current) => ({
+              ...current,
+              remoteControl: checked || undefined,
+            }));
+          }}
+        />
       </div>
 
       <Collapsible>
@@ -878,6 +898,7 @@ function CodexSessionForm({
           permissionMode: options.permissionMode,
           initialPrompt: initialPrompt || undefined,
           configOverrides: options.configOverrides || undefined,
+          mcpEnabled: options.mcpEnabled,
         });
       },
       onError: handleError,
@@ -1026,6 +1047,25 @@ function CodexSessionForm({
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <div className="space-y-0.5">
+          <Label htmlFor="new-codex-mcp">Agent UI MCP</Label>
+          <p className="text-xs text-muted-foreground">
+            Let this session use Agent UI tools over MCP
+          </p>
+        </div>
+        <Switch
+          id="new-codex-mcp"
+          checked={options.mcpEnabled ?? true}
+          onCheckedChange={(checked) => {
+            setOptions((current) => ({
+              ...current,
+              mcpEnabled: checked ? undefined : false,
+            }));
+          }}
+        />
       </div>
 
       <Collapsible>

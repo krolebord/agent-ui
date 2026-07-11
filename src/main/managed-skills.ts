@@ -29,6 +29,7 @@ function buildSkills(ctx: ManagedSkillContext): ManagedSkill[] {
       contents: `---
 name: agent-ui-handoff
 description: Summarize the current session into a handoff document that Agent UI can use to start a fresh session continuing this work. Use whenever the user asks to hand off, save state, pause for a new session, or finish a session.
+disable-model-invocation: true
 managed-by: agent-ui-builtin
 ---
 

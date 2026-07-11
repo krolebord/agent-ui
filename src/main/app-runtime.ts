@@ -1,6 +1,7 @@
 import type { AppHost } from "./app-host";
 import { createServices, type Services } from "./create-services";
 import log from "./logger";
+import { MCP_PATH } from "./mcp/server";
 import { startWebAppServer } from "./web-app-server";
 
 export interface AppRuntime {
@@ -49,6 +50,10 @@ export async function startAppRuntime(
     services = await createServices({
       host: options.host,
       disposeSignal: disposeController.signal,
+      // Sessions only spawn once the UI is reachable, so by the time this
+      // getter runs the web server URL (with its actual bound port) is set.
+      getMcpServerUrl: () =>
+        webAppServer ? `${webAppServer.url}${MCP_PATH}` : null,
     });
 
     log.info("Plugin initialization result", {

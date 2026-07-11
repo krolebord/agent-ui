@@ -3,6 +3,7 @@ import {
   TerminalPane,
   type TerminalPaneHandle,
 } from "@renderer/components/terminal-pane";
+import { useTerminalFileUpload } from "@renderer/hooks/use-terminal-file-upload";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
@@ -25,6 +26,7 @@ export function LiveTerminalSurface({
   attachKey?: string;
 }) {
   const terminalRef = useRef<TerminalPaneHandle | null>(null);
+  const uploadFile = useTerminalFileUpload(terminalId);
 
   useEffect(() => {
     attachKey;
@@ -98,6 +100,16 @@ export function LiveTerminalSurface({
     [active, readOnly, terminalId],
   );
 
+  const handlePasteFile = useCallback(
+    async (file: File) => {
+      if (!active || readOnly) {
+        return null;
+      }
+      return uploadFile(file);
+    },
+    [active, readOnly, uploadFile],
+  );
+
   const handleResize = useCallback(
     (cols: number, rows: number) => {
       if (!active) {
@@ -117,6 +129,7 @@ export function LiveTerminalSurface({
     <TerminalPane
       ref={terminalRef}
       onInput={handleInput}
+      onPasteFile={handlePasteFile}
       onResize={handleResize}
       readOnly={readOnly}
       trackGlobalSize={trackGlobalSize}

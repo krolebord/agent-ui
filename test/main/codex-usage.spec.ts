@@ -1,20 +1,40 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const readFileMock = vi.hoisted(() => vi.fn());
-const homedirMock = vi.hoisted(() => vi.fn());
-const spawnMock = vi.hoisted(() => vi.fn());
+const appServerStartMock = vi.hoisted(() => vi.fn());
+const appServerStopMock = vi.hoisted(() => vi.fn());
+const trackerStartMock = vi.hoisted(() => vi.fn());
+const trackerStopMock = vi.hoisted(() => vi.fn());
+const readAccountRateLimitsMock = vi.hoisted(() => vi.fn());
+const appServerConstructorMock = vi.hoisted(() => vi.fn());
+const trackerConstructorMock = vi.hoisted(() => vi.fn());
 
-vi.mock("node:fs/promises", () => ({
-  readFile: readFileMock,
-}));
+vi.mock("../../src/main/codex-app-server-runtime", () => {
+  class CodexAppServerProcessMock {
+    readonly wsUrl = "ws://127.0.0.1:34567";
+    readonly start = appServerStartMock;
+    readonly stop = appServerStopMock;
 
-vi.mock("node:os", () => ({
-  homedir: homedirMock,
-}));
+    constructor(options: unknown) {
+      appServerConstructorMock(options);
+    }
+  }
 
-vi.mock("nano-spawn", () => ({
-  default: spawnMock,
-}));
+  return { CodexAppServerProcess: CodexAppServerProcessMock };
+});
+
+vi.mock("../../src/main/codex-app-server-tracker", () => {
+  class CodexAppServerTrackerMock {
+    readonly start = trackerStartMock;
+    readonly stop = trackerStopMock;
+    readonly readAccountRateLimits = readAccountRateLimitsMock;
+
+    constructor(options: unknown) {
+      trackerConstructorMock(options);
+    }
+  }
+
+  return { CodexAppServerTracker: CodexAppServerTrackerMock };
+});
 
 vi.mock("../../src/main/logger", () => ({
   default: {
@@ -27,315 +47,146 @@ vi.mock("../../src/main/logger", () => ({
 
 import { getCodexUsage } from "../../src/main/codex-usage";
 
-const fetchMock = vi.fn();
-
-function makeEnoentError() {
-  const error = new Error("not found") as NodeJS.ErrnoException;
-  error.code = "ENOENT";
-  return error;
-}
-
-function buildAuthJson(accountId = "acct-1") {
-  return JSON.stringify({
-    OPENAI_API_KEY: null,
-    tokens: {
-      access_token: "access-token",
-      refresh_token: "refresh-token",
-      id_token: "id-token",
-      account_id: accountId,
-    },
-    last_refresh: "2026-01-28T08:05:37Z",
-  });
-}
-
-function buildUsageResponseJson(balance: number | string = 5.39) {
-  return JSON.stringify({
-    plan_type: "plus",
-    rate_limit: {
-      primary_window: {
-        used_percent: 6,
-        reset_at: 1_738_300_000,
-        limit_window_seconds: 18_000,
+function buildRateLimitsResponse() {
+  return {
+    rateLimits: {
+      limitId: "codex",
+      limitName: null,
+      primary: {
+        usedPercent: 8,
+        windowDurationMins: 300,
+        resetsAt: 1_783_705_404,
       },
-      secondary_window: {
-        used_percent: 24,
-        reset_at: 1_738_900_000,
-        limit_window_seconds: 604_800,
+      secondary: {
+        usedPercent: 17,
+        windowDurationMins: 10_080,
+        resetsAt: 1_784_272_276,
       },
-    },
-    credits: {
-      has_credits: true,
-      unlimited: false,
-      balance,
-    },
-  });
-}
-
-function buildUsageResponseWithPlanTypeJson(
-  planType: string | null,
-  balance: number | string = 5.39,
-) {
-  return JSON.stringify({
-    plan_type: planType,
-    rate_limit: {
-      primary_window: {
-        used_percent: 6,
-        reset_at: 1_738_300_000,
-        limit_window_seconds: 18_000,
+      credits: {
+        hasCredits: true,
+        unlimited: false,
+        balance: "5.39",
       },
-      secondary_window: {
-        used_percent: 24,
-        reset_at: 1_738_900_000,
-        limit_window_seconds: 604_800,
-      },
+      planType: "team",
+      rateLimitReachedType: null,
     },
-    credits: {
-      has_credits: true,
-      unlimited: false,
-      balance,
-    },
-  });
-}
-
-function buildUsageResponseWithNullableFieldsJson() {
-  return JSON.stringify({
-    user_id: "user-123",
-    account_id: "user-123",
-    email: "tester@example.com",
-    plan_type: "free",
-    rate_limit: {
-      allowed: true,
-      limit_reached: false,
-      primary_window: {
-        used_percent: 6,
-        reset_at: 1_738_300_000,
-        limit_window_seconds: 18_000,
-      },
-      secondary_window: null,
-    },
-    code_review_rate_limit: {
-      allowed: false,
-      limit_reached: true,
-      primary_window: {
-        used_percent: 9,
-        reset_at: 1_738_301_000,
-        limit_window_seconds: 18_000,
-      },
-      secondary_window: null,
-    },
-    additional_rate_limits: null,
-    credits: null,
-    promo: null,
-  });
-}
-
-function buildUsageResponseWithNoCreditsJson() {
-  return JSON.stringify({
-    user_id: "user-8KW415WSieP6TwBbTjpkDpwO",
-    account_id: "d68a3185-a399-468a-b8fc-1fe7292f239d",
-    email: "tester@example.com",
-    plan_type: "team",
-    rate_limit: {
-      allowed: true,
-      limit_reached: false,
-      primary_window: {
-        used_percent: 0,
-        limit_window_seconds: 18_000,
-        reset_after_seconds: 18_000,
-        reset_at: 1_772_725_907,
-      },
-      secondary_window: {
-        used_percent: 0,
-        limit_window_seconds: 604_800,
-        reset_after_seconds: 604_800,
-        reset_at: 1_773_312_707,
-      },
-    },
-    code_review_rate_limit: {
-      allowed: true,
-      limit_reached: false,
-      primary_window: {
-        used_percent: 0,
-        limit_window_seconds: 604_800,
-        reset_after_seconds: 604_800,
-        reset_at: 1_773_312_707,
-      },
-      secondary_window: null,
-    },
-    additional_rate_limits: null,
-    credits: {
-      has_credits: false,
-      unlimited: false,
-      balance: null,
-      approx_local_messages: null,
-      approx_cloud_messages: null,
-    },
-    promo: null,
-  });
+    rateLimitsByLimitId: {},
+    rateLimitResetCredits: null,
+  };
 }
 
 describe("getCodexUsage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.CODEX_HOME = undefined;
-    homedirMock.mockReturnValue("/home/tester");
-    vi.stubGlobal("fetch", fetchMock);
+    appServerStartMock.mockResolvedValue(undefined);
+    appServerStopMock.mockResolvedValue(undefined);
+    trackerStartMock.mockResolvedValue(undefined);
+    trackerStopMock.mockResolvedValue(undefined);
+    readAccountRateLimitsMock.mockResolvedValue(buildRateLimitsResponse());
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  it("reads and normalizes rate limits through Codex app-server", async () => {
+    const result = await getCodexUsage();
 
-  it("prefers CODEX_HOME/auth.json when CODEX_HOME is set", async () => {
-    process.env.CODEX_HOME = "/custom-codex-home";
-    readFileMock.mockImplementation(async (filePath: string) => {
-      if (filePath === "/custom-codex-home/auth.json") {
-        return buildAuthJson();
-      }
-      throw makeEnoentError();
+    expect(appServerConstructorMock).toHaveBeenCalledWith({
+      sessionId: "usage",
     });
+    expect(trackerConstructorMock).toHaveBeenCalledWith({
+      sessionId: "usage",
+      wsUrl: "ws://127.0.0.1:34567",
+    });
+    expect(readAccountRateLimitsMock).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      ok: true,
+      usage: {
+        planType: "team",
+        primaryWindow: {
+          utilization: 8,
+          windowSeconds: 18_000,
+          resetsAt: "2026-07-10T17:43:24.000Z",
+        },
+        secondaryWindow: {
+          utilization: 17,
+          windowSeconds: 604_800,
+        },
+        credits: {
+          hasCredits: true,
+          unlimited: false,
+          balance: 5.39,
+        },
+      },
+    });
+    expect(trackerStopMock).toHaveBeenCalledOnce();
+    expect(appServerStopMock).toHaveBeenCalledOnce();
+  });
 
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseJson(), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+  it("uses the codex multi-bucket snapshot when the compatibility view is null", async () => {
+    readAccountRateLimitsMock.mockResolvedValue({
+      rateLimits: null,
+      rateLimitsByLimitId: {
+        another_limit: {
+          limitId: "another_limit",
+          primary: {
+            usedPercent: 90,
+            windowDurationMins: 60,
+            resetsAt: 1_783_705_404,
+          },
+          secondary: null,
+        },
+        codex: {
+          limitId: "codex",
+          primary: {
+            usedPercent: 12,
+            windowDurationMins: 300,
+            resetsAt: 1_783_705_404,
+          },
+          secondary: null,
+          planType: "plus",
+        },
+      },
+    });
 
     const result = await getCodexUsage();
 
-    expect(readFileMock).toHaveBeenCalledTimes(1);
-    expect(readFileMock).toHaveBeenCalledWith(
-      "/custom-codex-home/auth.json",
-      "utf8",
-    );
     expect(result).toMatchObject({
       ok: true,
       usage: {
         planType: "plus",
-        primaryWindow: { utilization: 6, windowSeconds: 18_000 },
-        secondaryWindow: { utilization: 24, windowSeconds: 604_800 },
+        primaryWindow: { utilization: 12 },
+        secondaryWindow: null,
       },
     });
   });
 
-  it("falls back to ~/.codex/auth.json when ~/.config/codex/auth.json is missing", async () => {
-    readFileMock.mockImplementation(async (filePath: string) => {
-      if (filePath === "/home/tester/.codex/auth.json") {
-        return buildAuthJson();
-      }
-      throw makeEnoentError();
+  it("reports unsupported login methods when no rate-limit snapshot exists", async () => {
+    readAccountRateLimitsMock.mockResolvedValue({
+      rateLimits: null,
+      rateLimitsByLimitId: {},
     });
-
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseJson(), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    const result = await getCodexUsage();
-
-    expect(readFileMock).toHaveBeenNthCalledWith(
-      1,
-      "/home/tester/.config/codex/auth.json",
-      "utf8",
-    );
-    expect(readFileMock).toHaveBeenNthCalledWith(
-      2,
-      "/home/tester/.codex/auth.json",
-      "utf8",
-    );
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  it("falls back to macOS keychain when auth files are unavailable", async () => {
-    readFileMock.mockRejectedValue(makeEnoentError());
-    spawnMock.mockResolvedValue({ output: buildAuthJson() });
-
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseJson(), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    const result = await getCodexUsage();
-
-    expect(spawnMock).toHaveBeenCalledWith(
-      "security",
-      ["find-generic-password", "-s", "Codex Auth", "-w"],
-      { timeout: 5_000, stdin: "ignore" },
-    );
-    expect(result).toMatchObject({ ok: true });
-  });
-
-  it("sends ChatGPT-Account-Id header when account_id is present", async () => {
-    readFileMock.mockResolvedValue(buildAuthJson("account-123"));
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseJson(), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    await getCodexUsage();
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://chatgpt.com/backend-api/wham/usage",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Authorization: "Bearer access-token",
-          Accept: "application/json",
-          "ChatGPT-Account-Id": "account-123",
-        }),
-      }),
-    );
-  });
-
-  it("omits ChatGPT-Account-Id header when account_id is absent", async () => {
-    readFileMock.mockResolvedValue(buildAuthJson(""));
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseJson(), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    await getCodexUsage();
-
-    const headers = fetchMock.mock.calls[0]?.[1]?.headers as
-      | Record<string, string>
-      | undefined;
-    expect(headers).toBeDefined();
-    expect(headers?.["ChatGPT-Account-Id"]).toBeUndefined();
-  });
-
-  it("returns an error when the API responds with non-2xx", async () => {
-    readFileMock.mockResolvedValue(buildAuthJson());
-    fetchMock.mockResolvedValue(
-      new Response("forbidden", {
-        status: 403,
-        statusText: "Forbidden",
-      }),
-    );
 
     const result = await getCodexUsage();
 
     expect(result).toEqual({
       ok: false,
-      message: "Codex usage API returned 403 Forbidden",
+      message: "Codex plan usage is unavailable for this login method",
     });
   });
 
-  it("returns an error when usage response schema is invalid", async () => {
-    readFileMock.mockResolvedValue(buildAuthJson());
-    fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ rate_limit: {} }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+  it("stops the app-server when the request fails", async () => {
+    readAccountRateLimitsMock.mockRejectedValue(new Error("not authenticated"));
+
+    const result = await getCodexUsage();
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Failed to fetch Codex usage data",
+    });
+    expect(trackerStopMock).toHaveBeenCalledOnce();
+    expect(appServerStopMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects unexpected app-server responses", async () => {
+    readAccountRateLimitsMock.mockResolvedValue({ rateLimits: {} });
 
     const result = await getCodexUsage();
 
@@ -343,108 +194,5 @@ describe("getCodexUsage", () => {
       ok: false,
       message: "Codex usage response has unexpected format",
     });
-  });
-
-  it("accepts numeric string credits balance values", async () => {
-    readFileMock.mockResolvedValue(buildAuthJson());
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseJson("0"), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    const result = await getCodexUsage();
-
-    expect(result).toMatchObject({
-      ok: true,
-      usage: {
-        credits: {
-          balance: 0,
-        },
-      },
-    });
-  });
-
-  it("accepts null plan_type values", async () => {
-    readFileMock.mockResolvedValue(buildAuthJson());
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseWithPlanTypeJson(null), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    const result = await getCodexUsage();
-
-    expect(result).toMatchObject({
-      ok: true,
-      usage: {
-        planType: null,
-      },
-    });
-  });
-
-  it("accepts nullable usage fields returned by the Codex API", async () => {
-    readFileMock.mockResolvedValue(buildAuthJson());
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseWithNullableFieldsJson(), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    const result = await getCodexUsage();
-
-    expect(result).toMatchObject({
-      ok: true,
-      usage: {
-        planType: "free",
-        primaryWindow: {
-          utilization: 6,
-          windowSeconds: 18_000,
-        },
-        secondaryWindow: null,
-      },
-    });
-
-    if (result.ok) {
-      expect(result.usage).toBeDefined();
-      if (!result.usage) {
-        throw new Error("Expected usage payload");
-      }
-      expect(result.usage.credits).toBeUndefined();
-    }
-  });
-
-  it("accepts no-credits payloads where credits.balance is null", async () => {
-    readFileMock.mockResolvedValue(buildAuthJson());
-    fetchMock.mockResolvedValue(
-      new Response(buildUsageResponseWithNoCreditsJson(), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-
-    const result = await getCodexUsage();
-
-    expect(result).toMatchObject({
-      ok: true,
-      usage: {
-        planType: "team",
-        primaryWindow: {
-          utilization: 0,
-          windowSeconds: 18_000,
-        },
-        secondaryWindow: {
-          utilization: 0,
-          windowSeconds: 604_800,
-        },
-      },
-    });
-
-    if (result.ok && result.usage) {
-      expect(result.usage.credits).toBeUndefined();
-    }
   });
 });

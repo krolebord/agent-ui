@@ -49,6 +49,7 @@ const STORAGE_SCHEMA_VERSION = 3;
 interface CreateServicesOptions {
   host: AppHost;
   disposeSignal: AbortSignal;
+  getMcpServerUrl?: () => string | null;
 }
 
 interface ShellIntegrationInitResult {
@@ -120,7 +121,7 @@ async function initializeManagedCursorHooks(
 export type CreateServicesResult = Awaited<ReturnType<typeof createServices>>;
 
 export async function createServices(options: CreateServicesOptions) {
-  const { host, disposeSignal } = options;
+  const { host, disposeSignal, getMcpServerUrl } = options;
   const userDataPath = host.paths.userData;
   const [
     { managedPluginDir, pluginWarning },
@@ -221,6 +222,7 @@ export async function createServices(options: CreateServicesOptions) {
     titleGeneration: titleGenerationService,
     stateFileManager,
     state: sessionsState,
+    getMcpServerUrl,
   });
   const terminalManager = sessionsService.terminalManager;
 
@@ -237,6 +239,7 @@ export async function createServices(options: CreateServicesOptions) {
     state: sessionsState,
     terminalManager,
     titleGeneration: titleGenerationService,
+    getMcpServerUrl,
   });
   const cursorAgentSessionsManager = new CursorAgentSessionsManager({
     state: sessionsState,

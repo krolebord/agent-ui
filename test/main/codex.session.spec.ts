@@ -247,6 +247,7 @@ describe("CodexSessionsManager", () => {
       | undefined;
     expect(appServerSpies.instances[0]?.start).toHaveBeenCalledWith({
       cwd: "/tmp",
+      mcpServerUrl: null,
     });
     expect(trackerSpies.instances[0]?.start).toHaveBeenCalled();
     expect(startCall?.args).toEqual([

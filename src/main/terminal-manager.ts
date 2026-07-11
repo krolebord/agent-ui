@@ -4,7 +4,9 @@ import { createDisposable } from "@shared/utils";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import headlessXterm from "@xterm/headless";
 import { z } from "zod";
+import { MAX_PASTED_FILE_BYTES } from "../shared/pasted-files";
 import { procedure } from "./orpc";
+import { savePastedFile } from "./pasted-files";
 import { assertProjectPathInteractionAllowed } from "./project-service";
 import {
   createTerminalSession,
@@ -104,6 +106,31 @@ export const terminalsRouter = {
       );
       assertProjectPathInteractionAllowed(interactionCwd, context);
       context.terminalManager.writeToTerminal(input.terminalId, input.data);
+    }),
+  uploadPastedFile: procedure
+    .input(
+      z.object({
+        terminalId: z.string(),
+        // Base64 is ~4/3 of the decoded size; savePastedFile enforces the
+        // exact byte limit after decoding.
+        base64Data: z
+          .string()
+          .min(1)
+          .max(Math.ceil((MAX_PASTED_FILE_BYTES * 4) / 3) + 4),
+        fileName: z.string().max(500).optional(),
+        mimeType: z.string().max(255).optional(),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const interactionCwd = context.terminalManager.resolveInteractionCwd(
+        input.terminalId,
+      );
+      assertProjectPathInteractionAllowed(interactionCwd, context);
+      return await savePastedFile({
+        base64Data: input.base64Data,
+        fileName: input.fileName,
+        mimeType: input.mimeType,
+      });
     }),
   resizeTerminal: procedure
     .input(

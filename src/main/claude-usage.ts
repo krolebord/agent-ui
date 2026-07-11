@@ -1,6 +1,11 @@
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
 import spawn from "nano-spawn";
 import * as z from "zod";
 import log from "./logger";
+
+const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 
 const CredentialsSchema = z.object({
   claudeAiOauth: z
@@ -36,29 +41,103 @@ const UsageResponseSchema = z.object({
 
 export type UsageData = z.infer<typeof UsageResponseSchema>;
 
-export async function getUsage() {
-  let credentialsJson: string;
+async function readCredentialsFile(
+  filePath: string,
+): Promise<string | undefined> {
+  try {
+    const value = await readFile(filePath, "utf8");
+    return value.trim() || undefined;
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException;
+    if (err.code !== "ENOENT") {
+      log.warn("Usage: failed to read Claude credentials file", {
+        filePath,
+        message: err.message,
+        code: err.code,
+      });
+    }
+    return undefined;
+  }
+}
+
+async function readCredentialsFromKeychain(): Promise<string | undefined> {
   try {
     const { output } = await spawn(
       "security",
-      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      ["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"],
       { timeout: 5_000, stdin: "ignore" },
     );
-    credentialsJson = output.trim();
-  } catch (e: unknown) {
-    const err = e as { message?: string; exitCode?: number };
-    log.error("Usage: failed to read credentials from keychain", {
+    return output.trim() || undefined;
+  } catch (error) {
+    const err = error as { message?: string; exitCode?: number };
+    log.warn("Usage: failed to read credentials from keychain", {
       message: err.message,
       exitCode: err.exitCode,
     });
-    return { ok: false, message: "Failed to read credentials from keychain" };
+    return undefined;
+  }
+}
+
+async function readCredentialsPayload(): Promise<
+  { source: string; rawJson: string } | undefined
+> {
+  if (process.platform === "darwin") {
+    const keychainValue = await readCredentialsFromKeychain();
+    if (keychainValue) {
+      return {
+        source: `keychain:${CLAUDE_KEYCHAIN_SERVICE}`,
+        rawJson: keychainValue,
+      };
+    }
+  }
+
+  const configuredDir = process.env.CLAUDE_CONFIG_DIR?.trim();
+  const configDir =
+    configuredDir && configuredDir !== "undefined"
+      ? configuredDir
+      : path.join(homedir(), ".claude");
+  const filePath = path.join(configDir, ".credentials.json");
+  const fileValue = await readCredentialsFile(filePath);
+  if (fileValue) {
+    return { source: filePath, rawJson: fileValue };
+  }
+
+  return undefined;
+}
+
+function expiresAtMilliseconds(expiresAt: number): number {
+  return expiresAt < 1_000_000_000_000 ? expiresAt * 1_000 : expiresAt;
+}
+
+function usesApiBilling(): boolean {
+  return Boolean(
+    process.env.ANTHROPIC_API_KEY?.trim() ||
+      process.env.CLAUDE_CODE_USE_BEDROCK === "1" ||
+      process.env.CLAUDE_CODE_USE_VERTEX === "1" ||
+      process.env.CLAUDE_CODE_USE_FOUNDRY === "1",
+  );
+}
+
+export async function getUsage() {
+  if (usesApiBilling()) {
+    return {
+      ok: false,
+      message: "Claude plan usage is unavailable with API billing",
+    };
+  }
+
+  const credentialsPayload = await readCredentialsPayload();
+  if (!credentialsPayload) {
+    return { ok: false, message: "Claude auth credentials were not found" };
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(credentialsJson);
+    parsed = JSON.parse(credentialsPayload.rawJson);
   } catch {
-    log.error("Usage: credentials are not valid JSON");
+    log.error("Usage: credentials are not valid JSON", {
+      source: credentialsPayload.source,
+    });
     return { ok: false, message: "Credentials are not valid JSON" };
   }
 
@@ -72,7 +151,7 @@ export async function getUsage() {
 
   const { accessToken, expiresAt } = credentialsResult.data.claudeAiOauth;
 
-  if (expiresAt * 1000 <= Date.now()) {
+  if (expiresAtMilliseconds(expiresAt) <= Date.now()) {
     log.warn("Usage: access token has expired");
     return { ok: false, message: "Claude access token has expired" };
   }

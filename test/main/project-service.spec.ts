@@ -6,6 +6,7 @@ import {
   acquireProjectCommitLock,
   addTrackedProject,
   defineProjectState,
+  pushProjectToRemote,
   refreshTrackedProject,
 } from "../../src/main/project-service";
 
@@ -200,6 +201,92 @@ describe("project-service acquireProjectCommitLock", () => {
 
     const releaseSecond = await second;
     releaseSecond();
+  });
+});
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) {
+    await Promise.resolve();
+  }
+}
+
+describe("project-service pushProjectToRemote", () => {
+  it("waits for a pending commit pipeline before pushing", async () => {
+    const events: string[] = [];
+    const pushToRemote = vi.fn(async () => {
+      events.push("pushed");
+    });
+
+    const releaseCommitLock = await acquireProjectCommitLock("/repo");
+
+    const pushPromise = pushProjectToRemote("/repo", {
+      projectGitService: { pushToRemote },
+    });
+
+    await flushMicrotasks();
+    expect(pushToRemote).not.toHaveBeenCalled();
+
+    events.push("commit-released");
+    releaseCommitLock();
+    await pushPromise;
+
+    expect(events).toEqual(["commit-released", "pushed"]);
+    expect(pushToRemote).toHaveBeenCalledWith("/repo");
+  });
+
+  it("blocks a new commit pipeline while a push is in flight", async () => {
+    const events: string[] = [];
+    const pushDeferred = createDeferred<void>();
+    const pushToRemote = vi.fn(() => pushDeferred.promise);
+
+    const pushPromise = pushProjectToRemote("/repo", {
+      projectGitService: { pushToRemote },
+    });
+    const commitLockPromise = acquireProjectCommitLock("/repo").then(
+      (release) => {
+        events.push("commit-acquired");
+        return release;
+      },
+    );
+
+    await flushMicrotasks();
+    expect(pushToRemote).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([]);
+
+    events.push("push-finished");
+    pushDeferred.resolve();
+    await pushPromise;
+
+    const releaseCommitLock = await commitLockPromise;
+    expect(events).toEqual(["push-finished", "commit-acquired"]);
+    releaseCommitLock();
+  });
+
+  it("releases the commit lock when the push fails", async () => {
+    const pushToRemote = vi.fn(async () => {
+      throw new Error("push failed");
+    });
+
+    await expect(
+      pushProjectToRemote("/repo", {
+        projectGitService: { pushToRemote },
+      }),
+    ).rejects.toThrow("push failed");
+
+    const releaseCommitLock = await acquireProjectCommitLock("/repo");
+    releaseCommitLock();
+  });
+
+  it("does not wait on commit pipelines of other projects", async () => {
+    const releaseOtherLock = await acquireProjectCommitLock("/repo-other");
+    const pushToRemote = vi.fn().mockResolvedValue(undefined);
+
+    await pushProjectToRemote("/repo", {
+      projectGitService: { pushToRemote },
+    });
+
+    expect(pushToRemote).toHaveBeenCalledWith("/repo");
+    releaseOtherLock();
   });
 });
 

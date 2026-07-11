@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import log from "./logger";
+import { buildCodexMcpConfigOverride } from "./mcp/client-config";
 
 const HOST = "127.0.0.1";
 const READY_TIMEOUT_MS = 15_000;
@@ -82,6 +83,7 @@ export interface CodexAppServerProcessOptions {
 
 export interface CodexAppServerStartOptions {
   cwd?: string;
+  mcpServerUrl?: string | null;
 }
 
 export class CodexAppServerProcess {
@@ -116,11 +118,18 @@ export class CodexAppServerProcess {
     const wsUrl = `ws://${HOST}:${port}`;
     const readyUrl = `http://${HOST}:${port}/readyz`;
 
-    const child = spawn("codex", ["app-server", "--listen", wsUrl], {
-      stdio: ["ignore", "pipe", "pipe"],
-      cwd: options.cwd,
-      env: process.env,
-    });
+    const mcpArgs = options.mcpServerUrl
+      ? ["-c", buildCodexMcpConfigOverride(options.mcpServerUrl)]
+      : [];
+    const child = spawn(
+      "codex",
+      ["app-server", ...mcpArgs, "--listen", wsUrl],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        cwd: options.cwd,
+        env: process.env,
+      },
+    );
 
     this.port = port;
     this.process = child;

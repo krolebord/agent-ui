@@ -9,6 +9,10 @@ import "@xterm/xterm/css/xterm.css";
 
 const PTY_RESIZE_DEBOUNCE_MS = 75;
 
+const isMacPlatform =
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent || "");
+
 export interface TerminalPaneHandle {
   write: (chunk: string) => void;
   clear: () => void;
@@ -21,15 +25,45 @@ interface TerminalPaneProps {
   className?: string;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
+  /**
+   * Called when the user pastes a file. Should persist the file and return
+   * an absolute file path to paste into the terminal, or null to ignore the
+   * paste.
+   */
+  onPasteFile?: (file: File) => Promise<string | null>;
   readOnly?: boolean;
   trackGlobalSize?: boolean;
   ref: React.RefObject<TerminalPaneHandle | null>;
+}
+
+function getPastedFile(clipboardData: DataTransfer | null): File | null {
+  if (!clipboardData) {
+    return null;
+  }
+
+  // If the clipboard also carries plain text (e.g. copied spreadsheet
+  // cells or a file path), let the normal text paste win.
+  if (clipboardData.getData("text/plain")) {
+    return null;
+  }
+
+  for (const item of clipboardData.items) {
+    if (item.kind === "file") {
+      const file = item.getAsFile();
+      if (file) {
+        return file;
+      }
+    }
+  }
+
+  return null;
 }
 
 export function TerminalPane({
   className,
   onInput,
   onResize,
+  onPasteFile,
   readOnly = false,
   trackGlobalSize = true,
   ref,
@@ -39,6 +73,7 @@ export function TerminalPane({
   const fitRef = useRef<() => void>(() => {});
   const onInputRef = useRef(onInput);
   const onResizeRef = useRef(onResize);
+  const onPasteFileRef = useRef(onPasteFile);
   const lastReportedSizeRef = useRef<{ cols: number; rows: number } | null>(
     null,
   );
@@ -52,6 +87,10 @@ export function TerminalPane({
   useEffect(() => {
     onResizeRef.current = onResize;
   }, [onResize]);
+
+  useEffect(() => {
+    onPasteFileRef.current = onPasteFile;
+  }, [onPasteFile]);
 
   useImperativeHandle(ref, () => ({
     write: (chunk: string) => {
@@ -148,6 +187,39 @@ export function TerminalPane({
         return false;
       }
 
+      // Copy/paste keyboard shortcuts for the browser client.
+      // On macOS the primary modifier is Cmd; on Windows/Linux it is Ctrl.
+      if (event.type === "keydown") {
+        const key = event.key.toLowerCase();
+        const primaryModifier = isMacPlatform ? event.metaKey : event.ctrlKey;
+
+        // Copy the current selection.
+        //   macOS:        Cmd+C
+        //   Windows/Linux: Ctrl+Shift+C, or Ctrl+C when text is selected.
+        // Plain Ctrl+C with no selection falls through so it still sends
+        // SIGINT to the process.
+        if (key === "c" && primaryModifier) {
+          const selection = terminal.getSelection();
+          const wantsCopy =
+            isMacPlatform || event.shiftKey || selection.length > 0;
+          if (wantsCopy && selection.length > 0) {
+            void navigator.clipboard.writeText(selection).catch(() => {});
+            terminal.clearSelection();
+            return false;
+          }
+        }
+
+        // Paste from the clipboard.
+        //   macOS:        Cmd+V
+        //   Windows/Linux: Ctrl+V or Ctrl+Shift+V
+        // Returning false lets the browser dispatch its native paste event,
+        // which the existing text and image paste handlers consume (so image
+        // paste keeps working too).
+        if (key === "v" && primaryModifier) {
+          return false;
+        }
+      }
+
       // Let app-level Cmd/Ctrl shortcuts pass through to the document
       // so @tanstack/hotkeys can handle them (xterm would otherwise
       // call stopPropagation and swallow the event).
@@ -160,6 +232,31 @@ export function TerminalPane({
 
       return true;
     });
+
+    // Capture-phase so this runs before xterm's own paste handler, which
+    // only understands text. Files are persisted host-side (they can't
+    // travel through the PTY stream) and their file path is pasted instead.
+    const onPaste = (event: ClipboardEvent) => {
+      const pasteFile = onPasteFileRef.current;
+      if (!pasteFile || terminal.options.disableStdin) {
+        return;
+      }
+
+      const file = getPastedFile(event.clipboardData);
+      if (!file) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      void (async () => {
+        const filePath = await pasteFile(file);
+        if (filePath && terminalRef.current === terminal) {
+          terminal.paste(filePath);
+        }
+      })();
+    };
+    container.addEventListener("paste", onPaste, true);
 
     const setTerminalSize = useTerminalSizeStore.getState().setSize;
     const fitAndNotify = () => {
@@ -200,6 +297,7 @@ export function TerminalPane({
 
     return () => {
       detachTouchScroll();
+      container.removeEventListener("paste", onPaste, true);
       onDataDisposable.dispose();
       onResizeDisposable.dispose();
       resizeObserver.disconnect();
