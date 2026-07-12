@@ -127,14 +127,24 @@ export function TerminalKeyBar({
             submitInput();
           }}
         >
+          {/* Activated via pointer events, not onClick: this button occupies the
+              same spot as the "open input" button, so the ghost click that the
+              browser dispatches right after the opening tap would land here and
+              immediately close the form again. Ghost clicks carry no pointerdown,
+              so the pointer-tap pattern is immune. */}
           <Button
             type="button"
             variant="outline"
             size="sm"
+            tabIndex={-1}
             className="min-w-10 shrink-0 px-2"
             aria-label="Close terminal input"
             title="Close terminal input"
-            onClick={() => setInputOpen(false)}
+            onPointerDown={(event) => {
+              handlePointerDown(event, () => setInputOpen(false));
+            }}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
           >
             <X className="size-4" />
           </Button>
@@ -195,7 +205,7 @@ export function TerminalKeyBar({
           variant="outline"
           size="sm"
           tabIndex={-1}
-          className="min-w-10 shrink-0 px-2"
+          className="min-w-10 shrink-0 touch-pan-x px-2"
           aria-label="Open terminal input"
           title="Open terminal input"
           onPointerDown={(event) => {
@@ -211,7 +221,7 @@ export function TerminalKeyBar({
           variant="outline"
           size="sm"
           tabIndex={-1}
-          className="min-w-10 shrink-0 px-2"
+          className="min-w-10 shrink-0 touch-pan-x px-2"
           aria-label="Attach file"
           title="Attach file"
           onPointerDown={(event) => {
@@ -229,7 +239,7 @@ export function TerminalKeyBar({
             variant="outline"
             size="sm"
             tabIndex={-1}
-            className="min-w-10 shrink-0 font-mono text-xs"
+            className="min-w-10 shrink-0 touch-pan-x font-mono text-xs"
             onPointerDown={(event) => {
               handlePointerDown(event, () => send(data));
             }}
