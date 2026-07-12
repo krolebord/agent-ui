@@ -119,6 +119,32 @@ describe("ScheduledSessionsService", () => {
       service.dispose();
     });
 
+    it("replaces the config with a different session type", () => {
+      const { service, state } = createService();
+      const entry = service.create({
+        schedule: { kind: "recurring", cron: "0 3 * * *" },
+        config: claudeConfig,
+      });
+
+      service.update({
+        id: entry.id,
+        schedule: { kind: "recurring", cron: "0 3 * * *" },
+        config: {
+          type: "codex",
+          cwd: claudeConfig.cwd,
+          sessionName: undefined,
+          modelReasoningEffort: "high",
+          fastMode: "default",
+          permissionMode: "default",
+          initialPrompt: "do the thing",
+        },
+      });
+
+      expect(state.state[entry.id]?.config.type).toBe("codex");
+
+      service.dispose();
+    });
+
     it("re-enables a completed one-time schedule", async () => {
       const { service, state, runSession } = createService();
       const entry = service.create({

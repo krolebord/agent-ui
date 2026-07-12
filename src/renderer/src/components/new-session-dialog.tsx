@@ -427,7 +427,7 @@ export function NewSessionDialog() {
         return SESSION_TYPE_OPTIONS[nextIndex]?.value ?? "claude";
       });
     },
-    { enabled: Boolean(openProjectCwd), ignoreInputs: false },
+    { enabled: isOpen, ignoreInputs: false },
   );
 
   if (!isOpen) {
@@ -468,11 +468,9 @@ export function NewSessionDialog() {
                 {projectPath}
               </span>
             </DialogDescription>
-            {!isEditing && (
-              <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
-              </span>
-            )}
+            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+              <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
+            </span>
           </div>
         </DialogHeader>
 
@@ -480,7 +478,6 @@ export function NewSessionDialog() {
           type="single"
           variant="outline"
           value={sessionType}
-          disabled={isEditing}
           onValueChange={(value) => {
             if (value) {
               setSessionType(value as LastSessionType);
