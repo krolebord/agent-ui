@@ -58,6 +58,7 @@ export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
     systemPrompt: z.string().optional().catch(undefined),
     remoteControl: z.boolean().optional().catch(undefined),
     mcpEnabled: z.boolean().optional().catch(undefined),
+    mcpCanScheduleSessions: z.boolean().optional().catch(undefined),
     initialPrompt: z
       .string()
       .optional()
@@ -85,6 +86,7 @@ export const startClaudeSessionSchema = z.object({
   systemPrompt: z.string().optional(),
   remoteControl: z.boolean().optional(),
   mcpEnabled: z.boolean().optional(),
+  mcpCanScheduleSessions: z.boolean().optional(),
   initialPrompt: z
     .string()
     .optional()
@@ -214,6 +216,7 @@ type ClaudeStartupOptions = Omit<
 > & {
   cwd: string;
   mcpEnabled?: boolean;
+  mcpCanScheduleSessions?: boolean;
 };
 
 function getDefaultSessionTitle(sessionId: string): string {
@@ -305,6 +308,7 @@ export class SessionsServiceNew {
       systemPrompt: sessionInput.systemPrompt,
       remoteControl: sessionInput.remoteControl,
       mcpEnabled: sessionInput.mcpEnabled,
+      mcpCanScheduleSessions: sessionInput.mcpCanScheduleSessions,
       permissionMode: sessionInput.permissionMode ?? "default",
       pluginDir: this.pluginDir,
       initialPrompt: sessionInput.initialPrompt,
@@ -326,6 +330,7 @@ export class SessionsServiceNew {
         systemPrompt: startupOptions.systemPrompt,
         remoteControl: startupOptions.remoteControl,
         mcpEnabled: startupOptions.mcpEnabled,
+        mcpCanScheduleSessions: startupOptions.mcpCanScheduleSessions,
         permissionMode: startupOptions.permissionMode,
         cwd: startupOptions.cwd,
       },
@@ -348,6 +353,7 @@ export class SessionsServiceNew {
       systemPrompt: sessionInput.systemPrompt,
       remoteControl: sessionInput.remoteControl,
       mcpEnabled: sessionInput.mcpEnabled,
+      mcpCanScheduleSessions: sessionInput.mcpCanScheduleSessions,
       initialPrompt: sessionInput.initialPrompt,
       start: {
         type: "start-new",
@@ -409,6 +415,7 @@ export class SessionsServiceNew {
       systemPrompt: session.startupConfig.systemPrompt,
       remoteControl: input.remoteControl ?? session.startupConfig.remoteControl,
       mcpEnabled: session.startupConfig.mcpEnabled,
+      mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
       start: {
         type: "resume",
         sessionId: input.sessionId,
@@ -435,6 +442,7 @@ export class SessionsServiceNew {
         systemPrompt: session.startupConfig.systemPrompt,
         remoteControl: session.startupConfig.remoteControl,
         mcpEnabled: session.startupConfig.mcpEnabled,
+        mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
         permissionMode: session.startupConfig.permissionMode,
         cwd: session.startupConfig.cwd,
       },
@@ -458,6 +466,7 @@ export class SessionsServiceNew {
       systemPrompt: session.startupConfig.systemPrompt,
       remoteControl: session.startupConfig.remoteControl,
       mcpEnabled: session.startupConfig.mcpEnabled,
+      mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
       start: {
         type: "start-new",
         sessionId: sessionId,
@@ -480,6 +489,7 @@ export class SessionsServiceNew {
     systemPrompt?: string;
     remoteControl?: boolean;
     mcpEnabled?: boolean;
+    mcpCanScheduleSessions?: boolean;
     initialPrompt?: string;
     start: ClaudeStartOptions;
   }) {
@@ -566,7 +576,10 @@ export class SessionsServiceNew {
       mcpServerUrl:
         opts.mcpEnabled === false
           ? null
-          : (this.getMcpServerUrl?.({ cwd: opts.cwd }) ?? null),
+          : (this.getMcpServerUrl?.({
+              cwd: opts.cwd,
+              canScheduleSessions: opts.mcpCanScheduleSessions !== false,
+            }) ?? null),
     });
 
     const runtime = this.terminalManager.startTerminal({

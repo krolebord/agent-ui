@@ -80,6 +80,7 @@ export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
     initialPrompt: z.string().optional(),
     configOverrides: z.string().optional(),
     mcpEnabled: z.boolean().optional().catch(undefined),
+    mcpCanScheduleSessions: z.boolean().optional().catch(undefined),
   }),
 });
 export type CodexLocalTerminalSessionData = z.infer<
@@ -104,6 +105,7 @@ export const startCodexSessionSchema = z.object({
     .transform((value) => value?.trim() || undefined),
   configOverrides: z.string().optional(),
   mcpEnabled: z.boolean().optional(),
+  mcpCanScheduleSessions: z.boolean().optional(),
 });
 
 const renameCodexSessionSchema = z.object({
@@ -164,6 +166,7 @@ export const codexSessionsRouter = {
           : session.startupConfig.initialPrompt,
         configOverrides: session.startupConfig.configOverrides,
         mcpEnabled: session.startupConfig.mcpEnabled,
+        mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
         cols: input.cols,
         rows: input.rows,
       });
@@ -481,6 +484,7 @@ export class CodexSessionsManager {
         initialPrompt,
         configOverrides: input.configOverrides,
         mcpEnabled: input.mcpEnabled,
+        mcpCanScheduleSessions: input.mcpCanScheduleSessions,
       },
     };
 
@@ -664,6 +668,7 @@ export class CodexSessionsManager {
     initialPrompt,
     configOverrides,
     mcpEnabled,
+    mcpCanScheduleSessions,
     cols,
     rows,
   }: {
@@ -678,6 +683,7 @@ export class CodexSessionsManager {
     initialPrompt?: string;
     configOverrides?: string;
     mcpEnabled?: boolean;
+    mcpCanScheduleSessions?: boolean;
     cols?: number;
     rows?: number;
   }): Promise<void> {
@@ -777,7 +783,12 @@ export class CodexSessionsManager {
     });
     let tracker: CodexAppServerTracker | null = null;
     const mcpServerUrl =
-      mcpEnabled === false ? null : (this.getMcpServerUrl?.({ cwd }) ?? null);
+      mcpEnabled === false
+        ? null
+        : (this.getMcpServerUrl?.({
+            cwd,
+            canScheduleSessions: mcpCanScheduleSessions !== false,
+          }) ?? null);
 
     try {
       await appServer.start({ cwd, mcpServerUrl });
@@ -927,6 +938,8 @@ export class CodexSessionsManager {
         initialPrompt: sourceSession.startupConfig.initialPrompt,
         configOverrides: sourceSession.startupConfig.configOverrides,
         mcpEnabled: sourceSession.startupConfig.mcpEnabled,
+        mcpCanScheduleSessions:
+          sourceSession.startupConfig.mcpCanScheduleSessions,
       },
     };
 
@@ -945,6 +958,8 @@ export class CodexSessionsManager {
       permissionMode: forkedSession.startupConfig.permissionMode,
       configOverrides: forkedSession.startupConfig.configOverrides,
       mcpEnabled: forkedSession.startupConfig.mcpEnabled,
+      mcpCanScheduleSessions:
+        forkedSession.startupConfig.mcpCanScheduleSessions,
       cols: input.cols,
       rows: input.rows,
     });

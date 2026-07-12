@@ -275,20 +275,27 @@ export async function createServices(options: CreateServicesOptions) {
   );
   const scheduledSessionsService = new ScheduledSessionsService({
     state: scheduledSessionsState,
-    runSession: async (config) => {
+    runSession: async (config, meta) => {
       await skillsService.ensureFreshForPath(config.cwd);
+      // Sessions spawned from agent-created schedules must not be able to
+      // schedule further sessions, or agents could chain spawns unattended.
+      const mcpCanScheduleSessions = meta.createdBy !== "agent";
       switch (config.type) {
         case "claude": {
           const { type: _type, ...input } = config;
           return await sessionsService.startNewSession({
             ...input,
+            mcpCanScheduleSessions,
             cols: SCHEDULED_SESSION_COLS,
             rows: SCHEDULED_SESSION_ROWS,
           });
         }
         case "codex": {
           const { type: _type, ...input } = config;
-          const sessionId = codexSessionsManager.createSession(input);
+          const sessionId = codexSessionsManager.createSession({
+            ...input,
+            mcpCanScheduleSessions,
+          });
           await codexSessionsManager.startLiveSession({
             sessionId,
             cwd: input.cwd,
@@ -299,6 +306,7 @@ export async function createServices(options: CreateServicesOptions) {
             initialPrompt: input.initialPrompt,
             configOverrides: input.configOverrides,
             mcpEnabled: input.mcpEnabled,
+            mcpCanScheduleSessions,
             cols: SCHEDULED_SESSION_COLS,
             rows: SCHEDULED_SESSION_ROWS,
           });

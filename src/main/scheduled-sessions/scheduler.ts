@@ -15,6 +15,7 @@ const MAX_TICK_DELAY_MS = 30_000;
 
 export type ScheduledSessionRunner = (
   config: ScheduledSessionConfig,
+  meta: { createdBy: "user" | "agent" },
 ) => Promise<string>;
 
 export type ScheduledSessionRunValidator = (
@@ -33,6 +34,12 @@ export interface CreateScheduledSessionInput {
   name?: string;
   schedule: ScheduleSpec;
   config: ScheduledSessionConfig;
+  /** Defaults to "user". Agent-created entries spawn sessions whose MCP
+   * token cannot schedule further sessions. */
+  createdBy?: "user" | "agent";
+  /** Defaults to true. Agent-created entries start disabled so the user
+   * approves them before anything runs. */
+  enabled?: boolean;
 }
 
 export interface UpdateScheduledSessionInput {
@@ -40,6 +47,10 @@ export interface UpdateScheduledSessionInput {
   name?: string;
   schedule: ScheduleSpec;
   config: ScheduledSessionConfig;
+  /** Defaults to "user". A user edit re-arms the schedule; an agent edit
+   * disables it and flags it for re-approval, so approved content can never
+   * be swapped out from under the user. */
+  editedBy?: "user" | "agent";
 }
 
 export function getNextCronRunAt(cron: string, fromMs: number): number | null {
@@ -117,18 +128,33 @@ export class ScheduledSessionsService {
     }
   }
 
+  list(): ScheduledSession[] {
+    return Object.values(this.state.state);
+  }
+
+  get(id: string): ScheduledSession | undefined {
+    return this.state.state[id];
+  }
+
   create(input: CreateScheduledSessionInput): ScheduledSession {
     const now = this.now();
-    assertScheduleIsRunnable(input.schedule, now);
+    const enabled = input.enabled ?? true;
+    // A disabled entry may carry a past one-time schedule: it fires as a
+    // catch-up run the moment the user enables (approves) it.
+    assertScheduleIsRunnable(input.schedule, now, {
+      allowPastOnce: !enabled,
+    });
 
     const entry: ScheduledSession = {
       id: randomUUID(),
       name: input.name?.trim() || undefined,
       createdAt: now,
-      enabled: true,
+      createdBy: input.createdBy ?? "user",
+      needsApproval: input.createdBy === "agent" && !enabled ? true : undefined,
+      enabled,
       schedule: input.schedule,
       config: input.config,
-      nextRunAt: computeNextRunAt(input.schedule, now),
+      nextRunAt: enabled ? computeNextRunAt(input.schedule, now) : undefined,
     };
 
     this.state.updateState((entries) => {
@@ -145,10 +171,15 @@ export class ScheduledSessionsService {
     if (!existing) {
       throw new Error(`Scheduled session ${input.id} not found`);
     }
-    assertScheduleIsRunnable(input.schedule, now);
+    // A user edit re-arms the schedule, so a completed one-off moved to a new
+    // time runs again instead of staying disabled. An agent edit is only a
+    // proposal: the entry is disabled until the user re-approves it, and may
+    // carry a past one-time schedule that fires as a catch-up on approval.
+    const enabled = input.editedBy !== "agent";
+    assertScheduleIsRunnable(input.schedule, now, {
+      allowPastOnce: !enabled,
+    });
 
-    // Editing re-arms the schedule, so a completed one-off moved to a new
-    // time runs again instead of staying disabled.
     this.state.updateState((entries) => {
       const entry = entries[input.id];
       if (!entry) {
@@ -157,8 +188,11 @@ export class ScheduledSessionsService {
       entry.name = input.name?.trim() || undefined;
       entry.schedule = input.schedule;
       entry.config = input.config;
-      entry.enabled = true;
-      entry.nextRunAt = computeNextRunAt(input.schedule, now);
+      entry.enabled = enabled;
+      entry.needsApproval = enabled ? undefined : true;
+      entry.nextRunAt = enabled
+        ? computeNextRunAt(input.schedule, now)
+        : undefined;
     });
     this.scheduleTick();
 
@@ -184,6 +218,9 @@ export class ScheduledSessionsService {
         return;
       }
       entry.enabled = enabled;
+      if (enabled) {
+        entry.needsApproval = undefined;
+      }
       entry.nextRunAt = enabled
         ? computeNextRunAt(entry.schedule, now)
         : undefined;
@@ -299,7 +336,9 @@ export class ScheduledSessionsService {
         return;
       }
 
-      const sessionId = await this.runSession(config);
+      const sessionId = await this.runSession(config, {
+        createdBy: entry.createdBy ?? "user",
+      });
       this.recordRunResult(id, { sessionId });
     } catch (error) {
       log.error(`Scheduled session ${id} failed to start`, error);
@@ -333,7 +372,11 @@ export class ScheduledSessionsService {
   }
 }
 
-function assertScheduleIsRunnable(schedule: ScheduleSpec, now: number): void {
+function assertScheduleIsRunnable(
+  schedule: ScheduleSpec,
+  now: number,
+  opts?: { allowPastOnce?: boolean },
+): void {
   if (schedule.kind === "recurring") {
     assertValidCronExpression(schedule.cron);
     if (getNextCronRunAt(schedule.cron, now) === null) {
@@ -341,7 +384,7 @@ function assertScheduleIsRunnable(schedule: ScheduleSpec, now: number): void {
         `Cron expression "${schedule.cron}" never matches a future time.`,
       );
     }
-  } else if (schedule.at <= now) {
+  } else if (schedule.at <= now && !opts?.allowPastOnce) {
     throw new Error("Scheduled time must be in the future.");
   }
 }

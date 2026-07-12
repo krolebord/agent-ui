@@ -5,10 +5,17 @@ import { z } from "zod";
 export interface McpRequestContext {
   /** Working directory of the CLI session that made the request. */
   cwd: string | null;
+  /**
+   * Whether the session may create scheduled sessions via MCP tools. False
+   * for sessions that were themselves started from an agent-created schedule,
+   * so agents can't chain session creation.
+   */
+  canScheduleSessions: boolean;
 }
 
 const payloadSchema = z.object({
   cwd: z.string().nullable(),
+  canScheduleSessions: z.boolean(),
 });
 
 /**

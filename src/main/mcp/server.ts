@@ -30,11 +30,13 @@ export async function handleMcpHttpRequest(
   services: Services,
 ) {
   // A missing/invalid token still serves the request, just without a session
-  // context — tools that need the cwd degrade to global-only behavior.
+  // context — tools that need the cwd degrade to global-only behavior, and
+  // session-creating tools are blocked since the caller can't be tied back
+  // to a session we started.
   const requestUrl = new URL(req.url ?? "/", "http://agent-ui.local");
   const context = services.mcpSessionTokens.verify(
     requestUrl.searchParams.get("token"),
-  ) ?? { cwd: null };
+  ) ?? { cwd: null, canScheduleSessions: false };
 
   const server = createMcpServer(services, context);
   const transport = new StreamableHTTPServerTransport({

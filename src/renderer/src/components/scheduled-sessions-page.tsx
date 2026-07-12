@@ -186,6 +186,8 @@ function ScheduledSessionRow({
 
   const isCompletedOneOff =
     entry.schedule.kind === "once" && !entry.enabled && entry.lastRunAt;
+  const isAgentCreated = entry.createdBy === "agent";
+  const needsApproval = entry.needsApproval === true;
 
   return (
     <li className="flex items-start gap-3 px-3 py-2.5">
@@ -205,6 +207,16 @@ function ScheduledSessionRow({
           </span>
           {entry.schedule.kind === "recurring" ? (
             <Badge variant="outline">Recurring</Badge>
+          ) : null}
+          {isAgentCreated ? (
+            <Badge variant="outline" title="Created by an agent via MCP">
+              Agent
+            </Badge>
+          ) : null}
+          {needsApproval ? (
+            <Badge variant="secondary" title="Enable to approve this schedule">
+              Needs approval
+            </Badge>
           ) : null}
           {isCompletedOneOff && !entry.lastError ? (
             <Badge variant="secondary">Completed</Badge>

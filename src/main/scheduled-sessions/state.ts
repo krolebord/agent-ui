@@ -17,11 +17,19 @@ export const scheduleSpecSchema = z.discriminatedUnion("kind", [
 ]);
 export type ScheduleSpec = z.infer<typeof scheduleSpecSchema>;
 
+// mcpCanScheduleSessions is omitted so a stored config can never grant the
+// spawned session scheduling rights; the runner derives it from createdBy.
 const claudeScheduledConfigSchema = startClaudeSessionSchema
-  .omit({ cols: true, rows: true, resumeSessionId: true, forkSessionId: true })
+  .omit({
+    cols: true,
+    rows: true,
+    resumeSessionId: true,
+    forkSessionId: true,
+    mcpCanScheduleSessions: true,
+  })
   .extend({ type: z.literal("claude") });
 const codexScheduledConfigSchema = startCodexSessionSchema
-  .omit({ cols: true, rows: true })
+  .omit({ cols: true, rows: true, mcpCanScheduleSessions: true })
   .extend({ type: z.literal("codex") });
 const cursorScheduledConfigSchema = startCursorAgentSessionSchema
   .omit({ cols: true, rows: true })
@@ -43,6 +51,11 @@ export const scheduledSessionSchema = z.object({
     .optional()
     .transform((value) => value?.trim() || undefined),
   createdAt: z.number(),
+  // Absent means "user" (entries persisted before agent-created schedules).
+  createdBy: z.enum(["user", "agent"]).optional(),
+  // True while an agent-proposed create or edit awaits user review. Cleared
+  // when the user enables the entry or edits it themselves.
+  needsApproval: z.boolean().optional(),
   enabled: z.boolean(),
   schedule: scheduleSpecSchema,
   config: scheduledSessionConfigSchema,

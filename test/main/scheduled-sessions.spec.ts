@@ -216,7 +216,9 @@ describe("ScheduledSessionsService", () => {
     expect(runSession).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(runSession).toHaveBeenCalledExactlyOnceWith(claudeConfig);
+    expect(runSession).toHaveBeenCalledExactlyOnceWith(claudeConfig, {
+      createdBy: "user",
+    });
 
     const entry = Object.values(state.state)[0];
     expect(entry?.enabled).toBe(false);
@@ -259,7 +261,9 @@ describe("ScheduledSessionsService", () => {
       service.start();
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(runSession).toHaveBeenCalledExactlyOnceWith(claudeConfig);
+      expect(runSession).toHaveBeenCalledExactlyOnceWith(claudeConfig, {
+        createdBy: "user",
+      });
       expect(state.state["entry-1"]?.enabled).toBe(false);
 
       service.dispose();
@@ -366,11 +370,142 @@ describe("ScheduledSessionsService", () => {
 
     await service.runNow(entry.id);
 
-    expect(runSession).toHaveBeenCalledExactlyOnceWith(claudeConfig);
+    expect(runSession).toHaveBeenCalledExactlyOnceWith(claudeConfig, {
+      createdBy: "user",
+    });
     expect(state.state[entry.id]?.enabled).toBe(true);
     expect(state.state[entry.id]?.lastRunSessionId).toBe("session-id-1");
 
     service.dispose();
+  });
+
+  describe("agent-created entries", () => {
+    it("creates disabled entries that allow a past one-time schedule", async () => {
+      const { service, state, runSession } = createService();
+      const entry = service.create({
+        schedule: { kind: "once", at: BASE_TIME.getTime() - 1 },
+        config: claudeConfig,
+        createdBy: "agent",
+        enabled: false,
+      });
+
+      const stored = state.state[entry.id];
+      expect(stored?.createdBy).toBe("agent");
+      expect(stored?.enabled).toBe(false);
+      expect(stored?.needsApproval).toBe(true);
+      expect(stored?.nextRunAt).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(runSession).not.toHaveBeenCalled();
+
+      service.dispose();
+    });
+
+    it("still rejects past one-time schedules for enabled entries", () => {
+      const { service } = createService();
+      expect(() =>
+        service.create({
+          schedule: { kind: "once", at: BASE_TIME.getTime() - 1 },
+          config: claudeConfig,
+          createdBy: "agent",
+        }),
+      ).toThrow(/future/);
+    });
+
+    it("runs a pending immediate entry once the user enables it", async () => {
+      const { service, state, runSession } = createService();
+      const entry = service.create({
+        schedule: { kind: "once", at: BASE_TIME.getTime() },
+        config: claudeConfig,
+        createdBy: "agent",
+        enabled: false,
+      });
+
+      service.setEnabled(entry.id, true);
+      expect(state.state[entry.id]?.needsApproval).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(runSession).toHaveBeenCalledExactlyOnceWith(claudeConfig, {
+        createdBy: "agent",
+      });
+      expect(state.state[entry.id]?.enabled).toBe(false);
+
+      service.dispose();
+    });
+
+    it("agent edits disable the entry and flag it for re-approval", async () => {
+      const { service, state, runSession } = createService();
+      const entry = service.create({
+        schedule: { kind: "recurring", cron: "0 3 * * *" },
+        config: claudeConfig,
+        createdBy: "agent",
+        enabled: false,
+      });
+      service.setEnabled(entry.id, true);
+
+      service.update({
+        id: entry.id,
+        name: "Retimed",
+        schedule: { kind: "recurring", cron: "0 4 * * *" },
+        config: claudeConfig,
+        editedBy: "agent",
+      });
+
+      const stored = state.state[entry.id];
+      expect(stored?.enabled).toBe(false);
+      expect(stored?.needsApproval).toBe(true);
+      expect(stored?.nextRunAt).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(runSession).not.toHaveBeenCalled();
+
+      service.dispose();
+    });
+
+    it("agent edits may carry a past one-time schedule", () => {
+      const { service, state } = createService();
+      const entry = service.create({
+        schedule: { kind: "once", at: BASE_TIME.getTime() + 60_000 },
+        config: claudeConfig,
+        createdBy: "agent",
+        enabled: false,
+      });
+
+      service.update({
+        id: entry.id,
+        schedule: { kind: "once", at: BASE_TIME.getTime() - 1 },
+        config: claudeConfig,
+        editedBy: "agent",
+      });
+
+      expect(state.state[entry.id]?.enabled).toBe(false);
+      expect(state.state[entry.id]?.needsApproval).toBe(true);
+
+      service.dispose();
+    });
+
+    it("user edits re-arm the entry and clear the approval flag", () => {
+      const { service, state } = createService();
+      const entry = service.create({
+        schedule: { kind: "recurring", cron: "0 3 * * *" },
+        config: claudeConfig,
+        createdBy: "agent",
+        enabled: false,
+      });
+
+      service.update({
+        id: entry.id,
+        schedule: { kind: "recurring", cron: "0 4 * * *" },
+        config: claudeConfig,
+      });
+
+      const stored = state.state[entry.id];
+      expect(stored?.enabled).toBe(true);
+      expect(stored?.needsApproval).toBeUndefined();
+      expect(stored?.nextRunAt).toBeGreaterThan(BASE_TIME.getTime());
+
+      service.dispose();
+    });
   });
 
   it("stops firing after dispose", async () => {
