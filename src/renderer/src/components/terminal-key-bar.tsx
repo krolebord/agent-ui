@@ -1,16 +1,9 @@
 import { Button } from "@renderer/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@renderer/components/ui/dialog";
 import { Textarea } from "@renderer/components/ui/textarea";
 import { useTerminalFileUpload } from "@renderer/hooks/use-terminal-file-upload";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
-import { MessageSquareText, Paperclip, SendHorizontal } from "lucide-react";
+import { MessageSquareText, Paperclip, SendHorizontal, X } from "lucide-react";
 import type React from "react";
 import { useRef, useState } from "react";
 
@@ -124,6 +117,76 @@ export function TerminalKeyBar({
     setInputOpen(false);
   };
 
+  if (inputOpen) {
+    return (
+      <>
+        <form
+          className="flex shrink-0 items-end gap-1 border-t border-border/70 bg-background px-2 py-1.5"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitInput();
+          }}
+        >
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-w-10 shrink-0 px-2"
+            aria-label="Close terminal input"
+            title="Close terminal input"
+            onClick={() => setInputOpen(false)}
+          >
+            <X className="size-4" />
+          </Button>
+          <Textarea
+            autoFocus={shouldAutoFocus()}
+            placeholder="Type a prompt..."
+            value={inputText}
+            onChange={(event) => {
+              setInputText(event.target.value);
+            }}
+            rows={1}
+            // Cap at 3 lines (24px line height + vertical padding), then scroll.
+            className="max-h-[5.5rem] min-h-9 flex-1 resize-none overflow-y-auto py-1.5"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-w-10 shrink-0 px-2"
+            aria-label="Attach file"
+            title="Attach file"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip className="size-4" />
+          </Button>
+          <Button
+            type="submit"
+            size="sm"
+            className="min-w-10 shrink-0 px-2"
+            aria-label="Submit terminal input"
+            title="Submit terminal input"
+            disabled={!inputText}
+          >
+            <SendHorizontal className="size-4" />
+          </Button>
+        </form>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            void handleFilesSelected(event.target.files);
+            // Reset so selecting the same file again re-triggers change.
+            event.target.value = "";
+          }}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-t border-border/70 bg-background px-2 py-1.5">
@@ -189,38 +252,6 @@ export function TerminalKeyBar({
           event.target.value = "";
         }}
       />
-
-      <Dialog open={inputOpen} onOpenChange={setInputOpen}>
-        <DialogContent className="top-auto bottom-[1rem] max-w-[calc(100%-1rem)] gap-3 sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Terminal input</DialogTitle>
-          </DialogHeader>
-          <form
-            className="space-y-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submitInput();
-            }}
-          >
-            <Textarea
-              autoFocus={shouldAutoFocus()}
-              placeholder="Type a prompt..."
-              value={inputText}
-              onChange={(event) => {
-                setInputText(event.target.value);
-              }}
-              rows={6}
-              className="max-h-[45dvh] resize-none"
-            />
-            <DialogFooter>
-              <Button type="submit" disabled={!inputText}>
-                <SendHorizontal className="size-4" />
-                Submit
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

@@ -16,6 +16,11 @@ import {
   CodexPermissionModeToggleGroup,
   PermissionModeToggleGroup,
 } from "@renderer/components/permission-mode-toggle-group";
+import {
+  buildScheduleSpec,
+  type ScheduleDraft,
+  SessionFormFooter,
+} from "@renderer/components/schedule-session-controls";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -27,7 +32,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@renderer/components/ui/dialog";
@@ -81,6 +85,7 @@ import { useMutation } from "@tanstack/react-query";
 import { AlertCircle, ChevronsUpDown } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import {
@@ -247,6 +252,9 @@ export function NewSessionDialog() {
   const [sessionName, setSessionName] = useState("");
   const [selectedHandoff, setSelectedHandoff] =
     useState<HandoffEntryDisplay | null>(null);
+  const [scheduleDraft, setScheduleDraft] = useState<ScheduleDraft | null>(
+    null,
+  );
   const [claudeOptions, setClaudeOptions] = useState<LastClaudeSessionOptions>(
     resolveClaudeSessionOptions(undefined),
   );
@@ -273,6 +281,7 @@ export function NewSessionDialog() {
     setInitialPrompt("");
     setSessionName("");
     setSelectedHandoff(null);
+    setScheduleDraft(null);
     setClaudeOptions(
       resolveClaudeSessionOptions(storedLastSessionOptions.claude),
     );
@@ -394,6 +403,8 @@ export function NewSessionDialog() {
             setSessionName={setSessionName}
             selectedHandoff={selectedHandoff}
             setSelectedHandoff={setSelectedHandoff}
+            scheduleDraft={scheduleDraft}
+            setScheduleDraft={setScheduleDraft}
             options={claudeOptions}
             setOptions={setClaudeOptions}
             onClose={persistAndClose}
@@ -407,6 +418,8 @@ export function NewSessionDialog() {
             setSessionName={setSessionName}
             selectedHandoff={selectedHandoff}
             setSelectedHandoff={setSelectedHandoff}
+            scheduleDraft={scheduleDraft}
+            setScheduleDraft={setScheduleDraft}
             options={codexOptions}
             setOptions={setCodexOptions}
             onClose={persistAndClose}
@@ -420,6 +433,8 @@ export function NewSessionDialog() {
             setSessionName={setSessionName}
             selectedHandoff={selectedHandoff}
             setSelectedHandoff={setSelectedHandoff}
+            scheduleDraft={scheduleDraft}
+            setScheduleDraft={setScheduleDraft}
             options={cursorOptions}
             setOptions={setCursorOptions}
             onClose={persistAndClose}
@@ -438,6 +453,8 @@ interface SessionFormProps<TOptions> {
   setSessionName: (value: string) => void;
   selectedHandoff: HandoffEntryDisplay | null;
   setSelectedHandoff: (value: HandoffEntryDisplay | null) => void;
+  scheduleDraft: ScheduleDraft | null;
+  setScheduleDraft: (value: ScheduleDraft | null) => void;
   options: TOptions;
   setOptions: (value: TOptions | ((current: TOptions) => TOptions)) => void;
   onClose: () => void;
@@ -451,6 +468,8 @@ function LocalClaudeSessionForm({
   setSessionName,
   selectedHandoff,
   setSelectedHandoff,
+  scheduleDraft,
+  setScheduleDraft,
   options,
   setOptions,
   onClose,
@@ -482,14 +501,21 @@ function LocalClaudeSessionForm({
     }),
   );
 
+  const scheduleSession = useMutation(
+    orpc.scheduledSessions.create.mutationOptions({
+      onSuccess: () => {
+        toast.success("Session scheduled");
+        onClose();
+      },
+      onError: handleError,
+    }),
+  );
+
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
-        const { cols, rows } = getTerminalSize();
-        startSession.mutate({
+        const sessionConfig = {
           cwd: projectPath,
-          cols,
-          rows,
           initialPrompt: initialPrompt || undefined,
           sessionName: sessionName || undefined,
           model: options.model,
@@ -500,13 +526,33 @@ function LocalClaudeSessionForm({
           remoteControl: options.remoteControl || undefined,
           mcpEnabled: options.mcpEnabled,
           permissionMode: options.permissionMode,
-        });
+        };
+
+        if (scheduleDraft) {
+          const result = buildScheduleSpec(scheduleDraft);
+          if ("error" in result) {
+            setErrorMessage(result.error);
+            return;
+          }
+          scheduleSession.mutate({
+            name: sessionName || undefined,
+            schedule: result.schedule,
+            config: { type: "claude", ...sessionConfig },
+          });
+          return;
+        }
+
+        const { cols, rows } = getTerminalSize();
+        startSession.mutate({ ...sessionConfig, cols, rows });
       },
       onError: handleError,
     }),
   );
 
-  const isPending = ensureProject.isPending || startSession.isPending;
+  const isPending =
+    ensureProject.isPending ||
+    startSession.isPending ||
+    scheduleSession.isPending;
 
   const handleSubmit = () => {
     setErrorMessage(null);
@@ -770,19 +816,12 @@ function LocalClaudeSessionForm({
         </div>
       ) : null}
 
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onClose}
-          disabled={isPending}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Starting..." : "Create"}
-        </Button>
-      </DialogFooter>
+      <SessionFormFooter
+        isPending={isPending}
+        onClose={onClose}
+        scheduleDraft={scheduleDraft}
+        setScheduleDraft={setScheduleDraft}
+      />
     </form>
   );
 }
@@ -795,6 +834,8 @@ function CodexSessionForm({
   setSessionName,
   selectedHandoff,
   setSelectedHandoff,
+  scheduleDraft,
+  setScheduleDraft,
   options,
   setOptions,
   onClose,
@@ -883,14 +924,21 @@ function CodexSessionForm({
     }),
   );
 
+  const scheduleSession = useMutation(
+    orpc.scheduledSessions.create.mutationOptions({
+      onSuccess: () => {
+        toast.success("Session scheduled");
+        onClose();
+      },
+      onError: handleError,
+    }),
+  );
+
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
-        const { cols, rows } = getTerminalSize();
-        startSession.mutate({
+        const sessionConfig = {
           cwd: projectPath,
-          cols,
-          rows,
           sessionName: sessionName || undefined,
           model: options.model || undefined,
           modelReasoningEffort: options.modelReasoningEffort,
@@ -899,13 +947,33 @@ function CodexSessionForm({
           initialPrompt: initialPrompt || undefined,
           configOverrides: options.configOverrides || undefined,
           mcpEnabled: options.mcpEnabled,
-        });
+        };
+
+        if (scheduleDraft) {
+          const result = buildScheduleSpec(scheduleDraft);
+          if ("error" in result) {
+            setErrorMessage(result.error);
+            return;
+          }
+          scheduleSession.mutate({
+            name: sessionName || undefined,
+            schedule: result.schedule,
+            config: { type: "codex", ...sessionConfig },
+          });
+          return;
+        }
+
+        const { cols, rows } = getTerminalSize();
+        startSession.mutate({ ...sessionConfig, cols, rows });
       },
       onError: handleError,
     }),
   );
 
-  const isPending = ensureProject.isPending || startSession.isPending;
+  const isPending =
+    ensureProject.isPending ||
+    startSession.isPending ||
+    scheduleSession.isPending;
 
   const handleSubmit = () => {
     setErrorMessage(null);
@@ -1122,19 +1190,12 @@ function CodexSessionForm({
         </div>
       ) : null}
 
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onClose}
-          disabled={isPending}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Starting..." : "Create"}
-        </Button>
-      </DialogFooter>
+      <SessionFormFooter
+        isPending={isPending}
+        onClose={onClose}
+        scheduleDraft={scheduleDraft}
+        setScheduleDraft={setScheduleDraft}
+      />
     </form>
   );
 }
@@ -1147,6 +1208,8 @@ function CursorAgentSessionForm({
   setSessionName,
   selectedHandoff,
   setSelectedHandoff,
+  scheduleDraft,
+  setScheduleDraft,
   options,
   setOptions,
   onClose,
@@ -1194,26 +1257,53 @@ function CursorAgentSessionForm({
     }),
   );
 
-  const ensureProject = useMutation(
-    orpc.projects.addProject.mutationOptions({
+  const scheduleSession = useMutation(
+    orpc.scheduledSessions.create.mutationOptions({
       onSuccess: () => {
-        const { cols, rows } = getTerminalSize();
-        startSession.mutate({
-          cwd: projectPath,
-          cols,
-          rows,
-          sessionName: sessionName || undefined,
-          model: options.model || undefined,
-          mode: options.mode,
-          permissionMode: options.permissionMode,
-          initialPrompt: initialPrompt || undefined,
-        });
+        toast.success("Session scheduled");
+        onClose();
       },
       onError: handleError,
     }),
   );
 
-  const isPending = ensureProject.isPending || startSession.isPending;
+  const ensureProject = useMutation(
+    orpc.projects.addProject.mutationOptions({
+      onSuccess: () => {
+        const sessionConfig = {
+          cwd: projectPath,
+          sessionName: sessionName || undefined,
+          model: options.model || undefined,
+          mode: options.mode,
+          permissionMode: options.permissionMode,
+          initialPrompt: initialPrompt || undefined,
+        };
+
+        if (scheduleDraft) {
+          const result = buildScheduleSpec(scheduleDraft);
+          if ("error" in result) {
+            setErrorMessage(result.error);
+            return;
+          }
+          scheduleSession.mutate({
+            name: sessionName || undefined,
+            schedule: result.schedule,
+            config: { type: "cursorAgent", ...sessionConfig },
+          });
+          return;
+        }
+
+        const { cols, rows } = getTerminalSize();
+        startSession.mutate({ ...sessionConfig, cols, rows });
+      },
+      onError: handleError,
+    }),
+  );
+
+  const isPending =
+    ensureProject.isPending ||
+    startSession.isPending ||
+    scheduleSession.isPending;
 
   const handleSubmit = () => {
     setErrorMessage(null);
@@ -1387,19 +1477,12 @@ function CursorAgentSessionForm({
         </div>
       ) : null}
 
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onClose}
-          disabled={isPending}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Starting..." : "Create"}
-        </Button>
-      </DialogFooter>
+      <SessionFormFooter
+        isPending={isPending}
+        onClose={onClose}
+        scheduleDraft={scheduleDraft}
+        setScheduleDraft={setScheduleDraft}
+      />
     </form>
   );
 }

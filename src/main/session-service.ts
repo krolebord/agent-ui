@@ -69,7 +69,7 @@ export type ClaudeLocalTerminalSessionData = z.infer<
   typeof claudeLocalTerminalSessionSchema
 >;
 
-const startClaudeSessionSchema = z.object({
+export const startClaudeSessionSchema = z.object({
   cwd: z.string(),
   cols: z.number(),
   rows: z.number(),

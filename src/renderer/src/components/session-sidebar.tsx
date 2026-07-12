@@ -53,6 +53,7 @@ import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
 import { useProjectWorktreeDialogStore } from "./project-worktree-dialog";
 import { RawSessionStateDialog } from "./raw-session-state-dialog";
 import { RenameSessionDialog } from "./rename-session-dialog";
+import { SidebarScheduledSessionsButton } from "./scheduled-sessions-page";
 import {
   BaseSessionSidebarItem,
   type SessionMenuAction,
@@ -286,6 +287,7 @@ export function SessionSidebar() {
             )}
           </Button>
           <SidebarSkillsButton />
+          <SidebarScheduledSessionsButton />
           <Button
             variant="flat"
             className="h-full w-9 shrink-0 px-0"

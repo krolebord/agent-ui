@@ -5,6 +5,7 @@ import { moveStoppedSessionToProject } from "./move-stopped-session-to-project";
 import { procedure } from "./orpc";
 import { projectsRouter } from "./project-service";
 import { projectTerminalsRouter } from "./project-terminals";
+import { scheduledSessionsRouter } from "./scheduled-sessions/router";
 import { claudeSessionsRouter } from "./session-service";
 import { codexSessionsRouter } from "./sessions/codex.session";
 import { cursorAgentSessionsRouter } from "./sessions/cursor-agent.session";
@@ -65,4 +66,5 @@ export const orpcRouter = {
   stateSync: stateSyncRouter,
   sessions: sessionsRouter,
   skills: skillsRouter,
+  scheduledSessions: scheduledSessionsRouter,
 };

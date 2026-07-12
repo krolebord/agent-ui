@@ -32,6 +32,7 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
+import { ScheduledSessionsPage } from "./scheduled-sessions-page";
 import { SkillsPage } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
 import { WelcomePage } from "./welcome-page";
@@ -73,6 +74,10 @@ export function SessionPage() {
 
   if (mainView === "skills") {
     return <SkillsPage />;
+  }
+
+  if (mainView === "scheduledSessions") {
+    return <ScheduledSessionsPage />;
   }
 
   if (!session) {

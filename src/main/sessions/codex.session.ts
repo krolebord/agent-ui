@@ -86,7 +86,7 @@ export type CodexLocalTerminalSessionData = z.infer<
   typeof codexLocalTerminalSessionSchema
 >;
 
-const startCodexSessionSchema = z.object({
+export const startCodexSessionSchema = z.object({
   cwd: z.string(),
   cols: z.number().optional(),
   rows: z.number().optional(),

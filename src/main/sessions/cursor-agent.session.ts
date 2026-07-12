@@ -46,7 +46,7 @@ export const cursorAgentSessionSchema = commonSessionSchema.extend({
 });
 export type CursorAgentSessionData = z.infer<typeof cursorAgentSessionSchema>;
 
-const startCursorAgentSessionSchema = z.object({
+export const startCursorAgentSessionSchema = z.object({
   cwd: z.string(),
   cols: z.number().optional(),
   rows: z.number().optional(),

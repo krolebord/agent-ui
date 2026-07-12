@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { CodexPermissionMode } from "@shared/codex-types";
 import { createDisposable } from "@shared/utils";
 import type { AppHost } from "./app-host";
 import {
@@ -6,6 +7,7 @@ import {
   defineAppSettingsState,
 } from "./app-settings";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
+import type { CursorAgentMode, CursorAgentPermissionMode } from "./cursor-cli";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { defineHandoffsState, HandoffsService } from "./handoffs-service";
@@ -28,6 +30,11 @@ import {
   defineProjectTerminalsState,
   ProjectTerminalsManager,
 } from "./project-terminals";
+import { ScheduledSessionsService } from "./scheduled-sessions/scheduler";
+import {
+  defineScheduledSessionsPersistence,
+  defineScheduledSessionsState,
+} from "./scheduled-sessions/state";
 import { SessionsServiceNew } from "./session-service";
 import { SessionStateFileManager } from "./session-state-file-manager";
 import { CodexSessionsManager } from "./sessions/codex.session";
@@ -46,6 +53,11 @@ import { TerminalManager } from "./terminal-manager";
 import { TitleGenerationService } from "./title-generation-service";
 
 const STORAGE_SCHEMA_VERSION = 3;
+
+// Sessions started by the scheduler have no attached renderer yet; the
+// terminal is resized to the real viewport once a client attaches.
+const SCHEDULED_SESSION_COLS = 120;
+const SCHEDULED_SESSION_ROWS = 30;
 
 interface CreateServicesOptions {
   host: AppHost;
@@ -256,6 +268,73 @@ export async function createServices(options: CreateServicesOptions) {
     sessionsState,
     disposeSignal,
   );
+
+  const scheduledSessionsState = defineScheduledSessionsState();
+  persistenceService.registerAndHydrate(
+    defineScheduledSessionsPersistence(scheduledSessionsState),
+  );
+  const scheduledSessionsService = new ScheduledSessionsService({
+    state: scheduledSessionsState,
+    runSession: async (config) => {
+      await skillsService.ensureFreshForPath(config.cwd);
+      switch (config.type) {
+        case "claude": {
+          const { type: _type, ...input } = config;
+          return await sessionsService.startNewSession({
+            ...input,
+            cols: SCHEDULED_SESSION_COLS,
+            rows: SCHEDULED_SESSION_ROWS,
+          });
+        }
+        case "codex": {
+          const { type: _type, ...input } = config;
+          const sessionId = codexSessionsManager.createSession(input);
+          await codexSessionsManager.startLiveSession({
+            sessionId,
+            cwd: input.cwd,
+            model: input.model,
+            modelReasoningEffort: input.modelReasoningEffort,
+            fastMode: input.fastMode,
+            permissionMode: input.permissionMode as CodexPermissionMode,
+            initialPrompt: input.initialPrompt,
+            configOverrides: input.configOverrides,
+            mcpEnabled: input.mcpEnabled,
+            cols: SCHEDULED_SESSION_COLS,
+            rows: SCHEDULED_SESSION_ROWS,
+          });
+          return sessionId;
+        }
+        case "cursorAgent": {
+          const { type: _type, ...input } = config;
+          const sessionId =
+            await cursorAgentSessionsManager.createSession(input);
+
+          let plan = false;
+          let initialPrompt = input.initialPrompt;
+          if (initialPrompt?.startsWith("/plan")) {
+            plan = true;
+            initialPrompt =
+              initialPrompt.slice("/plan".length).trim() || undefined;
+          }
+
+          await cursorAgentSessionsManager.startLiveSession({
+            sessionId,
+            cwd: input.cwd,
+            model: input.model,
+            mode: input.mode as CursorAgentMode | undefined,
+            permissionMode: input.permissionMode as CursorAgentPermissionMode,
+            initialPrompt,
+            plan,
+            cols: SCHEDULED_SESSION_COLS,
+            rows: SCHEDULED_SESSION_ROWS,
+          });
+          return sessionId;
+        }
+      }
+    },
+  });
+  scheduledSessionsService.start();
+
   const stateService = new StateOrchestrator({
     serviceStates: {
       appSettings: appSettingsState,
@@ -265,6 +344,7 @@ export async function createServices(options: CreateServicesOptions) {
       handoffs: handoffsState,
       machineStats: machineStatsState,
       skills: skillsState,
+      scheduledSessions: scheduledSessionsState,
     },
   });
 
@@ -292,6 +372,7 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(
     async () => await worktreeSetupSessionsManager.dispose(),
   );
+  shutdownDisposable.addDisposable(() => scheduledSessionsService.dispose());
   shutdownDisposable.addDisposable(() => machineStatsMonitor.dispose());
   shutdownDisposable.addDisposable(() => handoffsService.dispose());
   shutdownDisposable.addDisposable(() => skillsService.dispose());
@@ -314,6 +395,7 @@ export async function createServices(options: CreateServicesOptions) {
     pluginWarning,
     handoffsService,
     skillsService,
+    scheduledSessionsService,
     mcpSessionTokens,
     sessions: {
       state: sessionsState,
