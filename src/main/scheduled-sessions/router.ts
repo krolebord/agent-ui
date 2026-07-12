@@ -18,6 +18,11 @@ export const scheduledSessionsRouter = {
       const entry = context.scheduledSessionsService.create(input);
       return { id: entry.id };
     }),
+  update: procedure
+    .input(createScheduledSessionSchema.extend({ id: z.string() }))
+    .handler(async ({ input, context }) => {
+      context.scheduledSessionsService.update(input);
+    }),
   delete: procedure
     .input(z.object({ id: z.string() }))
     .handler(async ({ input, context }) => {

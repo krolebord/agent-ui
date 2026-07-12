@@ -35,6 +35,13 @@ export interface CreateScheduledSessionInput {
   config: ScheduledSessionConfig;
 }
 
+export interface UpdateScheduledSessionInput {
+  id: string;
+  name?: string;
+  schedule: ScheduleSpec;
+  config: ScheduledSessionConfig;
+}
+
 export function getNextCronRunAt(cron: string, fromMs: number): number | null {
   const parsed = new Cron(cron);
   const next = parsed.nextRun(new Date(fromMs));
@@ -112,17 +119,7 @@ export class ScheduledSessionsService {
 
   create(input: CreateScheduledSessionInput): ScheduledSession {
     const now = this.now();
-
-    if (input.schedule.kind === "recurring") {
-      assertValidCronExpression(input.schedule.cron);
-      if (getNextCronRunAt(input.schedule.cron, now) === null) {
-        throw new Error(
-          `Cron expression "${input.schedule.cron}" never matches a future time.`,
-        );
-      }
-    } else if (input.schedule.at <= now) {
-      throw new Error("Scheduled time must be in the future.");
-    }
+    assertScheduleIsRunnable(input.schedule, now);
 
     const entry: ScheduledSession = {
       id: randomUUID(),
@@ -140,6 +137,36 @@ export class ScheduledSessionsService {
     this.scheduleTick();
 
     return entry;
+  }
+
+  update(input: UpdateScheduledSessionInput): ScheduledSession {
+    const now = this.now();
+    const existing = this.state.state[input.id];
+    if (!existing) {
+      throw new Error(`Scheduled session ${input.id} not found`);
+    }
+    assertScheduleIsRunnable(input.schedule, now);
+
+    // Editing re-arms the schedule, so a completed one-off moved to a new
+    // time runs again instead of staying disabled.
+    this.state.updateState((entries) => {
+      const entry = entries[input.id];
+      if (!entry) {
+        return;
+      }
+      entry.name = input.name?.trim() || undefined;
+      entry.schedule = input.schedule;
+      entry.config = input.config;
+      entry.enabled = true;
+      entry.nextRunAt = computeNextRunAt(input.schedule, now);
+    });
+    this.scheduleTick();
+
+    const updated = this.state.state[input.id];
+    if (!updated) {
+      throw new Error(`Scheduled session ${input.id} not found`);
+    }
+    return updated;
   }
 
   delete(id: string): void {
@@ -303,6 +330,19 @@ export class ScheduledSessionsService {
         entry.lastRunSessionId = result.sessionId;
       }
     });
+  }
+}
+
+function assertScheduleIsRunnable(schedule: ScheduleSpec, now: number): void {
+  if (schedule.kind === "recurring") {
+    assertValidCronExpression(schedule.cron);
+    if (getNextCronRunAt(schedule.cron, now) === null) {
+      throw new Error(
+        `Cron expression "${schedule.cron}" never matches a future time.`,
+      );
+    }
+  } else if (schedule.at <= now) {
+    throw new Error("Scheduled time must be in the future.");
   }
 }
 

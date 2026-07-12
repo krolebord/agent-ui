@@ -1,3 +1,4 @@
+import type { ScheduledSession } from "@main/scheduled-sessions/state";
 import {
   addRecentCodexModel,
   CODEX_DEFAULT_MODEL_VALUE,
@@ -20,6 +21,7 @@ import {
   buildScheduleSpec,
   type ScheduleDraft,
   SessionFormFooter,
+  scheduleSpecToDraft,
 } from "@renderer/components/schedule-session-controls";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Button } from "@renderer/components/ui/button";
@@ -98,10 +100,14 @@ export const useNewSessionDialogStore = create(
   combine(
     {
       openProjectCwd: null as string | null,
+      editScheduledSessionId: null as string | null,
     },
     (set) => ({
       setOpenProjectCwd: (openProjectCwd: string | null) => {
-        set({ openProjectCwd });
+        set({ openProjectCwd, editScheduledSessionId: null });
+      },
+      openScheduledSessionEditor: (editScheduledSessionId: string | null) => {
+        set({ editScheduledSessionId, openProjectCwd: null });
       },
     }),
   ),
@@ -226,19 +232,73 @@ function buildLastSessionOptions(input: {
   };
 }
 
+function claudeConfigToOptions(
+  config: Extract<ScheduledSession["config"], { type: "claude" }>,
+): LastClaudeSessionOptions {
+  return {
+    model: config.model ?? "opus",
+    effort: config.effort,
+    permissionMode: config.permissionMode ?? "default",
+    haikuModelOverride: config.haikuModelOverride,
+    subagentModelOverride: config.subagentModelOverride,
+    systemPrompt: config.systemPrompt,
+    remoteControl: config.remoteControl,
+    mcpEnabled: config.mcpEnabled,
+  };
+}
+
+function codexConfigToOptions(
+  config: Extract<ScheduledSession["config"], { type: "codex" }>,
+  stored: LastCodexSessionOptions,
+): LastCodexSessionOptions {
+  return {
+    ...stored,
+    model: config.model,
+    modelReasoningEffort: config.modelReasoningEffort,
+    fastMode: config.fastMode,
+    permissionMode: config.permissionMode,
+    configOverrides: config.configOverrides,
+    mcpEnabled: config.mcpEnabled,
+  };
+}
+
+function cursorConfigToOptions(
+  config: Extract<ScheduledSession["config"], { type: "cursorAgent" }>,
+  stored: LastCursorSessionOptions,
+): LastCursorSessionOptions {
+  return {
+    ...stored,
+    model: config.model,
+    mode: config.mode,
+    permissionMode: config.permissionMode,
+  };
+}
+
 export function NewSessionDialog() {
   const openProjectCwd = useNewSessionDialogStore((s) => s.openProjectCwd);
   const setOpenProjectCwd = useNewSessionDialogStore(
     (s) => s.setOpenProjectCwd,
   );
+  const editScheduledSessionId = useNewSessionDialogStore(
+    (s) => s.editScheduledSessionId,
+  );
+  const openScheduledSessionEditor = useNewSessionDialogStore(
+    (s) => s.openScheduledSessionEditor,
+  );
+  const editEntry = useAppState((state) =>
+    editScheduledSessionId
+      ? (state.scheduledSessions[editScheduledSessionId] ?? null)
+      : null,
+  );
   const storedLastSessionOptions = useAppState(
     (state) => state.appSettings.lastSessionOptions,
   );
+  const lookupCwd = openProjectCwd ?? editEntry?.config.cwd ?? null;
   const project = useAppState((state) => {
-    if (!openProjectCwd) {
+    if (!lookupCwd) {
       return null;
     }
-    return state.projects.find((item) => item.path === openProjectCwd) ?? null;
+    return state.projects.find((item) => item.path === lookupCwd) ?? null;
   });
 
   useEffect(() => {
@@ -266,9 +326,10 @@ export function NewSessionDialog() {
   );
 
   const wasOpenRef = useRef(false);
+  const isOpen = openProjectCwd !== null || editEntry !== null;
 
   useEffect(() => {
-    if (!openProjectCwd) {
+    if (!isOpen) {
       wasOpenRef.current = false;
       return;
     }
@@ -277,25 +338,61 @@ export function NewSessionDialog() {
     }
     wasOpenRef.current = true;
 
+    setSelectedHandoff(null);
+    const resolvedClaude = resolveClaudeSessionOptions(
+      storedLastSessionOptions.claude,
+    );
+    const resolvedCodex = resolveCodexSessionOptions(
+      storedLastSessionOptions.codex,
+    );
+    const resolvedCursor = resolveCursorSessionOptions(
+      storedLastSessionOptions.cursor,
+    );
+
+    if (editEntry) {
+      const config = editEntry.config;
+      setSessionType(config.type);
+      setInitialPrompt(config.initialPrompt ?? "");
+      setSessionName(config.sessionName ?? editEntry.name ?? "");
+      setScheduleDraft(scheduleSpecToDraft(editEntry.schedule));
+      setClaudeOptions(
+        config.type === "claude"
+          ? claudeConfigToOptions(config)
+          : resolvedClaude,
+      );
+      setCodexOptions(
+        config.type === "codex"
+          ? codexConfigToOptions(config, resolvedCodex)
+          : resolvedCodex,
+      );
+      setCursorOptions(
+        config.type === "cursorAgent"
+          ? cursorConfigToOptions(config, resolvedCursor)
+          : resolvedCursor,
+      );
+      return;
+    }
+
     setSessionType(storedLastSessionOptions.lastSessionType ?? "claude");
     setInitialPrompt("");
     setSessionName("");
-    setSelectedHandoff(null);
     setScheduleDraft(null);
-    setClaudeOptions(
-      resolveClaudeSessionOptions(storedLastSessionOptions.claude),
-    );
-    setCodexOptions(resolveCodexSessionOptions(storedLastSessionOptions.codex));
-    setCursorOptions(
-      resolveCursorSessionOptions(storedLastSessionOptions.cursor),
-    );
-  }, [openProjectCwd, storedLastSessionOptions]);
+    setClaudeOptions(resolvedClaude);
+    setCodexOptions(resolvedCodex);
+    setCursorOptions(resolvedCursor);
+  }, [isOpen, editEntry, storedLastSessionOptions]);
 
   const persistLastSessionOptions = useMutation(
     orpc.appSettings.setLastSessionOptions.mutationOptions(),
   );
 
   const persistAndClose = useCallback(() => {
+    if (editScheduledSessionId) {
+      // Edited values describe one schedule, not the user's preferred
+      // defaults for new sessions — close without persisting them.
+      openScheduledSessionEditor(null);
+      return;
+    }
     persistLastSessionOptions.mutate(
       buildLastSessionOptions({
         sessionType,
@@ -309,6 +406,8 @@ export function NewSessionDialog() {
     claudeOptions,
     codexOptions,
     cursorOptions,
+    editScheduledSessionId,
+    openScheduledSessionEditor,
     persistLastSessionOptions,
     sessionType,
     setOpenProjectCwd,
@@ -331,12 +430,13 @@ export function NewSessionDialog() {
     { enabled: Boolean(openProjectCwd), ignoreInputs: false },
   );
 
-  if (!openProjectCwd) {
+  if (!isOpen) {
     return null;
   }
 
-  const projectPath = project?.path ?? openProjectCwd;
+  const projectPath = project?.path ?? lookupCwd ?? "";
   const projectName = project ? getProjectDisplayName(project) : projectPath;
+  const isEditing = editEntry !== null;
 
   return (
     <Dialog
@@ -349,18 +449,30 @@ export function NewSessionDialog() {
     >
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="hidden">Start new session</DialogTitle>
+          <DialogTitle className="hidden">
+            {isEditing ? "Edit scheduled session" : "Start new session"}
+          </DialogTitle>
           <div className="flex items-start justify-between gap-2">
             <DialogDescription>
+              {isEditing ? (
+                <>
+                  <span className="text-foreground">
+                    Edit scheduled session
+                  </span>
+                  <br />
+                </>
+              ) : null}
               Project: <span className="text-foreground">{projectName}</span>
               <br />
               <span className="text-xs text-muted-foreground">
                 {projectPath}
               </span>
             </DialogDescription>
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-              <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
-            </span>
+            {!isEditing && (
+              <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
+              </span>
+            )}
           </div>
         </DialogHeader>
 
@@ -368,6 +480,7 @@ export function NewSessionDialog() {
           type="single"
           variant="outline"
           value={sessionType}
+          disabled={isEditing}
           onValueChange={(value) => {
             if (value) {
               setSessionType(value as LastSessionType);
@@ -408,6 +521,7 @@ export function NewSessionDialog() {
             options={claudeOptions}
             setOptions={setClaudeOptions}
             onClose={persistAndClose}
+            editScheduledSessionId={editEntry?.id ?? null}
           />
         ) : sessionType === "codex" ? (
           <CodexSessionForm
@@ -423,6 +537,7 @@ export function NewSessionDialog() {
             options={codexOptions}
             setOptions={setCodexOptions}
             onClose={persistAndClose}
+            editScheduledSessionId={editEntry?.id ?? null}
           />
         ) : (
           <CursorAgentSessionForm
@@ -438,6 +553,7 @@ export function NewSessionDialog() {
             options={cursorOptions}
             setOptions={setCursorOptions}
             onClose={persistAndClose}
+            editScheduledSessionId={editEntry?.id ?? null}
           />
         )}
       </DialogContent>
@@ -458,6 +574,7 @@ interface SessionFormProps<TOptions> {
   options: TOptions;
   setOptions: (value: TOptions | ((current: TOptions) => TOptions)) => void;
   onClose: () => void;
+  editScheduledSessionId: string | null;
 }
 
 function LocalClaudeSessionForm({
@@ -473,6 +590,7 @@ function LocalClaudeSessionForm({
   options,
   setOptions,
   onClose,
+  editScheduledSessionId,
 }: SessionFormProps<LastClaudeSessionOptions>) {
   const onHandoffChange = useHandoffSelection({
     initialPrompt,
@@ -511,22 +629,34 @@ function LocalClaudeSessionForm({
     }),
   );
 
+  const updateScheduledSession = useMutation(
+    orpc.scheduledSessions.update.mutationOptions({
+      onSuccess: () => {
+        toast.success("Schedule updated");
+        onClose();
+      },
+      onError: handleError,
+    }),
+  );
+
+  const buildSessionConfig = () => ({
+    cwd: projectPath,
+    initialPrompt: initialPrompt || undefined,
+    sessionName: sessionName || undefined,
+    model: options.model,
+    effort: options.effort,
+    haikuModelOverride: options.haikuModelOverride,
+    subagentModelOverride: options.subagentModelOverride,
+    systemPrompt: options.systemPrompt || undefined,
+    remoteControl: options.remoteControl || undefined,
+    mcpEnabled: options.mcpEnabled,
+    permissionMode: options.permissionMode,
+  });
+
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
-        const sessionConfig = {
-          cwd: projectPath,
-          initialPrompt: initialPrompt || undefined,
-          sessionName: sessionName || undefined,
-          model: options.model,
-          effort: options.effort,
-          haikuModelOverride: options.haikuModelOverride,
-          subagentModelOverride: options.subagentModelOverride,
-          systemPrompt: options.systemPrompt || undefined,
-          remoteControl: options.remoteControl || undefined,
-          mcpEnabled: options.mcpEnabled,
-          permissionMode: options.permissionMode,
-        };
+        const sessionConfig = buildSessionConfig();
 
         if (scheduleDraft) {
           const result = buildScheduleSpec(scheduleDraft);
@@ -552,7 +682,8 @@ function LocalClaudeSessionForm({
   const isPending =
     ensureProject.isPending ||
     startSession.isPending ||
-    scheduleSession.isPending;
+    scheduleSession.isPending ||
+    updateScheduledSession.isPending;
 
   const handleSubmit = () => {
     setErrorMessage(null);
@@ -560,6 +691,25 @@ function LocalClaudeSessionForm({
     const normalizedPath = projectPath.trim();
     if (!normalizedPath) {
       setErrorMessage("Project path is required.");
+      return;
+    }
+
+    if (editScheduledSessionId) {
+      if (!scheduleDraft) {
+        setErrorMessage("Schedule is required.");
+        return;
+      }
+      const result = buildScheduleSpec(scheduleDraft);
+      if ("error" in result) {
+        setErrorMessage(result.error);
+        return;
+      }
+      updateScheduledSession.mutate({
+        id: editScheduledSessionId,
+        name: sessionName || undefined,
+        schedule: result.schedule,
+        config: { type: "claude", ...buildSessionConfig() },
+      });
       return;
     }
 
@@ -608,14 +758,16 @@ function LocalClaudeSessionForm({
         }}
       />
 
-      <div className="space-y-2">
-        <Label>Continue from handoff (optional)</Label>
-        <HandoffPicker
-          value={selectedHandoff}
-          onChange={onHandoffChange}
-          disabled={isPending}
-        />
-      </div>
+      {!editScheduledSessionId && (
+        <div className="space-y-2">
+          <Label>Continue from handoff (optional)</Label>
+          <HandoffPicker
+            value={selectedHandoff}
+            onChange={onHandoffChange}
+            disabled={isPending}
+          />
+        </div>
+      )}
 
       <div className="flex items-end gap-3">
         <div className="min-w-0 flex-1 space-y-2">
@@ -821,6 +973,7 @@ function LocalClaudeSessionForm({
         onClose={onClose}
         scheduleDraft={scheduleDraft}
         setScheduleDraft={setScheduleDraft}
+        mode={editScheduledSessionId ? "edit" : "create"}
       />
     </form>
   );
@@ -839,6 +992,7 @@ function CodexSessionForm({
   options,
   setOptions,
   onClose,
+  editScheduledSessionId,
 }: SessionFormProps<LastCodexSessionOptions>) {
   const onHandoffChange = useHandoffSelection({
     initialPrompt,
@@ -934,20 +1088,32 @@ function CodexSessionForm({
     }),
   );
 
+  const updateScheduledSession = useMutation(
+    orpc.scheduledSessions.update.mutationOptions({
+      onSuccess: () => {
+        toast.success("Schedule updated");
+        onClose();
+      },
+      onError: handleError,
+    }),
+  );
+
+  const buildSessionConfig = () => ({
+    cwd: projectPath,
+    sessionName: sessionName || undefined,
+    model: options.model || undefined,
+    modelReasoningEffort: options.modelReasoningEffort,
+    fastMode: options.fastMode,
+    permissionMode: options.permissionMode,
+    initialPrompt: initialPrompt || undefined,
+    configOverrides: options.configOverrides || undefined,
+    mcpEnabled: options.mcpEnabled,
+  });
+
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
-        const sessionConfig = {
-          cwd: projectPath,
-          sessionName: sessionName || undefined,
-          model: options.model || undefined,
-          modelReasoningEffort: options.modelReasoningEffort,
-          fastMode: options.fastMode,
-          permissionMode: options.permissionMode,
-          initialPrompt: initialPrompt || undefined,
-          configOverrides: options.configOverrides || undefined,
-          mcpEnabled: options.mcpEnabled,
-        };
+        const sessionConfig = buildSessionConfig();
 
         if (scheduleDraft) {
           const result = buildScheduleSpec(scheduleDraft);
@@ -973,7 +1139,8 @@ function CodexSessionForm({
   const isPending =
     ensureProject.isPending ||
     startSession.isPending ||
-    scheduleSession.isPending;
+    scheduleSession.isPending ||
+    updateScheduledSession.isPending;
 
   const handleSubmit = () => {
     setErrorMessage(null);
@@ -981,6 +1148,25 @@ function CodexSessionForm({
     const normalizedPath = projectPath.trim();
     if (!normalizedPath) {
       setErrorMessage("Project path is required.");
+      return;
+    }
+
+    if (editScheduledSessionId) {
+      if (!scheduleDraft) {
+        setErrorMessage("Schedule is required.");
+        return;
+      }
+      const result = buildScheduleSpec(scheduleDraft);
+      if ("error" in result) {
+        setErrorMessage(result.error);
+        return;
+      }
+      updateScheduledSession.mutate({
+        id: editScheduledSessionId,
+        name: sessionName || undefined,
+        schedule: result.schedule,
+        config: { type: "codex", ...buildSessionConfig() },
+      });
       return;
     }
 
@@ -1029,14 +1215,16 @@ function CodexSessionForm({
         }}
       />
 
-      <div className="space-y-2">
-        <Label>Continue from handoff (optional)</Label>
-        <HandoffPicker
-          value={selectedHandoff}
-          onChange={onHandoffChange}
-          disabled={isPending}
-        />
-      </div>
+      {!editScheduledSessionId && (
+        <div className="space-y-2">
+          <Label>Continue from handoff (optional)</Label>
+          <HandoffPicker
+            value={selectedHandoff}
+            onChange={onHandoffChange}
+            disabled={isPending}
+          />
+        </div>
+      )}
 
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-2">
@@ -1195,6 +1383,7 @@ function CodexSessionForm({
         onClose={onClose}
         scheduleDraft={scheduleDraft}
         setScheduleDraft={setScheduleDraft}
+        mode={editScheduledSessionId ? "edit" : "create"}
       />
     </form>
   );
@@ -1213,6 +1402,7 @@ function CursorAgentSessionForm({
   options,
   setOptions,
   onClose,
+  editScheduledSessionId,
 }: SessionFormProps<LastCursorSessionOptions>) {
   const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -1267,17 +1457,29 @@ function CursorAgentSessionForm({
     }),
   );
 
+  const updateScheduledSession = useMutation(
+    orpc.scheduledSessions.update.mutationOptions({
+      onSuccess: () => {
+        toast.success("Schedule updated");
+        onClose();
+      },
+      onError: handleError,
+    }),
+  );
+
+  const buildSessionConfig = () => ({
+    cwd: projectPath,
+    sessionName: sessionName || undefined,
+    model: options.model || undefined,
+    mode: options.mode,
+    permissionMode: options.permissionMode,
+    initialPrompt: initialPrompt || undefined,
+  });
+
   const ensureProject = useMutation(
     orpc.projects.addProject.mutationOptions({
       onSuccess: () => {
-        const sessionConfig = {
-          cwd: projectPath,
-          sessionName: sessionName || undefined,
-          model: options.model || undefined,
-          mode: options.mode,
-          permissionMode: options.permissionMode,
-          initialPrompt: initialPrompt || undefined,
-        };
+        const sessionConfig = buildSessionConfig();
 
         if (scheduleDraft) {
           const result = buildScheduleSpec(scheduleDraft);
@@ -1303,7 +1505,8 @@ function CursorAgentSessionForm({
   const isPending =
     ensureProject.isPending ||
     startSession.isPending ||
-    scheduleSession.isPending;
+    scheduleSession.isPending ||
+    updateScheduledSession.isPending;
 
   const handleSubmit = () => {
     setErrorMessage(null);
@@ -1311,6 +1514,25 @@ function CursorAgentSessionForm({
     const normalizedPath = projectPath.trim();
     if (!normalizedPath) {
       setErrorMessage("Project path is required.");
+      return;
+    }
+
+    if (editScheduledSessionId) {
+      if (!scheduleDraft) {
+        setErrorMessage("Schedule is required.");
+        return;
+      }
+      const result = buildScheduleSpec(scheduleDraft);
+      if ("error" in result) {
+        setErrorMessage(result.error);
+        return;
+      }
+      updateScheduledSession.mutate({
+        id: editScheduledSessionId,
+        name: sessionName || undefined,
+        schedule: result.schedule,
+        config: { type: "cursorAgent", ...buildSessionConfig() },
+      });
       return;
     }
 
@@ -1384,14 +1606,16 @@ function CursorAgentSessionForm({
         </ToggleGroup>
       </div>
 
-      <div className="space-y-2">
-        <Label>Continue from handoff (optional)</Label>
-        <HandoffPicker
-          value={selectedHandoff}
-          onChange={onHandoffChange}
-          disabled={isPending}
-        />
-      </div>
+      {!editScheduledSessionId && (
+        <div className="space-y-2">
+          <Label>Continue from handoff (optional)</Label>
+          <HandoffPicker
+            value={selectedHandoff}
+            onChange={onHandoffChange}
+            disabled={isPending}
+          />
+        </div>
+      )}
 
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1 space-y-2">
@@ -1482,6 +1706,7 @@ function CursorAgentSessionForm({
         onClose={onClose}
         scheduleDraft={scheduleDraft}
         setScheduleDraft={setScheduleDraft}
+        mode={editScheduledSessionId ? "edit" : "create"}
       />
     </form>
   );

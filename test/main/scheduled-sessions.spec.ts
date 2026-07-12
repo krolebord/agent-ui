@@ -89,6 +89,96 @@ describe("ScheduledSessionsService", () => {
     });
   });
 
+  describe("update", () => {
+    it("updates name, schedule, and config, recomputing the next run", () => {
+      const { service, state } = createService();
+      const entry = service.create({
+        name: "Nightly",
+        schedule: { kind: "recurring", cron: "0 3 * * *" },
+        config: claudeConfig,
+      });
+
+      service.update({
+        id: entry.id,
+        name: "Hourly",
+        schedule: { kind: "recurring", cron: "0 * * * *" },
+        config: { ...claudeConfig, initialPrompt: "do the other thing" },
+      });
+
+      const stored = state.state[entry.id];
+      expect(stored?.name).toBe("Hourly");
+      expect(stored?.schedule).toEqual({
+        kind: "recurring",
+        cron: "0 * * * *",
+      });
+      expect(
+        stored?.config.type === "claude" && stored.config.initialPrompt,
+      ).toBe("do the other thing");
+      expect(stored?.nextRunAt).toBe(BASE_TIME.getTime() + 60 * 60_000);
+
+      service.dispose();
+    });
+
+    it("re-enables a completed one-time schedule", async () => {
+      const { service, state, runSession } = createService();
+      const entry = service.create({
+        schedule: { kind: "once", at: BASE_TIME.getTime() + 1_000 },
+        config: claudeConfig,
+      });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(state.state[entry.id]?.enabled).toBe(false);
+
+      service.update({
+        id: entry.id,
+        schedule: { kind: "once", at: Date.now() + 60_000 },
+        config: claudeConfig,
+      });
+
+      expect(state.state[entry.id]?.enabled).toBe(true);
+      await vi.advanceTimersByTimeAsync(61_000);
+      expect(runSession).toHaveBeenCalledTimes(2);
+
+      service.dispose();
+    });
+
+    it("rejects invalid schedules", () => {
+      const { service } = createService();
+      const entry = service.create({
+        schedule: { kind: "once", at: BASE_TIME.getTime() + 60_000 },
+        config: claudeConfig,
+      });
+
+      expect(() =>
+        service.update({
+          id: entry.id,
+          schedule: { kind: "once", at: BASE_TIME.getTime() - 1 },
+          config: claudeConfig,
+        }),
+      ).toThrow(/future/);
+      expect(() =>
+        service.update({
+          id: entry.id,
+          schedule: { kind: "recurring", cron: "not a cron" },
+          config: claudeConfig,
+        }),
+      ).toThrow(/Invalid cron expression/);
+
+      service.dispose();
+    });
+
+    it("throws for unknown entries", () => {
+      const { service } = createService();
+      expect(() =>
+        service.update({
+          id: "missing",
+          schedule: { kind: "once", at: BASE_TIME.getTime() + 60_000 },
+          config: claudeConfig,
+        }),
+      ).toThrow(/not found/);
+    });
+  });
+
   it("runs a one-time schedule at its time and disables it", async () => {
     const { service, state, runSession } = createService();
     service.create({

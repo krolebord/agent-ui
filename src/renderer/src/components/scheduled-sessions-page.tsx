@@ -1,6 +1,7 @@
 import type { ScheduledSession } from "@main/scheduled-sessions/state";
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
 import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigger";
+import { useNewSessionDialogStore } from "@renderer/components/new-session-dialog";
 import {
   describeSchedule,
   formatRunTime,
@@ -21,6 +22,7 @@ import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
 import {
   CalendarClock,
+  Pencil,
   Play,
   SquareArrowOutUpRight,
   Trash2,
@@ -251,6 +253,21 @@ function ScheduledSessionRow({
           }}
         >
           <Play className="size-3.5" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="size-8 px-0"
+          aria-label={`Edit ${entryDisplayName(entry)}`}
+          title="Edit"
+          onClick={() => {
+            useNewSessionDialogStore
+              .getState()
+              .openScheduledSessionEditor(entry.id);
+          }}
+        >
+          <Pencil className="size-3.5" />
         </Button>
         <Switch
           aria-label={`Enable ${entryDisplayName(entry)}`}
