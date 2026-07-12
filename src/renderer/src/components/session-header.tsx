@@ -1,5 +1,5 @@
 import type { Session } from "@main/sessions/state";
-import { useTerminalFileUpload } from "@renderer/hooks/use-terminal-file-upload";
+import { useTerminalAttachFiles } from "@renderer/hooks/use-terminal-attach-files";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -116,25 +116,7 @@ const useSessionHeaderOpenAppStore = create(
 // Desktop counterpart to the mobile key bar's attach button: uploads picked
 // files to the host and pastes the resulting paths into the terminal.
 function AttachFileButton({ terminalId }: { terminalId: string }) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadFile = useTerminalFileUpload(terminalId);
-
-  const handleFilesSelected = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) {
-      return;
-    }
-
-    const paths = (
-      await Promise.all(Array.from(fileList).map((file) => uploadFile(file)))
-    ).filter((path): path is string => path != null);
-
-    if (paths.length > 0) {
-      await orpc.terminals.writeToTerminal.call({
-        terminalId,
-        data: `${paths.join(" ")} `,
-      });
-    }
-  };
+  const { openFilePicker, fileInput } = useTerminalAttachFiles(terminalId);
 
   return (
     <>
@@ -145,21 +127,11 @@ function AttachFileButton({ terminalId }: { terminalId: string }) {
         className="size-8 shrink-0 px-0 max-md:hidden"
         aria-label="Attach file"
         title="Attach file"
-        onClick={() => fileInputRef.current?.click()}
+        onClick={openFilePicker}
       >
         <Paperclip className="size-3.5 text-muted-foreground" />
       </Button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(event) => {
-          void handleFilesSelected(event.target.files);
-          // Reset so selecting the same file again re-triggers change.
-          event.target.value = "";
-        }}
-      />
+      {fileInput}
     </>
   );
 }

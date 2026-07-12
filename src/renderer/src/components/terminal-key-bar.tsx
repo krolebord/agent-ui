@@ -1,6 +1,6 @@
 import { Button } from "@renderer/components/ui/button";
 import { Textarea } from "@renderer/components/ui/textarea";
-import { useTerminalFileUpload } from "@renderer/hooks/use-terminal-file-upload";
+import { useTerminalAttachFiles } from "@renderer/hooks/use-terminal-attach-files";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
 import { MessageSquareText, Paperclip, SendHorizontal, X } from "lucide-react";
@@ -40,8 +40,7 @@ export function TerminalKeyBar({
 }) {
   const [inputOpen, setInputOpen] = useState(false);
   const [inputText, setInputText] = useState("");
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadFile = useTerminalFileUpload(terminalId);
+  const { openFilePicker, fileInput } = useTerminalAttachFiles(terminalId);
   // Tracks the pointer-down position and pending action so we can tell taps
   // apart from scrolls of the key bar.
   const pending = useRef<{
@@ -89,22 +88,6 @@ export function TerminalKeyBar({
 
   const handlePointerCancel = () => {
     pending.current = null;
-  };
-
-  // Uploads each picked file and pastes the resulting host paths into the
-  // terminal (space-separated), the same tokens a drag-drop would produce.
-  const handleFilesSelected = async (fileList: FileList | null) => {
-    if (!fileList || fileList.length === 0) {
-      return;
-    }
-
-    const paths = (
-      await Promise.all(Array.from(fileList).map((file) => uploadFile(file)))
-    ).filter((path): path is string => path != null);
-
-    if (paths.length > 0) {
-      send(`${paths.join(" ")} `);
-    }
   };
 
   const submitInput = () => {
@@ -166,7 +149,7 @@ export function TerminalKeyBar({
             className="min-w-10 shrink-0 px-2"
             aria-label="Attach file"
             title="Attach file"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={openFilePicker}
           >
             <Paperclip className="size-4" />
           </Button>
@@ -182,17 +165,7 @@ export function TerminalKeyBar({
           </Button>
         </form>
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(event) => {
-            void handleFilesSelected(event.target.files);
-            // Reset so selecting the same file again re-triggers change.
-            event.target.value = "";
-          }}
-        />
+        {fileInput}
       </>
     );
   }
@@ -225,7 +198,7 @@ export function TerminalKeyBar({
           aria-label="Attach file"
           title="Attach file"
           onPointerDown={(event) => {
-            handlePointerDown(event, () => fileInputRef.current?.click());
+            handlePointerDown(event, openFilePicker);
           }}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
@@ -251,17 +224,7 @@ export function TerminalKeyBar({
         ))}
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(event) => {
-          void handleFilesSelected(event.target.files);
-          // Reset so selecting the same file again re-triggers change.
-          event.target.value = "";
-        }}
-      />
+      {fileInput}
     </>
   );
 }
