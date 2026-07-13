@@ -3,7 +3,18 @@ import { Textarea } from "@renderer/components/ui/textarea";
 import { useTerminalAttachFiles } from "@renderer/hooks/use-terminal-attach-files";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { orpc } from "@renderer/orpc-client";
-import { MessageSquareText, Paperclip, SendHorizontal, X } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  CornerDownLeft,
+  type LucideIcon,
+  MessageSquareText,
+  Paperclip,
+  SendHorizontal,
+  X,
+} from "lucide-react";
 import type React from "react";
 import { useRef, useState } from "react";
 
@@ -14,18 +25,29 @@ import { useRef, useState } from "react";
 const shiftEnterData = (sessionType: string | undefined): string =>
   sessionType === "codex-local-terminal" ? "\x1b[13;2u" : "\\";
 
-const terminalKeys = (sessionType: string | undefined) =>
-  [
-    { label: "Esc", data: "\x1b" },
-    { label: "Tab", data: "\t" },
-    { label: "Shift-Tab", data: "\x1b[Z" },
-    { label: "Shift-Enter", data: shiftEnterData(sessionType) },
-    { label: "Up", data: "\x1b[A" },
-    { label: "Down", data: "\x1b[B" },
-    { label: "Left", data: "\x1b[D" },
-    { label: "Right", data: "\x1b[C" },
-    { label: "Ctrl-C", data: "\x03" },
-  ] as const;
+type TerminalKey = {
+  label: string;
+  data: string;
+  // When present, the key renders as an icon button; `label` is used as the
+  // accessible name instead of visible text.
+  icon?: LucideIcon;
+};
+
+const terminalKeys = (sessionType: string | undefined): TerminalKey[] => [
+  { label: "Esc", data: "\x1b" },
+  { label: "Ctrl-C", data: "\x03" },
+  { label: "Tab", data: "\t" },
+  {
+    label: "New line",
+    data: shiftEnterData(sessionType),
+    icon: CornerDownLeft,
+  },
+  { label: "Shift-Tab", data: "\x1b[Z" },
+  { label: "Up", data: "\x1b[A", icon: ArrowUp },
+  { label: "Down", data: "\x1b[B", icon: ArrowDown },
+  { label: "Left", data: "\x1b[D", icon: ArrowLeft },
+  { label: "Right", data: "\x1b[C", icon: ArrowRight },
+];
 
 // Max distance (px) a pointer may travel between down and up before the
 // gesture is treated as a scroll rather than a tap.
@@ -205,7 +227,7 @@ export function TerminalKeyBar({
         >
           <Paperclip className="size-4" />
         </Button>
-        {terminalKeys(sessionType).map(({ label, data }) => (
+        {terminalKeys(sessionType).map(({ label, data, icon: Icon }) => (
           <Button
             key={label}
             type="button"
@@ -213,13 +235,15 @@ export function TerminalKeyBar({
             size="sm"
             tabIndex={-1}
             className="min-w-10 shrink-0 touch-pan-x font-mono text-xs"
+            aria-label={Icon ? label : undefined}
+            title={Icon ? label : undefined}
             onPointerDown={(event) => {
               handlePointerDown(event, () => send(data));
             }}
             onPointerUp={handlePointerUp}
             onPointerCancel={handlePointerCancel}
           >
-            {label}
+            {Icon ? <Icon className="size-4" /> : label}
           </Button>
         ))}
       </div>
