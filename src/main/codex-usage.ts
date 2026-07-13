@@ -99,7 +99,48 @@ function selectRateLimitsSnapshot(
     return null;
   }
 
-  return byLimitId.codex ?? Object.values(byLimitId)[0] ?? null;
+  const base = byLimitId.codex ?? Object.values(byLimitId)[0];
+  if (!base) {
+    return null;
+  }
+
+  // Newer app-server versions split the 5-hour and weekly limits into
+  // separate buckets, each carrying only a `primary` window. Merge windows
+  // from every bucket so the weekly limit isn't dropped.
+  if (base.secondary) {
+    return base;
+  }
+
+  const buckets = Object.values(byLimitId);
+  const allWindows = buckets.flatMap((bucket) =>
+    [bucket.primary, bucket.secondary].filter(
+      (window): window is z.infer<typeof usageWindowSchema> => window != null,
+    ),
+  );
+
+  const primaryDurationMins = base.primary?.windowDurationMins ?? 0;
+  const secondary = allWindows
+    .filter((window) => window.windowDurationMins > primaryDurationMins)
+    .reduce<z.infer<typeof usageWindowSchema> | null>(
+      (longest, window) =>
+        !longest || window.windowDurationMins > longest.windowDurationMins
+          ? window
+          : longest,
+      null,
+    );
+
+  return {
+    ...base,
+    secondary,
+    planType:
+      base.planType ??
+      buckets.find((bucket) => bucket.planType != null)?.planType ??
+      null,
+    credits:
+      base.credits ??
+      buckets.find((bucket) => bucket.credits != null)?.credits ??
+      null,
+  };
 }
 
 async function readRateLimitsFromAppServer(): Promise<unknown> {

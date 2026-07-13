@@ -158,6 +158,61 @@ describe("getCodexUsage", () => {
     });
   });
 
+  it("merges the weekly window from a separate bucket when limits are split", async () => {
+    readAccountRateLimitsMock.mockResolvedValue({
+      rateLimits: null,
+      rateLimitsByLimitId: {
+        codex: {
+          limitId: "codex",
+          primary: {
+            usedPercent: 12,
+            windowDurationMins: 300,
+            resetsAt: 1_783_705_404,
+          },
+          secondary: null,
+          planType: "plus",
+        },
+        codex_weekly: {
+          limitId: "codex_weekly",
+          primary: {
+            usedPercent: 43,
+            windowDurationMins: 10_080,
+            resetsAt: 1_784_272_276,
+          },
+          secondary: null,
+          credits: {
+            hasCredits: true,
+            unlimited: false,
+            balance: "2.50",
+          },
+        },
+      },
+    });
+
+    const result = await getCodexUsage();
+
+    expect(result).toMatchObject({
+      ok: true,
+      usage: {
+        planType: "plus",
+        primaryWindow: {
+          utilization: 12,
+          windowSeconds: 18_000,
+        },
+        secondaryWindow: {
+          utilization: 43,
+          windowSeconds: 604_800,
+          resetsAt: "2026-07-17T07:11:16.000Z",
+        },
+        credits: {
+          hasCredits: true,
+          unlimited: false,
+          balance: 2.5,
+        },
+      },
+    });
+  });
+
   it("reports unsupported login methods when no rate-limit snapshot exists", async () => {
     readAccountRateLimitsMock.mockResolvedValue({
       rateLimits: null,
