@@ -1,3 +1,7 @@
+import {
+  countAttentionSessions,
+  sessionNeedsAttention,
+} from "@shared/session-attention";
 import { app, BrowserWindow, powerSaveBlocker } from "electron";
 import type { AppSettingsState } from "./app-settings";
 import log from "./logger";
@@ -5,11 +9,6 @@ import type { SessionStatus } from "./sessions/common";
 import type { SessionServiceState } from "./sessions/state";
 
 const BLOCKER_TYPE = "prevent-display-sleep";
-
-const ATTENTION_STATUSES = new Set<SessionStatus>([
-  "awaiting_user_response",
-  "awaiting_approval",
-]);
 
 const DOCK_BOUNCE_DELAY_MS = 2000;
 
@@ -112,9 +111,9 @@ export class DesktopIntegrationManager {
 
     try {
       if (this.appSettingsState.state.dockBadgeForAttention) {
-        const n = [...current.values()].filter((s) =>
-          ATTENTION_STATUSES.has(s),
-        ).length;
+        const n = countAttentionSessions(
+          Object.values(this.sessionsState.state),
+        );
         app.setBadgeCount(n);
       } else {
         app.setBadgeCount(0);
@@ -129,8 +128,8 @@ export class DesktopIntegrationManager {
       for (const [sessionId, newStatus] of current) {
         const oldStatus = this.sessionStatusSnapshot.get(sessionId);
         const wasAttention =
-          oldStatus !== undefined && ATTENTION_STATUSES.has(oldStatus);
-        const isAttention = ATTENTION_STATUSES.has(newStatus);
+          oldStatus !== undefined && sessionNeedsAttention(oldStatus);
+        const isAttention = sessionNeedsAttention(newStatus);
         if (!wasAttention && isAttention) {
           this.scheduleDeferredDockBounce(sessionId, newStatus);
           break;

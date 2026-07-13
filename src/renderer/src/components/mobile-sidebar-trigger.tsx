@@ -1,21 +1,14 @@
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { cn } from "@renderer/lib/utils";
+import { countAttentionSessions } from "@shared/session-attention";
 import { Menu } from "lucide-react";
 import { useAppState } from "./sync-state-provider";
 import { Button } from "./ui/button";
 
-const ATTENTION_STATUSES = new Set([
-  "awaiting_user_response",
-  "awaiting_approval",
-]);
-
 export function MobileSidebarTrigger({ className }: { className?: string }) {
   const openSidebar = useMobileNavStore((state) => state.openSidebar);
-  const attentionCount = useAppState(
-    (state) =>
-      Object.values(state.sessions).filter((session) =>
-        ATTENTION_STATUSES.has(session.status),
-      ).length,
+  const attentionCount = useAppState((state) =>
+    countAttentionSessions(Object.values(state.sessions)),
   );
 
   return (

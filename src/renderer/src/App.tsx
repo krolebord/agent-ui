@@ -24,6 +24,7 @@ import {
 import { Toaster } from "@renderer/components/ui/sonner";
 import { WorktreeDeleteDialog } from "@renderer/components/worktree-delete-dialog";
 import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
+import { useAttentionFavicon } from "@renderer/hooks/use-attention-favicon";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { useEffect } from "react";
@@ -88,6 +89,7 @@ function MobileAppShell() {
 }
 
 function App() {
+  useAttentionFavicon();
   useAppShortcuts();
   useValidateActiveSession();
   const isMobile = useIsMobile();
