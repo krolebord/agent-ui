@@ -455,7 +455,7 @@ function SkillEditor({
 
       <div className="space-y-2">
         <Label htmlFor="skill-description">Description</Label>
-        <Input
+        <Textarea
           id="skill-description"
           value={description}
           onChange={(event) => {
@@ -463,6 +463,7 @@ function SkillEditor({
             setError(null);
           }}
           placeholder="What it does and when agents should use it"
+          rows={3}
           disabled={isSaving}
         />
       </div>
