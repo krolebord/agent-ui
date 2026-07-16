@@ -15,12 +15,14 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@renderer/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@renderer/components/ui/dropdown-menu";
 import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
@@ -57,6 +59,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 import { create, createStore, type ExtractState } from "zustand";
 import { combine } from "zustand/middleware";
 import { useStore } from "zustand/react";
@@ -503,6 +506,18 @@ function fileTypeIcon(file: FileDiffMetadata) {
   return FileText;
 }
 
+function getFileBasename(filePath: string) {
+  const segments = filePath.split(/[\\/]/);
+  return segments[segments.length - 1] || filePath;
+}
+
+function joinProjectFilePath(projectPath: string, relativePath: string) {
+  const separator = projectPath.includes("\\") ? "\\" : "/";
+  const normalizedProject = projectPath.replace(/[\\/]+$/, "");
+  const normalizedRelative = relativePath.replace(/[\\/]+/g, separator);
+  return `${normalizedProject}${separator}${normalizedRelative}`;
+}
+
 function gitPathsForConfirmedFiles(
   files: FileDiffMetadata[],
   confirmedFiles: string[],
@@ -679,6 +694,7 @@ function FileListItem({
   showMobileMenu?: boolean;
   onOpenFile?: () => void;
 }) {
+  const projectPath = useProjectDiffStore((s) => s.projectPath);
   const selectFile = useProjectDiffStore((s) => s.selectFile);
   const toggleFileConfirmation = useProjectDiffStore(
     (s) => s.toggleFileConfirmation,
@@ -702,12 +718,23 @@ function FileListItem({
     [file.hunks],
   );
 
+  const fileBasename = getFileBasename(file.name);
+  const fileAbsolutePath = joinProjectFilePath(projectPath, file.name);
   const label = file.prevName
-    ? `${file.prevName.split("/").pop()} → ${file.name.split("/").pop()}`
-    : file.name.split("/").pop();
+    ? `${getFileBasename(file.prevName)} → ${fileBasename}`
+    : fileBasename;
   const dir = file.name.includes("/")
     ? file.name.slice(0, file.name.lastIndexOf("/"))
     : null;
+
+  const copyFileName = () => {
+    void navigator.clipboard.writeText(fileBasename);
+    toast.success("File name copied");
+  };
+  const copyFilePath = () => {
+    void navigator.clipboard.writeText(fileAbsolutePath);
+    toast.success("File path copied");
+  };
 
   const handleRowActivate = () => {
     selectFile(file.name);
@@ -802,6 +829,15 @@ function FileListItem({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={copyFileName}>
+                  <Copy className="size-3.5" />
+                  Copy name
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={copyFilePath}>
+                  <Copy className="size-3.5" />
+                  Copy path
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <FileDiscardDropdownItems
                   requestDiscard={requestDiscard}
                   requestDiscardSelected={requestDiscardSelected}
@@ -814,6 +850,15 @@ function FileListItem({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuItem onSelect={copyFileName}>
+          <Copy className="size-3.5" />
+          Copy name
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={copyFilePath}>
+          <Copy className="size-3.5" />
+          Copy path
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         <FileDiscardMenuItems
           requestDiscard={requestDiscard}
           requestDiscardSelected={requestDiscardSelected}

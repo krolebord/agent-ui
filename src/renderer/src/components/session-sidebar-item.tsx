@@ -202,10 +202,19 @@ function useMoveSessionToProjectActions(session: Session): SessionMenuAction[] {
   ];
 }
 
+function getSessionInitialPrompt(session: Session): string | undefined {
+  if (!("initialPrompt" in session.startupConfig)) {
+    return undefined;
+  }
+  const prompt = session.startupConfig.initialPrompt?.trim();
+  return prompt || undefined;
+}
+
 function useCommonSessionMenuActions(session: Session): SessionMenuAction[] {
   const openRename = useRenameSessionDialogStore((x) => x.open);
   const openRawState = useRawSessionStateDialogStore((x) => x.open);
   const moveSessionToProjectActions = useMoveSessionToProjectActions(session);
+  const initialPrompt = getSessionInitialPrompt(session);
 
   return [
     ...moveSessionToProjectActions,
@@ -263,6 +272,20 @@ function useCommonSessionMenuActions(session: Session): SessionMenuAction[] {
         toast.success("Working directory copied");
       },
     },
+    ...(initialPrompt
+      ? ([
+          {
+            type: "item",
+            key: "copy-initial-prompt",
+            label: "Copy initial prompt",
+            icon: Copy,
+            onSelect: () => {
+              void navigator.clipboard.writeText(initialPrompt);
+              toast.success("Initial prompt copied");
+            },
+          },
+        ] satisfies SessionMenuAction[])
+      : []),
   ];
 }
 
