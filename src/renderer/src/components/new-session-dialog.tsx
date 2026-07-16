@@ -244,6 +244,7 @@ function claudeConfigToOptions(
     systemPrompt: config.systemPrompt,
     remoteControl: config.remoteControl,
     mcpEnabled: config.mcpEnabled,
+    accountId: config.accountId,
   };
 }
 
@@ -636,6 +637,13 @@ function LocalClaudeSessionForm({
     }),
   );
 
+  const claudeAccounts = useAppState((s) => s.claudeAccounts.accounts);
+  const selectedAccountId =
+    options.accountId &&
+    claudeAccounts.some((account) => account.id === options.accountId)
+      ? options.accountId
+      : undefined;
+
   const buildSessionConfig = () => ({
     cwd: projectPath,
     initialPrompt: initialPrompt || undefined,
@@ -648,6 +656,7 @@ function LocalClaudeSessionForm({
     remoteControl: options.remoteControl || undefined,
     mcpEnabled: options.mcpEnabled,
     permissionMode: options.permissionMode,
+    accountId: selectedAccountId,
   });
 
   const ensureProject = useMutation(
@@ -822,6 +831,33 @@ function LocalClaudeSessionForm({
           </Select>
         </div>
       </div>
+
+      {claudeAccounts.length > 0 && (
+        <div className="space-y-2">
+          <Label>Account</Label>
+          <Select
+            value={selectedAccountId ?? "default"}
+            onValueChange={(value) => {
+              setOptions((current) => ({
+                ...current,
+                accountId: value === "default" ? undefined : value,
+              }));
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">Default account</SelectItem>
+              {claudeAccounts.map((account) => (
+                <SelectItem key={account.id} value={account.id}>
+                  {account.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-2">
         <div className="space-y-0.5">

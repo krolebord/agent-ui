@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { appSettingsRouter } from "./app-settings";
+import { claudeAccountsRouter } from "./claude-accounts";
 import { fsRouter } from "./fs.router";
 import { moveStoppedSessionToProject } from "./move-stopped-session-to-project";
 import { procedure } from "./orpc";
@@ -59,6 +60,7 @@ const sessionsRouter = {
 
 export const orpcRouter = {
   appSettings: appSettingsRouter,
+  claudeAccounts: claudeAccountsRouter,
   projects: projectsRouter,
   projectTerminals: projectTerminalsRouter,
   terminals: terminalsRouter,

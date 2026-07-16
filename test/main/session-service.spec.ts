@@ -90,7 +90,9 @@ vi.mock("../../src/main/claude-activity-monitor", () => ({
   }),
 }));
 
-function createService() {
+function createService(options?: {
+  getAccountToken?: (accountId: string) => string | null;
+}) {
   const state: Record<string, ClaudeLocalTerminalSessionData> = {};
   const sessionsState = {
     state,
@@ -114,6 +116,7 @@ function createService() {
     titleGeneration: titleGeneration as unknown as TitleGenerationService,
     stateFileManager: stateFileManager as unknown as SessionStateFileManager,
     state: sessionsState,
+    getAccountToken: options?.getAccountToken,
   });
 
   return { service, state, titleGeneration, stateFileManager };
@@ -256,6 +259,46 @@ describe("SessionsServiceNew", () => {
       });
 
       expect(titleGeneration.requestFromPrompt).not.toHaveBeenCalled();
+    });
+
+    it("injects the account token for the selected account", async () => {
+      const getAccountToken = vi.fn().mockReturnValue("sk-ant-oat01-work");
+      const { service, state } = createService({ getAccountToken });
+
+      const sessionId = await service.startNewSession(
+        makeStartInput({ accountId: "account-1" }),
+      );
+
+      expect(getAccountToken).toHaveBeenCalledWith("account-1");
+      expect(terminalSessionSpies.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: expect.objectContaining({
+            CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-work",
+          }),
+        }),
+      );
+      expect(state[sessionId]?.startupConfig.accountId).toBe("account-1");
+    });
+
+    it("starts without a token when the account is missing", async () => {
+      const getAccountToken = vi.fn().mockReturnValue(null);
+      const { service } = createService({ getAccountToken });
+
+      await service.startNewSession(makeStartInput({ accountId: "gone" }));
+
+      const startCall = terminalSessionSpies.start.mock.calls[0]?.[0];
+      expect(startCall.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    });
+
+    it("omits the account token when no account is selected", async () => {
+      const getAccountToken = vi.fn();
+      const { service } = createService({ getAccountToken });
+
+      await service.startNewSession(makeStartInput());
+
+      expect(getAccountToken).not.toHaveBeenCalled();
+      const startCall = terminalSessionSpies.start.mock.calls[0]?.[0];
+      expect(startCall.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     });
 
     it("does not retain a live session when terminal exits during start", async () => {

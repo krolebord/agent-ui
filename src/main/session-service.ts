@@ -45,6 +45,7 @@ interface SessionServiceOptions {
   stateFileManager: SessionStateFileManager;
   state: SessionServiceState;
   getMcpServerUrl?: (context: McpRequestContext) => string | null;
+  getAccountToken?: (accountId: string) => string | null;
 }
 
 export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
@@ -59,6 +60,7 @@ export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
     remoteControl: z.boolean().optional().catch(undefined),
     mcpEnabled: z.boolean().optional().catch(undefined),
     mcpCanScheduleSessions: z.boolean().optional().catch(undefined),
+    accountId: z.string().optional().catch(undefined),
     initialPrompt: z
       .string()
       .optional()
@@ -87,6 +89,7 @@ export const startClaudeSessionSchema = z.object({
   remoteControl: z.boolean().optional(),
   mcpEnabled: z.boolean().optional(),
   mcpCanScheduleSessions: z.boolean().optional(),
+  accountId: z.string().optional(),
   initialPrompt: z
     .string()
     .optional()
@@ -212,11 +215,12 @@ export const claudeSessionsRouter = {
 
 type ClaudeStartupOptions = Omit<
   BuildClaudeArgsInput,
-  "stateFilePath" | "mcpServerUrl"
+  "stateFilePath" | "mcpServerUrl" | "oauthToken"
 > & {
   cwd: string;
   mcpEnabled?: boolean;
   mcpCanScheduleSessions?: boolean;
+  accountId?: string;
 };
 
 function getDefaultSessionTitle(sessionId: string): string {
@@ -257,12 +261,16 @@ export class SessionsServiceNew {
   private readonly getMcpServerUrl:
     | ((context: McpRequestContext) => string | null)
     | null;
+  private readonly getAccountToken:
+    | ((accountId: string) => string | null)
+    | null;
   readonly terminalManager: TerminalManager;
 
   constructor(options: SessionServiceOptions) {
     this.pluginDir = options.pluginDir;
     this.pluginWarning = options.pluginWarning;
     this.getMcpServerUrl = options.getMcpServerUrl ?? null;
+    this.getAccountToken = options.getAccountToken ?? null;
     this.titleGeneration = options.titleGeneration;
     this.stateFileManager = options.stateFileManager;
     this.sessionsState = options.state;
@@ -309,6 +317,7 @@ export class SessionsServiceNew {
       remoteControl: sessionInput.remoteControl,
       mcpEnabled: sessionInput.mcpEnabled,
       mcpCanScheduleSessions: sessionInput.mcpCanScheduleSessions,
+      accountId: sessionInput.accountId,
       permissionMode: sessionInput.permissionMode ?? "default",
       pluginDir: this.pluginDir,
       initialPrompt: sessionInput.initialPrompt,
@@ -331,6 +340,7 @@ export class SessionsServiceNew {
         remoteControl: startupOptions.remoteControl,
         mcpEnabled: startupOptions.mcpEnabled,
         mcpCanScheduleSessions: startupOptions.mcpCanScheduleSessions,
+        accountId: startupOptions.accountId,
         permissionMode: startupOptions.permissionMode,
         cwd: startupOptions.cwd,
       },
@@ -354,6 +364,7 @@ export class SessionsServiceNew {
       remoteControl: sessionInput.remoteControl,
       mcpEnabled: sessionInput.mcpEnabled,
       mcpCanScheduleSessions: sessionInput.mcpCanScheduleSessions,
+      accountId: sessionInput.accountId,
       initialPrompt: sessionInput.initialPrompt,
       start: {
         type: "start-new",
@@ -416,6 +427,7 @@ export class SessionsServiceNew {
       remoteControl: input.remoteControl ?? session.startupConfig.remoteControl,
       mcpEnabled: session.startupConfig.mcpEnabled,
       mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
+      accountId: session.startupConfig.accountId,
       start: {
         type: "resume",
         sessionId: input.sessionId,
@@ -443,6 +455,7 @@ export class SessionsServiceNew {
         remoteControl: session.startupConfig.remoteControl,
         mcpEnabled: session.startupConfig.mcpEnabled,
         mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
+        accountId: session.startupConfig.accountId,
         permissionMode: session.startupConfig.permissionMode,
         cwd: session.startupConfig.cwd,
       },
@@ -467,6 +480,7 @@ export class SessionsServiceNew {
       remoteControl: session.startupConfig.remoteControl,
       mcpEnabled: session.startupConfig.mcpEnabled,
       mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
+      accountId: session.startupConfig.accountId,
       start: {
         type: "start-new",
         sessionId: sessionId,
@@ -490,6 +504,7 @@ export class SessionsServiceNew {
     remoteControl?: boolean;
     mcpEnabled?: boolean;
     mcpCanScheduleSessions?: boolean;
+    accountId?: string;
     initialPrompt?: string;
     start: ClaudeStartOptions;
   }) {
@@ -561,6 +576,16 @@ export class SessionsServiceNew {
     disposable.addDisposable(() => activityMonitor.stopMonitoring());
     activityMonitor.startMonitoring(stateFilePath);
 
+    let oauthToken: string | undefined;
+    if (opts.accountId) {
+      oauthToken = this.getAccountToken?.(opts.accountId) ?? undefined;
+      if (!oauthToken) {
+        log.warn(
+          `Claude account ${opts.accountId} for session ${opts.sessionId} was not found; starting with the default account`,
+        );
+      }
+    }
+
     const claudeArgs = buildClaudeArgs({
       start: opts.start,
       permissionMode: opts.permissionMode,
@@ -571,6 +596,7 @@ export class SessionsServiceNew {
       subagentModelOverride: opts.subagentModelOverride,
       systemPrompt: opts.systemPrompt,
       remoteControl: opts.remoteControl,
+      oauthToken,
       stateFilePath,
       initialPrompt: effectiveInitialPrompt,
       mcpServerUrl:

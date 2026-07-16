@@ -56,6 +56,20 @@ describe("buildClaudeArgs", () => {
     expect(env.DISABLE_TELEMETRY).toBeUndefined();
   });
 
+  it("omits CLAUDE_CODE_OAUTH_TOKEN by default", () => {
+    const { env } = buildClaudeArgs(makeInput());
+
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("sets CLAUDE_CODE_OAUTH_TOKEN when an OAuth token is provided", () => {
+    const { env } = buildClaudeArgs(
+      makeInput({ oauthToken: "sk-ant-oat01-test" }),
+    );
+
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-test");
+  });
+
   it("omits --mcp-config by default", () => {
     const { args } = buildClaudeArgs(makeInput());
 

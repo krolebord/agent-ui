@@ -31,6 +31,7 @@ export interface LastClaudeSessionOptions {
   systemPrompt?: string;
   remoteControl?: boolean;
   mcpEnabled?: boolean;
+  accountId?: string;
 }
 
 export interface LastCodexSessionOptions {
@@ -69,6 +70,7 @@ export const lastClaudeSessionOptionsSchema = z.object({
   systemPrompt: z.string().optional().catch(undefined),
   remoteControl: z.boolean().optional().catch(undefined),
   mcpEnabled: z.boolean().optional().catch(undefined),
+  accountId: z.string().optional().catch(undefined),
 });
 
 export const lastCodexSessionOptionsSchema = z.object({
@@ -113,6 +115,7 @@ export function defaultClaudeSessionOptions(): LastClaudeSessionOptions {
     systemPrompt: undefined,
     remoteControl: undefined,
     mcpEnabled: undefined,
+    accountId: undefined,
   };
 }
 

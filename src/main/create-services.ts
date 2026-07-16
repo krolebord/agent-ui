@@ -6,6 +6,11 @@ import {
   defineAppSettingsPersistence,
   defineAppSettingsState,
 } from "./app-settings";
+import {
+  defineClaudeAccountsPersistence,
+  defineClaudeAccountsState,
+  getClaudeAccountToken,
+} from "./claude-accounts";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import type { CursorAgentMode, CursorAgentPermissionMode } from "./cursor-cli";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
@@ -177,6 +182,11 @@ export async function createServices(options: CreateServicesOptions) {
     defineAppSettingsPersistence(appSettingsState),
   );
 
+  const claudeAccountsState = defineClaudeAccountsState();
+  persistenceService.registerAndHydrate(
+    defineClaudeAccountsPersistence(claudeAccountsState),
+  );
+
   const titleGenerationService = new TitleGenerationService({
     getSettings: () => appSettingsState.state.titleGeneration,
   });
@@ -238,6 +248,8 @@ export async function createServices(options: CreateServicesOptions) {
     stateFileManager,
     state: sessionsState,
     getMcpServerUrl,
+    getAccountToken: (accountId) =>
+      getClaudeAccountToken(claudeAccountsState, accountId),
   });
   const terminalManager = sessionsService.terminalManager;
 
@@ -346,6 +358,7 @@ export async function createServices(options: CreateServicesOptions) {
   const stateService = new StateOrchestrator({
     serviceStates: {
       appSettings: appSettingsState,
+      claudeAccounts: claudeAccountsState,
       projects: projectsState,
       projectTerminals: projectTerminalsState,
       sessions: sessionsState,
@@ -389,6 +402,7 @@ export async function createServices(options: CreateServicesOptions) {
 
   return {
     appSettingsState,
+    claudeAccountsState,
     machineStatsState,
     projectsState,
     projectTerminalsState,

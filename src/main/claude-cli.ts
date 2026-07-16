@@ -26,6 +26,7 @@ export interface BuildClaudeArgsInput {
   subagentModelOverride?: ClaudeModel;
   systemPrompt?: string;
   remoteControl?: boolean;
+  oauthToken?: string;
   stateFilePath: string;
   initialPrompt?: string;
   mcpServerUrl?: string | null;
@@ -119,6 +120,10 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): {
 
   if (input.subagentModelOverride) {
     env.CLAUDE_CODE_SUBAGENT_MODEL = input.subagentModelOverride;
+  }
+
+  if (input.oauthToken) {
+    env.CLAUDE_CODE_OAUTH_TOKEN = input.oauthToken;
   }
 
   return { args: args.filter(Boolean), env };
