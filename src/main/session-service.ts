@@ -13,9 +13,13 @@ import { ClaudeActivityMonitor } from "./claude-activity-monitor";
 import {
   type BuildClaudeArgsInput,
   buildClaudeArgs,
+  type ClaudeAccountAuth,
   type ClaudeStartOptions,
 } from "./claude-cli";
-import { getUsage as getClaudeUsage } from "./claude-usage";
+import {
+  fetchUsageWithToken,
+  getUsage as getClaudeUsage,
+} from "./claude-usage";
 import log from "./logger";
 import type { McpRequestContext } from "./mcp/session-token";
 import { procedure } from "./orpc";
@@ -45,7 +49,7 @@ interface SessionServiceOptions {
   stateFileManager: SessionStateFileManager;
   state: SessionServiceState;
   getMcpServerUrl?: (context: McpRequestContext) => string | null;
-  getAccountToken?: (accountId: string) => string | null;
+  getAccountAuth?: (accountId: string) => Promise<ClaudeAccountAuth | null>;
 }
 
 export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
@@ -175,7 +179,41 @@ export const claudeSessionsRouter = {
     .handler(async ({ input, context }) => {
       context.sessionsService.renameSession(input.sessionId, input.title);
     }),
-  getUsage: procedure.handler(getClaudeUsage),
+  getUsage: procedure
+    .input(z.object({ accountId: z.string().optional() }).optional())
+    .handler(async ({ input, context }) => {
+      const accountId = input?.accountId;
+      if (!accountId) {
+        return await getClaudeUsage();
+      }
+
+      // An explicit account bypasses the global API-billing env guard: the
+      // account's own credentials decide, not the host environment.
+      const account = context.claudeAccounts.getAccount(accountId);
+      if (!account) {
+        return { ok: false, message: "Claude account not found" };
+      }
+      if (account.type === "setup-token") {
+        return {
+          ok: false,
+          message:
+            "Usage is unavailable for setup-token accounts (missing scope)",
+        };
+      }
+
+      let accessToken: string;
+      try {
+        accessToken =
+          await context.claudeAccounts.getValidAccessToken(accountId);
+      } catch (error) {
+        return {
+          ok: false,
+          message:
+            error instanceof Error ? error.message : "Token refresh failed",
+        };
+      }
+      return await fetchUsageWithToken(accessToken);
+    }),
   subscribeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string() }))
     .handler(async function* ({ input, context, signal }) {
@@ -215,7 +253,7 @@ export const claudeSessionsRouter = {
 
 type ClaudeStartupOptions = Omit<
   BuildClaudeArgsInput,
-  "stateFilePath" | "mcpServerUrl" | "oauthToken"
+  "stateFilePath" | "mcpServerUrl" | "accountAuth"
 > & {
   cwd: string;
   mcpEnabled?: boolean;
@@ -261,8 +299,8 @@ export class SessionsServiceNew {
   private readonly getMcpServerUrl:
     | ((context: McpRequestContext) => string | null)
     | null;
-  private readonly getAccountToken:
-    | ((accountId: string) => string | null)
+  private readonly getAccountAuth:
+    | ((accountId: string) => Promise<ClaudeAccountAuth | null>)
     | null;
   readonly terminalManager: TerminalManager;
 
@@ -270,7 +308,7 @@ export class SessionsServiceNew {
     this.pluginDir = options.pluginDir;
     this.pluginWarning = options.pluginWarning;
     this.getMcpServerUrl = options.getMcpServerUrl ?? null;
-    this.getAccountToken = options.getAccountToken ?? null;
+    this.getAccountAuth = options.getAccountAuth ?? null;
     this.titleGeneration = options.titleGeneration;
     this.stateFileManager = options.stateFileManager;
     this.sessionsState = options.state;
@@ -350,28 +388,33 @@ export class SessionsServiceNew {
       state[sessionId] = newSession;
     });
 
-    await this.createLiveSession({
-      sessionId,
-      cols: sessionInput.cols,
-      rows: sessionInput.rows,
-      cwd: sessionInput.cwd,
-      permissionMode: sessionInput.permissionMode ?? "default",
-      model: sessionInput.model ?? "opus",
-      effort: sessionInput.effort,
-      haikuModelOverride: sessionInput.haikuModelOverride,
-      subagentModelOverride: sessionInput.subagentModelOverride,
-      systemPrompt: sessionInput.systemPrompt,
-      remoteControl: sessionInput.remoteControl,
-      mcpEnabled: sessionInput.mcpEnabled,
-      mcpCanScheduleSessions: sessionInput.mcpCanScheduleSessions,
-      accountId: sessionInput.accountId,
-      initialPrompt: sessionInput.initialPrompt,
-      start: {
-        type: "start-new",
+    try {
+      await this.createLiveSession({
         sessionId,
-        forkSessionId: sessionInput.forkSessionId,
-      },
-    });
+        cols: sessionInput.cols,
+        rows: sessionInput.rows,
+        cwd: sessionInput.cwd,
+        permissionMode: sessionInput.permissionMode ?? "default",
+        model: sessionInput.model ?? "opus",
+        effort: sessionInput.effort,
+        haikuModelOverride: sessionInput.haikuModelOverride,
+        subagentModelOverride: sessionInput.subagentModelOverride,
+        systemPrompt: sessionInput.systemPrompt,
+        remoteControl: sessionInput.remoteControl,
+        mcpEnabled: sessionInput.mcpEnabled,
+        mcpCanScheduleSessions: sessionInput.mcpCanScheduleSessions,
+        accountId: sessionInput.accountId,
+        initialPrompt: sessionInput.initialPrompt,
+        start: {
+          type: "start-new",
+          sessionId,
+          forkSessionId: sessionInput.forkSessionId,
+        },
+      });
+    } catch (error) {
+      await this.discardUnstartedSession(sessionId);
+      throw error;
+    }
 
     const prompt = sessionInput.initialPrompt?.trim();
     if (!sessionName && prompt) {
@@ -379,6 +422,18 @@ export class SessionsServiceNew {
     }
 
     return sessionId;
+  }
+
+  /**
+   * Drops a session record that never made it to a running terminal, so a
+   * failed start (e.g. an account that needs a fresh login) doesn't leave a
+   * dead entry in the sidebar.
+   */
+  private async discardUnstartedSession(sessionId: string) {
+    await this.terminalManager.unregisterTerminal(sessionId);
+    this.sessionsState.updateState((state) => {
+      delete state[sessionId];
+    });
   }
 
   private getSessionState(sessionId: string) {
@@ -466,27 +521,32 @@ export class SessionsServiceNew {
       state[sessionId] = forkedSession;
     });
 
-    await this.createLiveSession({
-      sessionId,
-      cols: input.cols,
-      rows: input.rows,
-      cwd: session.startupConfig.cwd,
-      permissionMode: session.startupConfig.permissionMode,
-      model: session.startupConfig.model,
-      effort: session.startupConfig.effort,
-      haikuModelOverride: session.startupConfig.haikuModelOverride,
-      subagentModelOverride: session.startupConfig.subagentModelOverride,
-      systemPrompt: session.startupConfig.systemPrompt,
-      remoteControl: session.startupConfig.remoteControl,
-      mcpEnabled: session.startupConfig.mcpEnabled,
-      mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
-      accountId: session.startupConfig.accountId,
-      start: {
-        type: "start-new",
-        sessionId: sessionId,
-        forkSessionId: session.sessionId,
-      },
-    });
+    try {
+      await this.createLiveSession({
+        sessionId,
+        cols: input.cols,
+        rows: input.rows,
+        cwd: session.startupConfig.cwd,
+        permissionMode: session.startupConfig.permissionMode,
+        model: session.startupConfig.model,
+        effort: session.startupConfig.effort,
+        haikuModelOverride: session.startupConfig.haikuModelOverride,
+        subagentModelOverride: session.startupConfig.subagentModelOverride,
+        systemPrompt: session.startupConfig.systemPrompt,
+        remoteControl: session.startupConfig.remoteControl,
+        mcpEnabled: session.startupConfig.mcpEnabled,
+        mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
+        accountId: session.startupConfig.accountId,
+        start: {
+          type: "start-new",
+          sessionId: sessionId,
+          forkSessionId: session.sessionId,
+        },
+      });
+    } catch (error) {
+      await this.discardUnstartedSession(sessionId);
+      throw error;
+    }
     return sessionId;
   }
 
@@ -512,6 +572,19 @@ export class SessionsServiceNew {
     const existingLiveSession = this.liveSessions.get(opts.sessionId);
     if (existingLiveSession) {
       return existingLiveSession;
+    }
+
+    // Resolved before anything is allocated: a managed account whose token
+    // cannot be refreshed throws, and the session must not start under the
+    // default account by accident.
+    let accountAuth: ClaudeAccountAuth | undefined;
+    if (opts.accountId) {
+      accountAuth = (await this.getAccountAuth?.(opts.accountId)) ?? undefined;
+      if (!accountAuth) {
+        log.warn(
+          `Claude account ${opts.accountId} for session ${opts.sessionId} was not found; starting with the default account`,
+        );
+      }
     }
 
     const disposable = createDisposable({
@@ -576,16 +649,6 @@ export class SessionsServiceNew {
     disposable.addDisposable(() => activityMonitor.stopMonitoring());
     activityMonitor.startMonitoring(stateFilePath);
 
-    let oauthToken: string | undefined;
-    if (opts.accountId) {
-      oauthToken = this.getAccountToken?.(opts.accountId) ?? undefined;
-      if (!oauthToken) {
-        log.warn(
-          `Claude account ${opts.accountId} for session ${opts.sessionId} was not found; starting with the default account`,
-        );
-      }
-    }
-
     const claudeArgs = buildClaudeArgs({
       start: opts.start,
       permissionMode: opts.permissionMode,
@@ -596,7 +659,7 @@ export class SessionsServiceNew {
       subagentModelOverride: opts.subagentModelOverride,
       systemPrompt: opts.systemPrompt,
       remoteControl: opts.remoteControl,
-      oauthToken,
+      accountAuth,
       stateFilePath,
       initialPrompt: effectiveInitialPrompt,
       mcpServerUrl:

@@ -15,6 +15,7 @@ import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import { UsagePanel } from "@renderer/components/usage-panel";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
+import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
@@ -27,6 +28,7 @@ import {
 } from "@renderer/services/terminal-session-selectors";
 import { useMutation } from "@tanstack/react-query";
 import {
+  CalendarClock,
   ChevronRight,
   EllipsisVertical,
   Eye,
@@ -41,8 +43,10 @@ import {
   Plus,
   RefreshCw,
   Settings,
+  Sparkles,
   SquareIcon,
   Trash2,
+  Users,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -53,7 +57,6 @@ import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
 import { useProjectWorktreeDialogStore } from "./project-worktree-dialog";
 import { RawSessionStateDialog } from "./raw-session-state-dialog";
 import { RenameSessionDialog } from "./rename-session-dialog";
-import { SidebarScheduledSessionsButton } from "./scheduled-sessions-page";
 import {
   BaseSessionSidebarItem,
   type SessionMenuAction,
@@ -61,7 +64,6 @@ import {
   statusIndicatorMeta,
 } from "./session-sidebar-item";
 import { useSettingsStore } from "./settings-dialog";
-import { SidebarSkillsButton } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
 import { useWorktreeDeleteDialogStore } from "./worktree-delete-dialog";
 
@@ -170,6 +172,12 @@ export function SessionSidebar() {
 
   const openSettingsDialog = useSettingsStore((x) => x.openSettingsDialog);
   const openAddProjectDialog = useAddProjectDialogStore((x) => x.open);
+  const mainView = useMainViewStore((state) => state.view);
+  const toggleSkills = useMainViewStore((state) => state.toggleSkills);
+  const toggleScheduledSessions = useMainViewStore(
+    (state) => state.toggleScheduledSessions,
+  );
+  const toggleAccounts = useMainViewStore((state) => state.toggleAccounts);
 
   const groups: ProjectSessionGroup[] = useMemo(
     () =>
@@ -261,42 +269,56 @@ export function SessionSidebar() {
     <aside className="flex h-full w-full flex-col border-r border-border/70 bg-black/35 backdrop-blur-xl">
       <div className="flex h-9 items-center border-b border-border/70 pl-16 [app-region:drag]">
         <div className="ml-auto flex h-full items-center [app-region:no-drag]">
-          <Button
-            variant="flat"
-            className={cn(
-              "h-full w-9 shrink-0 px-0",
-              showHiddenProjects && "text-zinc-100",
-            )}
-            onClick={() => setShowHiddenProjects((value) => !value)}
-            aria-label={
-              showHiddenProjects
-                ? "Hide hidden projects"
-                : "Show hidden projects"
-            }
-            aria-pressed={showHiddenProjects}
-            title={
-              showHiddenProjects
-                ? "Hide hidden projects"
-                : "Show hidden projects"
-            }
-          >
-            {showHiddenProjects ? (
-              <Eye className="size-3.5" />
-            ) : (
-              <EyeOff className="size-3.5" />
-            )}
-          </Button>
-          <SidebarSkillsButton />
-          <SidebarScheduledSessionsButton />
-          <Button
-            variant="flat"
-            className="h-full w-9 shrink-0 px-0"
-            onClick={openSettingsDialog}
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Settings className="size-3.5" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="flat"
+                className={cn(
+                  "h-full w-9 shrink-0 px-0",
+                  (mainView === "skills" ||
+                    mainView === "scheduledSessions" ||
+                    mainView === "accounts") &&
+                    "text-zinc-100",
+                )}
+                aria-label="More sidebar actions"
+                title="More"
+              >
+                <EllipsisVertical className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={toggleSkills}>
+                <Sparkles className="size-3.5" />
+                Skills
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={toggleScheduledSessions}>
+                <CalendarClock className="size-3.5" />
+                Scheduled sessions
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={toggleAccounts}>
+                <Users className="size-3.5" />
+                Accounts
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => setShowHiddenProjects((value) => !value)}
+              >
+                {showHiddenProjects ? (
+                  <Eye className="size-3.5" />
+                ) : (
+                  <EyeOff className="size-3.5" />
+                )}
+                {showHiddenProjects
+                  ? "Hide hidden projects"
+                  : "Show hidden projects"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={openSettingsDialog}>
+                <Settings className="size-3.5" />
+                Settings
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="flat"
             className="h-full w-9 shrink-0 px-0"

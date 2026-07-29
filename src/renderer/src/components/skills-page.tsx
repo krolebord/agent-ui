@@ -549,21 +549,3 @@ export function SkillsSettingsItem({
     </div>
   );
 }
-
-export function SidebarSkillsButton() {
-  const isActive = useMainViewStore((state) => state.view === "skills");
-  const toggleSkills = useMainViewStore((state) => state.toggleSkills);
-  return (
-    <Button
-      type="button"
-      variant="flat"
-      className={cn("h-full w-9 shrink-0 px-0", isActive && "text-zinc-100")}
-      aria-label="Skills"
-      aria-pressed={isActive}
-      title="Skills"
-      onClick={toggleSkills}
-    >
-      <Sparkles className="size-3.5" />
-    </Button>
-  );
-}

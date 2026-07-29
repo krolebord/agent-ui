@@ -472,15 +472,20 @@ const projectDiffPaneContext = createContext<ProjectDiffStore>(null!);
 
 type ProjectDiffStore = ReturnType<typeof createProjectDiffStore>;
 
-export function ProjectDiffPane({ cwd }: { cwd: string }) {
-  const storesRef = useRef<Map<string, ProjectDiffStore>>(new Map());
+/** Module-scoped so selection survives Diff pane unmounts (tab/session switches). */
+const projectDiffStores = new Map<string, ProjectDiffStore>();
 
-  let store = storesRef.current.get(cwd);
-
+function getProjectDiffStore(cwd: string): ProjectDiffStore {
+  let store = projectDiffStores.get(cwd);
   if (!store) {
     store = createProjectDiffStore(cwd);
-    storesRef.current.set(cwd, store);
+    projectDiffStores.set(cwd, store);
   }
+  return store;
+}
+
+export function ProjectDiffPane({ cwd }: { cwd: string }) {
+  const store = getProjectDiffStore(cwd);
 
   return (
     <projectDiffPaneContext.Provider value={store}>

@@ -133,12 +133,27 @@ export function UsagePanel() {
           ? "cursorAgent"
           : null;
 
+  const claudeAccountId =
+    activeSession?.type === "claude-local-terminal"
+      ? activeSession.startupConfig.accountId
+      : undefined;
+  const claudeAccount = useAppState((x) =>
+    claudeAccountId
+      ? (x.claudeAccounts.accounts.find(
+          (account) => account.id === claudeAccountId,
+        ) ?? null)
+      : null,
+  );
+  const claudeAccountLabel = claudeAccount?.label ?? null;
+  const claudeUsageUnsupported = claudeAccount?.type === "setup-token";
+
   const claudeQuery = useQuery(
     orpc.sessions.localClaude.getUsage.queryOptions({
+      input: { accountId: claudeAccountId },
       retry: false,
       refetchInterval: 5 * 60_000,
       staleTime: 5 * 60_000,
-      enabled: usageSource === "claude",
+      enabled: usageSource === "claude" && !claudeUsageUnsupported,
     }),
   );
 
@@ -429,6 +444,23 @@ export function UsagePanel() {
     );
   }
 
+  if (claudeUsageUnsupported) {
+    return (
+      <div className="border-t border-border/70 p-2">
+        <div className="space-y-1">
+          {claudeAccountLabel ? (
+            <div className="text-[10px] text-zinc-500">
+              {claudeAccountLabel}
+            </div>
+          ) : null}
+          <div className="rounded-lg border border-white/10 bg-white/[0.03] px-2.5 py-2 text-center text-xs text-zinc-500">
+            Usage is not supported for setup-token accounts.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const activeClaudeQuery = claudeQuery;
 
   const handleRefetch = async () => {
@@ -443,6 +475,11 @@ export function UsagePanel() {
     return (
       <div className="border-t border-border/70 p-2">
         <div className="space-y-1.5">
+          {claudeAccountLabel ? (
+            <div className="text-[10px] text-zinc-500">
+              {claudeAccountLabel}
+            </div>
+          ) : null}
           {BUCKET_LABELS.map(({ key, label }) => {
             const bucket = usage[key];
             if (!bucket) return null;

@@ -62,12 +62,27 @@ describe("buildClaudeArgs", () => {
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 
-  it("sets CLAUDE_CODE_OAUTH_TOKEN when an OAuth token is provided", () => {
-    const { env } = buildClaudeArgs(
-      makeInput({ oauthToken: "sk-ant-oat01-test" }),
+  it("sets CLAUDE_CODE_OAUTH_TOKEN for setup-token account auth", () => {
+    const { env, args } = buildClaudeArgs(
+      makeInput({
+        accountAuth: { type: "setup-token", token: "sk-ant-oat01-test" },
+      }),
     );
 
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-test");
+    expect(args).not.toContain("--settings");
+  });
+
+  it("sets CLAUDE_CODE_OAUTH_TOKEN for managed account auth", () => {
+    const { env, args } = buildClaudeArgs(
+      makeInput({
+        accountAuth: { type: "managed", token: "sk-ant-oat01-managed" },
+      }),
+    );
+
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-managed");
+    // An apiKeyHelper would be sent as an x-api-key API key and rejected.
+    expect(args).not.toContain("--settings");
   });
 
   it("omits --mcp-config by default", () => {

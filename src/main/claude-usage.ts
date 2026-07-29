@@ -156,6 +156,10 @@ export async function getUsage() {
     return { ok: false, message: "Claude access token has expired" };
   }
 
+  return await fetchUsageWithToken(accessToken);
+}
+
+export async function fetchUsageWithToken(accessToken: string) {
   let responseJson: unknown;
   try {
     const response = await fetch("https://api.anthropic.com/api/oauth/usage", {

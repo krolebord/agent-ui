@@ -304,25 +304,3 @@ function ScheduledSessionRow({
     </li>
   );
 }
-
-export function SidebarScheduledSessionsButton() {
-  const isActive = useMainViewStore(
-    (state) => state.view === "scheduledSessions",
-  );
-  const toggleScheduledSessions = useMainViewStore(
-    (state) => state.toggleScheduledSessions,
-  );
-  return (
-    <Button
-      type="button"
-      variant="flat"
-      className={cn("h-full w-9 shrink-0 px-0", isActive && "text-zinc-100")}
-      aria-label="Scheduled sessions"
-      aria-pressed={isActive}
-      title="Scheduled sessions"
-      onClick={toggleScheduledSessions}
-    >
-      <CalendarClock className="size-3.5" />
-    </Button>
-  );
-}

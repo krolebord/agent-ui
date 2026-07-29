@@ -17,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@renderer/components/ui/dialog";
-import { Input } from "@renderer/components/ui/input";
 import { Kbd, KbdGroup } from "@renderer/components/ui/kbd";
 import { Label } from "@renderer/components/ui/label";
 import {
@@ -40,17 +39,14 @@ import {
   FolderOpen,
   Keyboard,
   LoaderCircle,
-  Pencil,
-  Plus,
   Settings,
   Sparkles,
-  Trash2,
   Users,
 } from "lucide-react";
 import type * as React from "react";
-import { useState } from "react";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
+import { AccountsSettingsItem } from "./accounts-page";
 import { SkillsSettingsItem } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
 
@@ -114,7 +110,7 @@ export function SettingsDialog() {
               Claude accounts
             </SettingsSectionTrigger>
             <AccordionContent>
-              <ClaudeAccountsSettings />
+              <AccountsSettingsItem onNavigate={closeSettingsDialog} />
             </AccordionContent>
           </AccordionItem>
 
@@ -455,187 +451,6 @@ function MachineStatsSettings() {
           </Select>
         </div>
       </div>
-    </div>
-  );
-}
-
-function maskToken(token: string): string {
-  if (token.length <= 16) {
-    return "••••";
-  }
-  return `${token.slice(0, 12)}…${token.slice(-4)}`;
-}
-
-function ClaudeAccountEditor({
-  initialLabel,
-  initialToken,
-  isPending,
-  onSave,
-  onCancel,
-}: {
-  initialLabel: string;
-  initialToken: string;
-  isPending: boolean;
-  onSave: (values: { label: string; token: string }) => void;
-  onCancel: () => void;
-}) {
-  const [label, setLabel] = useState(initialLabel);
-  const [token, setToken] = useState(initialToken);
-  const canSave = label.trim().length > 0 && token.trim().length > 0;
-
-  return (
-    <div className="space-y-3 rounded-lg border border-border/60 p-3">
-      <div className="space-y-2">
-        <Label htmlFor="claude-account-label">Label</Label>
-        <Input
-          id="claude-account-label"
-          placeholder="e.g. Work, Personal"
-          value={label}
-          onChange={(event) => setLabel(event.target.value)}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="claude-account-token">Setup token</Label>
-        <Input
-          id="claude-account-token"
-          type="password"
-          placeholder="sk-ant-oat01-…"
-          className="font-mono"
-          value={token}
-          onChange={(event) => setToken(event.target.value)}
-        />
-        <p className="text-xs text-muted-foreground">
-          Generate with <span className="font-mono">claude setup-token</span>{" "}
-          while logged into the account you want to add.
-        </p>
-      </div>
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          disabled={!canSave || isPending}
-          onClick={() => onSave({ label: label.trim(), token: token.trim() })}
-        >
-          {isPending ? (
-            <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />
-          ) : null}
-          Save
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function ClaudeAccountsSettings() {
-  const accounts = useAppState((s) => s.claudeAccounts.accounts);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [isAdding, setIsAdding] = useState(false);
-
-  const addAccount = useMutation(
-    orpc.claudeAccounts.addAccount.mutationOptions({
-      onSuccess: () => setIsAdding(false),
-    }),
-  );
-  const updateAccount = useMutation(
-    orpc.claudeAccounts.updateAccount.mutationOptions({
-      onSuccess: () => setEditingId(null),
-    }),
-  );
-  const removeAccount = useMutation(
-    orpc.claudeAccounts.removeAccount.mutationOptions(),
-  );
-
-  return (
-    <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        Add long-lived OAuth tokens from{" "}
-        <span className="font-mono">claude setup-token</span> to run sessions
-        under different Claude accounts. The default account uses your regular
-        Claude CLI login.
-      </p>
-
-      {accounts.map((account) =>
-        editingId === account.id ? (
-          <ClaudeAccountEditor
-            key={account.id}
-            initialLabel={account.label}
-            initialToken={account.token}
-            isPending={updateAccount.isPending}
-            onSave={({ label, token }) => {
-              updateAccount.mutate({ id: account.id, label, token });
-            }}
-            onCancel={() => setEditingId(null)}
-          />
-        ) : (
-          <div
-            key={account.id}
-            className="flex items-center justify-between gap-2"
-          >
-            <div className="min-w-0 space-y-0.5">
-              <div className="truncate text-sm font-medium">
-                {account.label}
-              </div>
-              <div className="text-xs text-muted-foreground">
-                <span className="font-mono">{maskToken(account.token)}</span>
-                {" · added "}
-                {new Date(account.createdAt).toLocaleDateString()}
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-7"
-                title="Edit account"
-                onClick={() => {
-                  setIsAdding(false);
-                  setEditingId(account.id);
-                }}
-              >
-                <Pencil className="size-3.5" />
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="size-7 text-muted-foreground hover:text-destructive"
-                title="Remove account"
-                disabled={removeAccount.isPending}
-                onClick={() => removeAccount.mutate({ id: account.id })}
-              >
-                <Trash2 className="size-3.5" />
-              </Button>
-            </div>
-          </div>
-        ),
-      )}
-
-      {isAdding ? (
-        <ClaudeAccountEditor
-          initialLabel=""
-          initialToken=""
-          isPending={addAccount.isPending}
-          onSave={({ label, token }) => addAccount.mutate({ label, token })}
-          onCancel={() => setIsAdding(false)}
-        />
-      ) : (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setEditingId(null);
-            setIsAdding(true);
-          }}
-        >
-          <Plus className="mr-1.5 size-3.5" />
-          Add account
-        </Button>
-      )}
     </div>
   );
 }

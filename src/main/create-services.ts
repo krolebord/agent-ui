@@ -6,11 +6,14 @@ import {
   defineAppSettingsPersistence,
   defineAppSettingsState,
 } from "./app-settings";
+import { ClaudeAccountLoginService } from "./claude-account-login";
 import {
+  ClaudeAccountsService,
+  defineClaudeAccountsInternalState,
   defineClaudeAccountsPersistence,
-  defineClaudeAccountsState,
-  getClaudeAccountToken,
+  defineClaudeAccountsPublicState,
 } from "./claude-accounts";
+import type { ClaudeAccountAuth } from "./claude-cli";
 import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import type { CursorAgentMode, CursorAgentPermissionMode } from "./cursor-cli";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
@@ -63,6 +66,11 @@ const STORAGE_SCHEMA_VERSION = 3;
 // terminal is resized to the real viewport once a client attaches.
 const SCHEDULED_SESSION_COLS = 120;
 const SCHEDULED_SESSION_ROWS = 30;
+
+// Managed-account sessions get their access token snapshotted into the env at
+// spawn, so refresh anything with less than this much lifetime left rather
+// than handing a session a token that dies minutes later.
+const SPAWN_TOKEN_MIN_REMAINING_MS = 30 * 60_000;
 
 interface CreateServicesOptions {
   host: AppHost;
@@ -182,10 +190,33 @@ export async function createServices(options: CreateServicesOptions) {
     defineAppSettingsPersistence(appSettingsState),
   );
 
-  const claudeAccountsState = defineClaudeAccountsState();
+  const claudeAccountsInternalState = defineClaudeAccountsInternalState();
   persistenceService.registerAndHydrate(
-    defineClaudeAccountsPersistence(claudeAccountsState),
+    defineClaudeAccountsPersistence(claudeAccountsInternalState),
   );
+  const claudeAccountsPublicState = defineClaudeAccountsPublicState();
+  const claudeAccountsService = new ClaudeAccountsService({
+    internalState: claudeAccountsInternalState,
+    publicState: claudeAccountsPublicState,
+  });
+
+  const getAccountAuth = async (
+    accountId: string,
+  ): Promise<ClaudeAccountAuth | null> => {
+    const account = claudeAccountsService.getAccount(accountId);
+    if (!account) {
+      return null;
+    }
+    if (account.type === "setup-token") {
+      return { type: "setup-token", token: account.token };
+    }
+    // Refresh eagerly so the session starts with the longest runway the
+    // account can give it; the CLI cannot refresh the env-provided token.
+    const token = await claudeAccountsService.getValidAccessToken(accountId, {
+      minRemainingMs: SPAWN_TOKEN_MIN_REMAINING_MS,
+    });
+    return { type: "managed", token };
+  };
 
   const titleGenerationService = new TitleGenerationService({
     getSettings: () => appSettingsState.state.titleGeneration,
@@ -248,10 +279,15 @@ export async function createServices(options: CreateServicesOptions) {
     stateFileManager,
     state: sessionsState,
     getMcpServerUrl,
-    getAccountToken: (accountId) =>
-      getClaudeAccountToken(claudeAccountsState, accountId),
+    getAccountAuth,
   });
   const terminalManager = sessionsService.terminalManager;
+
+  const claudeAccountLogin = new ClaudeAccountLoginService({
+    userDataPath,
+    terminalManager,
+    accounts: claudeAccountsService,
+  });
 
   const localTerminalSessionsManager = new LocalTerminalSessionsManager(
     sessionsState,
@@ -358,7 +394,7 @@ export async function createServices(options: CreateServicesOptions) {
   const stateService = new StateOrchestrator({
     serviceStates: {
       appSettings: appSettingsState,
-      claudeAccounts: claudeAccountsState,
+      claudeAccounts: claudeAccountsPublicState,
       projects: projectsState,
       projectTerminals: projectTerminalsState,
       sessions: sessionsState,
@@ -375,6 +411,9 @@ export async function createServices(options: CreateServicesOptions) {
     },
   });
 
+  shutdownDisposable.addDisposable(
+    async () => await claudeAccountLogin.dispose(),
+  );
   shutdownDisposable.addDisposable(async () => await sessionsService.dispose());
   shutdownDisposable.addDisposable(async () => await terminalManager.dispose());
   shutdownDisposable.addDisposable(
@@ -402,7 +441,8 @@ export async function createServices(options: CreateServicesOptions) {
 
   return {
     appSettingsState,
-    claudeAccountsState,
+    claudeAccounts: claudeAccountsService,
+    claudeAccountLogin,
     machineStatsState,
     projectsState,
     projectTerminalsState,

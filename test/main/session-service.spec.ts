@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ClaudeAccountAuth } from "../../src/main/claude-cli";
 import {
   type ClaudeLocalTerminalSessionData,
   SessionsServiceNew,
@@ -91,7 +92,7 @@ vi.mock("../../src/main/claude-activity-monitor", () => ({
 }));
 
 function createService(options?: {
-  getAccountToken?: (accountId: string) => string | null;
+  getAccountAuth?: (accountId: string) => Promise<ClaudeAccountAuth | null>;
 }) {
   const state: Record<string, ClaudeLocalTerminalSessionData> = {};
   const sessionsState = {
@@ -116,7 +117,7 @@ function createService(options?: {
     titleGeneration: titleGeneration as unknown as TitleGenerationService,
     stateFileManager: stateFileManager as unknown as SessionStateFileManager,
     state: sessionsState,
-    getAccountToken: options?.getAccountToken,
+    getAccountAuth: options?.getAccountAuth,
   });
 
   return { service, state, titleGeneration, stateFileManager };
@@ -262,14 +263,17 @@ describe("SessionsServiceNew", () => {
     });
 
     it("injects the account token for the selected account", async () => {
-      const getAccountToken = vi.fn().mockReturnValue("sk-ant-oat01-work");
-      const { service, state } = createService({ getAccountToken });
+      const getAccountAuth = vi.fn().mockResolvedValue({
+        type: "setup-token",
+        token: "sk-ant-oat01-work",
+      } satisfies ClaudeAccountAuth);
+      const { service, state } = createService({ getAccountAuth });
 
       const sessionId = await service.startNewSession(
         makeStartInput({ accountId: "account-1" }),
       );
 
-      expect(getAccountToken).toHaveBeenCalledWith("account-1");
+      expect(getAccountAuth).toHaveBeenCalledWith("account-1");
       expect(terminalSessionSpies.start).toHaveBeenCalledWith(
         expect.objectContaining({
           env: expect.objectContaining({
@@ -280,9 +284,38 @@ describe("SessionsServiceNew", () => {
       expect(state[sessionId]?.startupConfig.accountId).toBe("account-1");
     });
 
+    it("injects the freshly refreshed token for managed accounts", async () => {
+      const getAccountAuth = vi.fn().mockResolvedValue({
+        type: "managed",
+        token: "sk-ant-oat01-managed",
+      } satisfies ClaudeAccountAuth);
+      const { service } = createService({ getAccountAuth });
+
+      await service.startNewSession(makeStartInput({ accountId: "managed-1" }));
+
+      const startCall = terminalSessionSpies.start.mock.calls[0]?.[0];
+      expect(startCall.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(
+        "sk-ant-oat01-managed",
+      );
+    });
+
+    it("fails the start instead of falling back when a refresh fails", async () => {
+      const getAccountAuth = vi
+        .fn()
+        .mockRejectedValue(new Error("Account needs a fresh Claude login"));
+      const { service, state } = createService({ getAccountAuth });
+
+      await expect(
+        service.startNewSession(makeStartInput({ accountId: "managed-1" })),
+      ).rejects.toThrow("Account needs a fresh Claude login");
+
+      expect(terminalSessionSpies.start).not.toHaveBeenCalled();
+      expect(Object.keys(state)).toHaveLength(0);
+    });
+
     it("starts without a token when the account is missing", async () => {
-      const getAccountToken = vi.fn().mockReturnValue(null);
-      const { service } = createService({ getAccountToken });
+      const getAccountAuth = vi.fn().mockResolvedValue(null);
+      const { service } = createService({ getAccountAuth });
 
       await service.startNewSession(makeStartInput({ accountId: "gone" }));
 
@@ -291,12 +324,12 @@ describe("SessionsServiceNew", () => {
     });
 
     it("omits the account token when no account is selected", async () => {
-      const getAccountToken = vi.fn();
-      const { service } = createService({ getAccountToken });
+      const getAccountAuth = vi.fn();
+      const { service } = createService({ getAccountAuth });
 
       await service.startNewSession(makeStartInput());
 
-      expect(getAccountToken).not.toHaveBeenCalled();
+      expect(getAccountAuth).not.toHaveBeenCalled();
       const startCall = terminalSessionSpies.start.mock.calls[0]?.[0];
       expect(startCall.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     });

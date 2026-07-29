@@ -6,6 +6,20 @@ import type {
 } from "../shared/claude-types";
 import { buildClaudeMcpConfig } from "./mcp/client-config";
 
+export interface ClaudeAccountAuth {
+  /**
+   * `setup-token` tokens are long-lived; `managed` tokens are refreshed to a
+   * fresh access token right before spawn.
+   */
+  type: "setup-token" | "managed";
+  /**
+   * OAuth token, delivered through `CLAUDE_CODE_OAUTH_TOKEN`. An `apiKeyHelper`
+   * cannot be used here: the CLI sends helper output as an `x-api-key` API key
+   * rather than an OAuth bearer token, and the API rejects it.
+   */
+  token: string;
+}
+
 export type ClaudeStartOptions =
   | {
       type: "start-new";
@@ -26,7 +40,7 @@ export interface BuildClaudeArgsInput {
   subagentModelOverride?: ClaudeModel;
   systemPrompt?: string;
   remoteControl?: boolean;
-  oauthToken?: string;
+  accountAuth?: ClaudeAccountAuth;
   stateFilePath: string;
   initialPrompt?: string;
   mcpServerUrl?: string | null;
@@ -122,8 +136,10 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): {
     env.CLAUDE_CODE_SUBAGENT_MODEL = input.subagentModelOverride;
   }
 
-  if (input.oauthToken) {
-    env.CLAUDE_CODE_OAUTH_TOKEN = input.oauthToken;
+  if (input.accountAuth) {
+    // Snapshotted into the env at spawn: the CLI cannot refresh a token it was
+    // handed this way, so a session outliving the token needs a restart.
+    env.CLAUDE_CODE_OAUTH_TOKEN = input.accountAuth.token;
   }
 
   return { args: args.filter(Boolean), env };
