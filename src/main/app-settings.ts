@@ -13,6 +13,10 @@ import { defineStatePersistence } from "./persistence-orchestrator";
 export const sleepBlockModes = ["off", "working", "always"] as const;
 export type SleepBlockMode = (typeof sleepBlockModes)[number];
 
+/** Which sidebar the session list renders: the project tree or the flat inbox. */
+export const sidebarViews = ["projects", "inbox"] as const;
+export type SidebarView = (typeof sidebarViews)[number];
+
 export const machineStatsPollIntervalSeconds = [15, 30, 60, 300] as const;
 
 const machineStatsPollIntervalSchema = z.union([
@@ -51,6 +55,7 @@ export const machineStatsSettingsSchema = z
   .catch(defaultMachineStatsSettings);
 
 export interface AppSettings {
+  sidebarView: SidebarView;
   sleepBlockMode: SleepBlockMode;
   dockBadgeForAttention: boolean;
   dockBounceOnAttention: boolean;
@@ -60,6 +65,7 @@ export interface AppSettings {
 }
 
 const defaults: AppSettings = {
+  sidebarView: "projects",
   sleepBlockMode: "working",
   dockBadgeForAttention: true,
   dockBounceOnAttention: false,
@@ -78,6 +84,7 @@ const sleepBlockModeSchema = z.enum(sleepBlockModes);
 
 const appSettingsPersistenceSchema = z
   .object({
+    sidebarView: z.enum(sidebarViews).catch(defaults.sidebarView),
     sleepBlockMode: z
       .union([sleepBlockModeSchema, z.undefined()])
       .catch(undefined),
@@ -104,6 +111,13 @@ export function defineAppSettingsPersistence(state: AppSettingsState) {
 }
 
 export const appSettingsRouter = {
+  setSidebarView: procedure
+    .input(z.object({ view: z.enum(sidebarViews) }))
+    .handler(async ({ input, context }) => {
+      context.appSettingsState.updateState((state) => {
+        state.sidebarView = input.view;
+      });
+    }),
   setSleepBlockMode: procedure
     .input(z.object({ mode: sleepBlockModeSchema }))
     .handler(async ({ input, context }) => {

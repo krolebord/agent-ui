@@ -1,3 +1,4 @@
+import { canSettleSession } from "@shared/session-lifecycle";
 import { z } from "zod";
 import { appSettingsRouter } from "./app-settings";
 import { claudeAccountsRouter } from "./claude-accounts";
@@ -35,6 +36,78 @@ const sessionsRouter = {
         if (session) {
           session.status = "awaiting_user_response";
         }
+      });
+    }),
+  settle: procedure
+    .input(z.object({ sessionId: z.string() }))
+    .handler(async ({ input, context }) => {
+      const session = context.sessions.state.state[input.sessionId];
+      // Silent no-op rather than an error: the row hides the affordance
+      // already, so reaching here means a raced click on work that became
+      // blocked, and the derived state the caller re-renders from is right
+      // either way.
+      if (!session || !canSettleSession(session)) {
+        return;
+      }
+      const sessionType = session.type;
+
+      context.sessions.state.updateState((state) => {
+        const current = state[input.sessionId];
+        if (!current || !canSettleSession(current)) {
+          return;
+        }
+        current.settledOverride = "settled";
+        current.settledAt = Date.now();
+        // Parking a finished session acknowledges it, exactly like markSeen —
+        // otherwise the unread flag would bounce it straight back out.
+        if (current.status === "awaiting_user_response") {
+          current.status = "idle";
+        }
+      });
+
+      // Settling frees the live process. Stop after the marker is written so
+      // the row is already parked; re-stamp settledAt afterwards so the
+      // stop-driven lastActivityAt bump cannot un-settle it.
+      switch (sessionType) {
+        case "claude-local-terminal":
+          await context.sessionsService.stopLiveSession(input.sessionId);
+          break;
+        case "local-terminal":
+          await context.sessions.localTerminal.stopLiveSession(input.sessionId);
+          break;
+        case "codex-local-terminal":
+          await context.sessions.codex.stopLiveSession(input.sessionId);
+          break;
+        case "cursor-agent":
+          await context.sessions.cursorAgent.stopLiveSession(input.sessionId);
+          break;
+        case "worktree-setup":
+          context.sessions.worktreeSetup.cancelSetup(input.sessionId);
+          break;
+        default: {
+          const exhaustiveCheck: never = sessionType;
+          return exhaustiveCheck;
+        }
+      }
+
+      context.sessions.state.updateState((state) => {
+        const current = state[input.sessionId];
+        if (!current || current.settledOverride !== "settled") {
+          return;
+        }
+        current.settledAt = Date.now();
+      });
+    }),
+  unsettle: procedure
+    .input(z.object({ sessionId: z.string() }))
+    .handler(async ({ input, context }) => {
+      context.sessions.state.updateState((state) => {
+        const session = state[input.sessionId];
+        if (!session) {
+          return;
+        }
+        delete session.settledOverride;
+        delete session.settledAt;
       });
     }),
   moveSessionToProject: procedure

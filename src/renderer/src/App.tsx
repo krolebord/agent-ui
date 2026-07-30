@@ -3,6 +3,7 @@ import { AddProjectDialog } from "@renderer/components/add-project-dialog";
 import { ConfirmDialog } from "@renderer/components/confirm-dialog";
 import { DiffReviewCommitDialog } from "@renderer/components/diff-review-commit-dialog";
 import { ErrorDialog } from "@renderer/components/error-dialog";
+import { InboxSidebar } from "@renderer/components/inbox-sidebar";
 import { NewSessionDialog } from "@renderer/components/new-session-dialog";
 import { ProjectDefaultsDialog } from "@renderer/components/project-defaults-dialog";
 import { ProjectDeletionToastListener } from "@renderer/components/project-deletion-toast-listener";
@@ -46,11 +47,18 @@ function useValidateActiveSession() {
   }, [activeSessionId, sessions]);
 }
 
+/** The session list, in whichever shape the user last chose. */
+function SessionListSidebar() {
+  const sidebarView = useAppState((state) => state.appSettings.sidebarView);
+
+  return sidebarView === "inbox" ? <InboxSidebar /> : <SessionSidebar />;
+}
+
 function DesktopAppShell() {
   return (
     <ResizablePanelGroup orientation="horizontal">
       <ResizablePanel defaultSize="18" minSize="12" maxSize="35">
-        <SessionSidebar />
+        <SessionListSidebar />
       </ResizablePanel>
       <ResizableHandle />
       <ResizablePanel>
@@ -81,7 +89,7 @@ function MobileAppShell() {
           <SheetDescription className="sr-only">
             Browse and switch between sessions
           </SheetDescription>
-          <SessionSidebar />
+          <SessionListSidebar />
         </SheetContent>
       </Sheet>
     </>

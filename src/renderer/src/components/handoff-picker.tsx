@@ -31,7 +31,7 @@ interface HandoffPickerProps {
 }
 
 export function buildHandoffPromptTemplate(handoffPath: string): string {
-  return `Read the handoff at ${handoffPath}. We will continue the work described there. Treat it as context to verify against the code, not facts to trust blindly — read any files it references before acting.`;
+  return `Read the handoff at ${handoffPath}. We will continue the work described there. Treat it as context to verify against the code, not facts to trust blindly.`;
 }
 
 export function useHandoffSelection(params: {

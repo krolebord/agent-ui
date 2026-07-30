@@ -17,6 +17,7 @@ import {
   CodexPermissionModeToggleGroup,
   PermissionModeToggleGroup,
 } from "@renderer/components/permission-mode-toggle-group";
+import { ProjectPicker } from "@renderer/components/project-picker";
 import {
   buildScheduleSpec,
   type ScheduleDraft,
@@ -58,10 +59,7 @@ import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { isCoarsePointer } from "@renderer/lib/pointer";
 import { orpc } from "@renderer/orpc-client";
-import {
-  getProjectDisplayName,
-  MODEL_OPTIONS,
-} from "@renderer/services/terminal-session-selectors";
+import { MODEL_OPTIONS } from "@renderer/services/terminal-session-selectors";
 import type { ClaudeEffort, ClaudeModel } from "@shared/claude-types";
 import { codexModels } from "@shared/codex-models";
 import type {
@@ -329,6 +327,18 @@ export function NewSessionDialog() {
   const wasOpenRef = useRef(false);
   const isOpen = openProjectCwd !== null || editEntry !== null;
 
+  // The project the dialog was opened for is only the starting point; the picker
+  // can retarget it. Reset happens during render rather than in an effect so
+  // reopening the dialog can never paint a stale project for a frame.
+  const [pickedProjectPath, setPickedProjectPath] = useState<string | null>(
+    null,
+  );
+  const [pickedProjectKey, setPickedProjectKey] = useState(lookupCwd);
+  if (pickedProjectKey !== lookupCwd) {
+    setPickedProjectKey(lookupCwd);
+    setPickedProjectPath(null);
+  }
+
   useEffect(() => {
     if (!isOpen) {
       wasOpenRef.current = false;
@@ -435,8 +445,7 @@ export function NewSessionDialog() {
     return null;
   }
 
-  const projectPath = project?.path ?? lookupCwd ?? "";
-  const projectName = project ? getProjectDisplayName(project) : projectPath;
+  const projectPath = pickedProjectPath ?? project?.path ?? lookupCwd ?? "";
   const isEditing = editEntry !== null;
 
   return (
@@ -456,22 +465,22 @@ export function NewSessionDialog() {
           <div className="flex items-start justify-between gap-2">
             <DialogDescription>
               {isEditing ? (
-                <>
-                  <span className="text-foreground">
-                    Edit scheduled session
-                  </span>
-                  <br />
-                </>
-              ) : null}
-              Project: <span className="text-foreground">{projectName}</span>
-              <br />
-              <span className="text-xs text-muted-foreground">
-                {projectPath}
-              </span>
+                <span className="text-foreground">Edit scheduled session</span>
+              ) : (
+                "Start a new session"
+              )}
             </DialogDescription>
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
               <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
             </span>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-session-project">Project</Label>
+            <ProjectPicker
+              id="new-session-project"
+              value={projectPath}
+              onChange={setPickedProjectPath}
+            />
           </div>
         </DialogHeader>
 

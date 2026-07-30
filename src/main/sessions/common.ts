@@ -28,6 +28,11 @@ export const commonSessionSchema = z.object({
     .catch("stopped"),
   warningMessage: z.string().optional(),
   errorMessage: z.string().optional(),
+  // Inbox sidebar lifecycle. Absent means "active"; see
+  // @shared/session-lifecycle for how the pair resolves (settledAt doubles as
+  // the anchor that lets later activity un-settle a session on its own).
+  settledAt: z.number().optional(),
+  settledOverride: z.enum(["settled", "active"]).optional(),
   offlineBuffer: z.string().optional(),
   bufferedOutput: z.string().optional(),
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildProjectPickerOptions,
   buildProjectSessionGroups,
   getProjectDisplayName,
   groupHasAwaitingUserInput,
@@ -156,5 +157,88 @@ describe("groupHasAwaitingUserInput", () => {
         ] as never,
       }),
     ).toBe(false);
+  });
+});
+
+describe("buildProjectPickerOptions", () => {
+  it("keeps project order and carries alias, worktree, hidden and lock flags", () => {
+    expect(
+      buildProjectPickerOptions({
+        projects: [
+          { path: "/workspace/app", collapsed: false, alias: "App" },
+          { path: "/workspace/hidden", collapsed: false, hidden: true },
+          {
+            path: "/workspace/app-wt",
+            collapsed: false,
+            worktreeOriginPath: "/workspace/app",
+          },
+          {
+            path: "/workspace/locked",
+            collapsed: false,
+            interactionDisabled: true,
+          },
+        ],
+        selectedPath: "/workspace/app",
+      }),
+    ).toEqual([
+      {
+        path: "/workspace/app",
+        label: "App (app)",
+        isWorktree: false,
+        hidden: false,
+        disabled: false,
+        unlisted: false,
+      },
+      {
+        path: "/workspace/hidden",
+        label: "hidden",
+        isWorktree: false,
+        hidden: true,
+        disabled: false,
+        unlisted: false,
+      },
+      {
+        path: "/workspace/app-wt",
+        label: "app-wt",
+        isWorktree: true,
+        hidden: false,
+        disabled: false,
+        unlisted: false,
+      },
+      {
+        path: "/workspace/locked",
+        label: "locked",
+        isWorktree: false,
+        hidden: false,
+        disabled: true,
+        unlisted: false,
+      },
+    ]);
+  });
+
+  it("prepends a selected path that is not in the project list", () => {
+    const options = buildProjectPickerOptions({
+      projects: [{ path: "/workspace/app", collapsed: false }],
+      selectedPath: "/workspace/gone",
+    });
+
+    expect(options[0]).toEqual({
+      path: "/workspace/gone",
+      label: "gone",
+      isWorktree: false,
+      hidden: false,
+      disabled: false,
+      unlisted: true,
+    });
+    expect(options).toHaveLength(2);
+  });
+
+  it("adds no entry when nothing is selected", () => {
+    expect(
+      buildProjectPickerOptions({
+        projects: [{ path: "/workspace/app", collapsed: false }],
+        selectedPath: "   ",
+      }).map((option) => option.path),
+    ).toEqual(["/workspace/app"]);
   });
 });

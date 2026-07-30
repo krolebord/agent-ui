@@ -127,6 +127,56 @@ export function groupHasAwaitingUserInput(
   );
 }
 
+export interface ProjectPickerOption {
+  path: string;
+  label: string;
+  isWorktree: boolean;
+  hidden: boolean;
+  /** Locked while a worktree delete is in flight — cannot host a new session. */
+  disabled: boolean;
+  /** Selected path that is not (or no longer) a known project. */
+  unlisted: boolean;
+}
+
+/**
+ * Options for the new-session project picker, in the user's own project order.
+ * Hidden projects stay listed: hiding a project from the tree is not a reason
+ * to make it unreachable when starting a session. A selected path that is not
+ * in the project list (a removed project on a scheduled session, or a folder
+ * that will be added on submit) is prepended so the picker can always show
+ * what is currently selected.
+ */
+export function buildProjectPickerOptions(input: {
+  projects: ClaudeProject[];
+  selectedPath: string;
+}): ProjectPickerOption[] {
+  const options = input.projects.map((project) => ({
+    path: project.path,
+    label: getProjectDisplayName(project),
+    isWorktree: Boolean(project.worktreeOriginPath),
+    hidden: project.hidden === true,
+    disabled: project.interactionDisabled === true,
+    unlisted: false,
+  }));
+
+  const selectedPath = input.selectedPath.trim();
+  if (!selectedPath || options.some((option) => option.path === selectedPath)) {
+    return options;
+  }
+
+  return [
+    {
+      path: selectedPath,
+      label: getProjectNameFromPath(selectedPath),
+      isWorktree: false,
+      hidden: false,
+      disabled: false,
+      unlisted: true,
+    },
+    ...options,
+  ];
+}
+
 export function buildProjectSessionGroups(
   state: BuildProjectSessionGroupsInput,
 ): ProjectSessionGroup[] {

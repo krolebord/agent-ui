@@ -3,6 +3,7 @@ import type { DragEndEvent } from "@dnd-kit/react";
 import { DragDropProvider, PointerSensor } from "@dnd-kit/react";
 import { isSortable, useSortable } from "@dnd-kit/react/sortable";
 import type { Session } from "@main/sessions/state";
+import { MachineStatsLine } from "@renderer/components/machine-stats-line";
 import { Button } from "@renderer/components/ui/button";
 import {
   DropdownMenu,
@@ -17,6 +18,10 @@ import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
+import {
+  stopSession,
+  useSessionLifecycleActions,
+} from "@renderer/hooks/use-session-lifecycle-actions";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
@@ -64,6 +69,7 @@ import {
   statusIndicatorMeta,
 } from "./session-sidebar-item";
 import { useSettingsStore } from "./settings-dialog";
+import { SidebarViewToggle } from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
 import { useWorktreeDeleteDialogStore } from "./worktree-delete-dialog";
 
@@ -129,40 +135,6 @@ function ProjectActiveSessionsPill({
       {activeSessionCount}
     </span>
   );
-}
-
-async function stopSession(session: Session): Promise<void> {
-  switch (session.type) {
-    case "claude-local-terminal":
-      await orpc.sessions.localClaude.stopLiveSession.call({
-        sessionId: session.sessionId,
-      });
-      return;
-    case "local-terminal":
-      await orpc.sessions.localTerminal.stopLiveSession.call({
-        sessionId: session.sessionId,
-      });
-      return;
-    case "codex-local-terminal":
-      await orpc.sessions.codex.stopLiveSession.call({
-        sessionId: session.sessionId,
-      });
-      return;
-    case "cursor-agent":
-      await orpc.sessions.cursorAgent.stopLiveSession.call({
-        sessionId: session.sessionId,
-      });
-      return;
-    case "worktree-setup":
-      await orpc.sessions.worktreeSetup.cancelSetup.call({
-        sessionId: session.sessionId,
-      });
-      return;
-    default: {
-      const exhaustiveCheck = session satisfies never;
-      return exhaustiveCheck;
-    }
-  }
 }
 
 export function SessionSidebar() {
@@ -319,6 +291,7 @@ export function SessionSidebar() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <SidebarViewToggle />
           <Button
             variant="flat"
             className="h-full w-9 shrink-0 px-0"
@@ -429,49 +402,6 @@ export function SessionSidebar() {
       <RawSessionStateDialog />
     </aside>
   );
-}
-
-function MachineStatsLine() {
-  const enabled = useAppState(
-    (state) => state.appSettings.machineStats.enabled,
-  );
-  const stats = useAppState((state) => state.machineStats);
-
-  if (!enabled) {
-    return null;
-  }
-
-  const cpuLabel =
-    stats.cpuLoadPercent === null
-      ? "--"
-      : `${Math.round(stats.cpuLoadPercent)}%`;
-  const temperatureLabel =
-    stats.cpuTemperatureCelsius === null
-      ? ""
-      : ` (${Math.round(stats.cpuTemperatureCelsius)}C)`;
-  const memoryLabel =
-    stats.memoryUsedBytes === null || stats.memoryTotalBytes === null
-      ? "-- / -- GB"
-      : `${formatMemoryGiB(stats.memoryUsedBytes)} / ${formatMemoryGiB(
-          stats.memoryTotalBytes,
-        )} GB`;
-
-  return (
-    <div
-      className="flex h-7 shrink-0 items-center border-t border-border/60 px-2 font-mono text-[10px] text-zinc-500"
-      title={stats.error ?? undefined}
-    >
-      <span className="truncate">
-        CPU: {cpuLabel}
-        {temperatureLabel} | {memoryLabel}
-      </span>
-    </div>
-  );
-}
-
-function formatMemoryGiB(bytes: number): string {
-  const value = bytes / 1024 ** 3;
-  return value >= 10 ? value.toFixed(1) : value.toFixed(2);
 }
 
 function SortableProjectGroup({
@@ -785,12 +715,6 @@ function GroupSessionsList({
   );
 }
 
-function navigateAwayIfActive(sessionId: string) {
-  if (useActiveSessionStore.getState().activeSessionId === sessionId) {
-    useActiveSessionStore.getState().setActiveSessionId(null);
-  }
-}
-
 function activateSessionAndCloseSidebar(sessionId: string) {
   useActiveSessionStore.getState().setActiveSessionId(sessionId);
   useMobileNavStore.getState().closeSidebar();
@@ -802,30 +726,7 @@ function ClaudeLocalTerminalSessionSidebarItem({
   sessionId: string;
 }) {
   const session = useAppState((x) => x.sessions[sessionId]);
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.localClaude.deleteSession.call({ sessionId: id });
-    },
-    onSuccess: () => navigateAwayIfActive(sessionId),
-  });
-
-  const resumeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { cols, rows } = getTerminalSize();
-      await orpc.sessions.localClaude.resumeSession.call({
-        sessionId: id,
-        cols,
-        rows,
-      });
-    },
-  });
-
-  const stopMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.localClaude.stopLiveSession.call({ sessionId: id });
-    },
-  });
+  const lifecycle = useSessionLifecycleActions(session);
 
   const forkMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -898,25 +799,25 @@ function ClaudeLocalTerminalSessionSidebarItem({
     <BaseSessionSidebarItem
       sessionId={sessionId}
       primaryButton={
-        session.status === "stopped" ? (
+        lifecycle.resume ? (
           <SidebarIconButton
             icon={PlayIcon}
             label="Resume session"
-            disabled={resumeMutation.isPending}
-            onClick={() => resumeMutation.mutate(sessionId)}
+            disabled={lifecycle.isResumePending}
+            onClick={lifecycle.resume}
           />
-        ) : (
+        ) : lifecycle.stop ? (
           <SidebarIconButton
             icon={SquareIcon}
-            label="Stop session"
-            disabled={stopMutation.isPending}
-            onClick={() => stopMutation.mutate(sessionId)}
+            label={lifecycle.stopLabel}
+            disabled={lifecycle.isStopPending}
+            onClick={lifecycle.stop}
           />
-        )
+        ) : null
       }
       extraMenuActions={extraMenuActions}
-      onDelete={() => deleteMutation.mutate(sessionId)}
-      deleteDisabled={deleteMutation.isPending}
+      onDelete={lifecycle.remove}
+      deleteDisabled={lifecycle.isRemovePending}
     />
   );
 }
@@ -928,30 +829,7 @@ function CodexLocalTerminalSessionSidebarItem({
 }) {
   const session = useAppState((x) => x.sessions[sessionId]);
   const [subagentsCollapsed, setSubagentsCollapsed] = useState(false);
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.codex.deleteSession.call({ sessionId: id });
-    },
-    onSuccess: () => navigateAwayIfActive(sessionId),
-  });
-
-  const resumeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { cols, rows } = getTerminalSize();
-      await orpc.sessions.codex.resumeSession.call({
-        sessionId: id,
-        cols,
-        rows,
-      });
-    },
-  });
-
-  const stopMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.codex.stopLiveSession.call({ sessionId: id });
-    },
-  });
+  const lifecycle = useSessionLifecycleActions(session);
 
   const forkMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -1030,25 +908,25 @@ function CodexLocalTerminalSessionSidebarItem({
           ) : undefined
         }
         primaryButton={
-          session.status === "stopped" ? (
+          lifecycle.resume ? (
             <SidebarIconButton
               icon={PlayIcon}
               label="Resume session"
-              disabled={resumeMutation.isPending}
-              onClick={() => resumeMutation.mutate(sessionId)}
+              disabled={lifecycle.isResumePending}
+              onClick={lifecycle.resume}
             />
-          ) : (
+          ) : lifecycle.stop ? (
             <SidebarIconButton
               icon={SquareIcon}
-              label="Stop session"
-              disabled={stopMutation.isPending}
-              onClick={() => stopMutation.mutate(sessionId)}
+              label={lifecycle.stopLabel}
+              disabled={lifecycle.isStopPending}
+              onClick={lifecycle.stop}
             />
-          )
+          ) : null
         }
         extraMenuActions={extraMenuActions}
-        onDelete={() => deleteMutation.mutate(sessionId)}
-        deleteDisabled={deleteMutation.isPending}
+        onDelete={lifecycle.remove}
+        deleteDisabled={lifecycle.isRemovePending}
       />
       {hasSubagents && !subagentsCollapsed
         ? subagents.map((subagent) => (
@@ -1122,95 +1000,57 @@ function CodexSubagentSidebarItem({
 
 function CursorAgentSessionSidebarItem({ sessionId }: { sessionId: string }) {
   const session = useAppState((x) => x.sessions[sessionId]);
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.cursorAgent.deleteSession.call({ sessionId: id });
-    },
-    onSuccess: () => navigateAwayIfActive(sessionId),
-  });
-
-  const resumeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { cols, rows } = getTerminalSize();
-      await orpc.sessions.cursorAgent.resumeSession.call({
-        sessionId: id,
-        cols,
-        rows,
-      });
-    },
-  });
-
-  const stopMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.cursorAgent.stopLiveSession.call({ sessionId: id });
-    },
-  });
+  const lifecycle = useSessionLifecycleActions(session);
 
   return (
     <BaseSessionSidebarItem
       sessionId={sessionId}
       primaryButton={
-        session.status === "stopped" ? (
+        lifecycle.resume ? (
           <SidebarIconButton
             icon={PlayIcon}
             label="Resume session"
-            disabled={resumeMutation.isPending}
-            onClick={() => resumeMutation.mutate(sessionId)}
+            disabled={lifecycle.isResumePending}
+            onClick={lifecycle.resume}
           />
-        ) : (
+        ) : lifecycle.stop ? (
           <SidebarIconButton
             icon={SquareIcon}
-            label="Stop session"
-            disabled={stopMutation.isPending}
-            onClick={() => stopMutation.mutate(sessionId)}
+            label={lifecycle.stopLabel}
+            disabled={lifecycle.isStopPending}
+            onClick={lifecycle.stop}
           />
-        )
+        ) : null
       }
-      onDelete={() => deleteMutation.mutate(sessionId)}
-      deleteDisabled={deleteMutation.isPending}
+      onDelete={lifecycle.remove}
+      deleteDisabled={lifecycle.isRemovePending}
     />
   );
 }
 
 function WorktreeSetupSessionSidebarItem({ sessionId }: { sessionId: string }) {
   const session = useAppState((x) => x.sessions[sessionId]);
-
-  const cancelMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.worktreeSetup.cancelSetup.call({ sessionId: id });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      await orpc.sessions.worktreeSetup.deleteSession.call({ sessionId: id });
-    },
-    onSuccess: () => navigateAwayIfActive(sessionId),
-  });
+  const lifecycle = useSessionLifecycleActions(session);
 
   if (!session || session.type !== "worktree-setup") {
     return null;
   }
 
-  const isRunning =
-    session.status === "running" || session.status === "starting";
-
   return (
     <BaseSessionSidebarItem
       sessionId={sessionId}
       primaryButton={
-        isRunning ? (
+        lifecycle.stop ? (
           <SidebarIconButton
             icon={SquareIcon}
-            label="Cancel setup"
-            disabled={cancelMutation.isPending}
-            onClick={() => cancelMutation.mutate(sessionId)}
+            label={lifecycle.stopLabel}
+            disabled={lifecycle.isStopPending}
+            onClick={lifecycle.stop}
           />
         ) : null
       }
-      onDelete={() => deleteMutation.mutate(sessionId)}
-      deleteDisabled={deleteMutation.isPending}
+      onDelete={lifecycle.remove}
+      deleteDisabled={lifecycle.isRemovePending}
     />
   );
 }
