@@ -35,6 +35,62 @@ function assertValidCommitHash(hash: string): void {
   }
 }
 
+/**
+ * Rewrites raw simple-git / git CLI push output into a short toast-friendly
+ * message. Known failure modes get actionable copy; everything else prefers a
+ * single `error:` / `fatal:` / `remote:` line over the full multi-line dump.
+ */
+export function formatGitPushError(raw: string): string {
+  const text = raw.trim();
+  if (!text) {
+    return "Git push failed.";
+  }
+
+  const lower = text.toLowerCase();
+
+  if (
+    lower.includes("fetch first") ||
+    lower.includes("non-fast-forward") ||
+    lower.includes("remote contains work that you do not")
+  ) {
+    return "Push rejected: remote has new commits. Pull or rebase, then push again.";
+  }
+
+  if (
+    lower.includes("could not read username") ||
+    lower.includes("authentication failed") ||
+    lower.includes("auth_header") ||
+    lower.includes("permission denied (publickey)") ||
+    lower.includes("invalid username or password")
+  ) {
+    return "Push failed: authentication required. Check your Git credentials.";
+  }
+
+  if (
+    lower.includes("protected branch") ||
+    lower.includes("gh006") ||
+    lower.includes("cannot push to a protected")
+  ) {
+    return "Push rejected: this branch is protected on the remote.";
+  }
+
+  if (
+    lower.includes("does not appear to be a git repository") ||
+    (lower.includes("repository") && lower.includes("not found"))
+  ) {
+    return "Push failed: remote repository not found or inaccessible.";
+  }
+
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^(error|fatal|remote):/i.test(trimmed)) {
+      return trimmed;
+    }
+  }
+
+  return "Git push failed.";
+}
+
 function parseCommitHistoryOutput(
   output: string,
 ): Omit<GitHistoryCommit, "unpushed">[] {
@@ -812,8 +868,8 @@ export class ProjectGitService {
         await git.push(["--set-upstream", "origin", branch]);
       }
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Git push failed.";
-      throw new Error(msg);
+      const raw = error instanceof Error ? error.message : "";
+      throw new Error(formatGitPushError(raw));
     }
 
     await this.refreshProject(projectPath);

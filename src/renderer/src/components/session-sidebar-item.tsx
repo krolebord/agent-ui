@@ -132,6 +132,9 @@ type SessionMenuActionItem = {
   key?: string;
   label: string;
   icon?: LucideIcon;
+  /** Muted right-aligned column, for a value the label refers to but shouldn't
+      repeat (a snooze preset's wake time, say). */
+  trailingLabel?: string;
   onSelect: () => void;
   disabled?: boolean;
   variant?: "default" | "destructive";
@@ -291,6 +294,22 @@ export function useCommonSessionMenuActions(
   ];
 }
 
+/** Shared item body so the four menu renderings below cannot drift apart. */
+function MenuActionItemContent({ item }: { item: SessionMenuActionItem }) {
+  const Icon = item.icon;
+  return (
+    <>
+      {Icon ? <Icon className="size-3.5" /> : null}
+      {item.label}
+      {item.trailingLabel ? (
+        <span className="ml-auto pl-4 text-xs tabular-nums text-muted-foreground">
+          {item.trailingLabel}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 export function renderContextMenuActions(actions: SessionMenuAction[]) {
   return actions.map((action, index) => {
     const key = action.key ?? `${action.type}:${index}`;
@@ -309,20 +328,16 @@ export function renderContextMenuActions(actions: SessionMenuAction[]) {
             {action.label}
           </ContextMenuSubTrigger>
           <ContextMenuSubContent>
-            {action.items.map((item, itemIndex) => {
-              const ItemIcon = item.icon;
-              return (
-                <ContextMenuItem
-                  key={item.key ?? `${key}:item:${itemIndex}`}
-                  disabled={item.disabled}
-                  variant={item.variant}
-                  onClick={item.onSelect}
-                >
-                  {ItemIcon ? <ItemIcon className="size-3.5" /> : null}
-                  {item.label}
-                </ContextMenuItem>
-              );
-            })}
+            {action.items.map((item, itemIndex) => (
+              <ContextMenuItem
+                key={item.key ?? `${key}:item:${itemIndex}`}
+                disabled={item.disabled}
+                variant={item.variant}
+                onClick={item.onSelect}
+              >
+                <MenuActionItemContent item={item} />
+              </ContextMenuItem>
+            ))}
           </ContextMenuSubContent>
         </ContextMenuSub>
       );
@@ -335,8 +350,7 @@ export function renderContextMenuActions(actions: SessionMenuAction[]) {
         variant={action.variant}
         onClick={action.onSelect}
       >
-        {Icon ? <Icon className="size-3.5" /> : null}
-        {action.label}
+        <MenuActionItemContent item={action} />
       </ContextMenuItem>
     );
   });
@@ -360,20 +374,16 @@ export function renderDropdownMenuActions(actions: SessionMenuAction[]) {
             {action.label}
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            {action.items.map((item, itemIndex) => {
-              const ItemIcon = item.icon;
-              return (
-                <DropdownMenuItem
-                  key={item.key ?? `${key}:item:${itemIndex}`}
-                  disabled={item.disabled}
-                  variant={item.variant}
-                  onClick={item.onSelect}
-                >
-                  {ItemIcon ? <ItemIcon className="size-3.5" /> : null}
-                  {item.label}
-                </DropdownMenuItem>
-              );
-            })}
+            {action.items.map((item, itemIndex) => (
+              <DropdownMenuItem
+                key={item.key ?? `${key}:item:${itemIndex}`}
+                disabled={item.disabled}
+                variant={item.variant}
+                onClick={item.onSelect}
+              >
+                <MenuActionItemContent item={item} />
+              </DropdownMenuItem>
+            ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
       );
@@ -386,8 +396,7 @@ export function renderDropdownMenuActions(actions: SessionMenuAction[]) {
         variant={action.variant}
         onClick={action.onSelect}
       >
-        {Icon ? <Icon className="size-3.5" /> : null}
-        {action.label}
+        <MenuActionItemContent item={action} />
       </DropdownMenuItem>
     );
   });

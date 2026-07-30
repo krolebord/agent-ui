@@ -33,6 +33,12 @@ export const commonSessionSchema = z.object({
   // the anchor that lets later activity un-settle a session on its own).
   settledAt: z.number().optional(),
   settledOverride: z.enum(["settled", "active"]).optional(),
+  // Snooze: hidden until `snoozedUntil` passes, or until the session reaches a
+  // conclusion. `snoozedAt` is the anchor that separates "already seen when
+  // parked" from "happened since". Both survive the wake so the row can show a
+  // Woke marker; visiting the session clears them.
+  snoozedUntil: z.number().optional(),
+  snoozedAt: z.number().optional(),
   offlineBuffer: z.string().optional(),
   bufferedOutput: z.string().optional(),
 });

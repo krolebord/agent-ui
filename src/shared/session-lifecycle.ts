@@ -21,6 +21,8 @@ export interface InboxLifecycleSession {
   lastActivityAt: number;
   settledAt?: number | undefined;
   settledOverride?: SettledOverride | undefined;
+  snoozedUntil?: number | undefined;
+  snoozedAt?: number | undefined;
 }
 
 /**
@@ -134,28 +136,164 @@ export function resolveSettledTimestamp(
   return session.settledAt ?? session.lastActivityAt;
 }
 
+/**
+ * Snooze is only blocked by a pending approval. Unlike settle, a *working*
+ * session is snoozable on purpose: snooze never touches the process (settle
+ * stops it), so "hide this while it finishes" is the case snooze exists for.
+ *
+ * `input` is snoozable for the same reason it is settleable — it conflates
+ * "asked you something" with "finished, unread" — and `sessions.snooze` clears
+ * it to `idle` so the unread flag cannot immediately wake the row again.
+ */
+export function canSnoozeSession(
+  session: Pick<InboxLifecycleSession, "status">,
+): boolean {
+  return resolveInboxStatus(session) !== "approval";
+}
+
+/**
+ * What outranks the user's "not now" and wakes a snoozed session early.
+ *
+ * The distinction snooze needs — and settle does not — is *started* versus
+ * *concluded*. `lastActivityAt` bumps for both, so it cannot carry the
+ * difference alone; the status supplies it:
+ *
+ * - `approval` / `input`: the agent is blocked on the user. Always wakes, with
+ *   no timestamp comparison, so it holds even if a write site forgets to bump
+ *   `lastActivityAt`. Safe against self-triggering because snoozing clears
+ *   `input`, and `approval` cannot be snoozed in the first place.
+ * - `working`: in motion is not a conclusion. Never wakes — this is what makes
+ *   snoozing a running session useful instead of instantly undone.
+ * - `failed` / `ready`: a conclusion, but only if it happened *after* the
+ *   snooze. A session parked while already broken or already finished stays
+ *   parked; that was the user saying "I saw it, not now".
+ */
+export function sessionRaisedHandWhileSnoozed(
+  session: InboxLifecycleSession,
+): boolean {
+  const status = resolveInboxStatus(session);
+  if (status === "approval" || status === "input") {
+    return true;
+  }
+  if (status === "working") {
+    return false;
+  }
+  if (session.snoozedAt === undefined) {
+    return false;
+  }
+  return session.lastActivityAt > session.snoozedAt;
+}
+
+/**
+ * Snoozed resolution: hidden while the wake time is still ahead and nothing has
+ * outranked the snooze.
+ *
+ * The timer wake is derived, exactly like settle's staleness rule — no event
+ * fires when `snoozedUntil` passes, the fields simply stop classifying. Every
+ * early return fails toward *visible*, so a missing, malformed or elapsed wake
+ * time can never bury a session.
+ */
+export function isSessionSnoozed(
+  session: InboxLifecycleSession,
+  now: number,
+): boolean {
+  if (session.snoozedUntil === undefined) {
+    return false;
+  }
+  if (!Number.isFinite(session.snoozedUntil)) {
+    return false;
+  }
+  if (session.snoozedUntil <= now) {
+    return false;
+  }
+  return !sessionRaisedHandWhileSnoozed(session);
+}
+
+/**
+ * Whether a row should carry the "Woke" marker: it holds snooze fields but no
+ * longer classifies as snoozed.
+ *
+ * No `lastVisitedAt` bookkeeping is needed for this because `sessions.markSeen`
+ * clears the snooze when the session is opened, so a *lingering* `snoozedUntil`
+ * is itself the "woke and not yet seen" signal.
+ */
+export function sessionWokeFromSnooze(
+  session: InboxLifecycleSession,
+  now: number,
+): boolean {
+  return session.snoozedUntil !== undefined && !isSessionSnoozed(session, now);
+}
+
+/**
+ * When a snoozed row wakes, for sorting and for the "in 2h" label. Soonest
+ * first is the shelf's question: what comes back next.
+ */
+export function resolveSnoozeWakeTimestamp(
+  session: InboxLifecycleSession,
+): number {
+  return session.snoozedUntil ?? session.lastActivityAt;
+}
+
+/**
+ * The next moment a partition could change on its own, or null when nothing is
+ * waiting on a clock. Callers arm a single timer on this instead of polling —
+ * the only clock-driven transition in the inbox is a snooze expiring.
+ */
+export function resolveNextSnoozeWakeAt(
+  sessions: readonly InboxLifecycleSession[],
+  now: number,
+): number | null {
+  let earliest: number | null = null;
+  for (const session of sessions) {
+    if (!isSessionSnoozed(session, now)) {
+      continue;
+    }
+    const wakeAt = session.snoozedUntil;
+    if (wakeAt === undefined) {
+      continue;
+    }
+    if (earliest === null || wakeAt < earliest) {
+      earliest = wakeAt;
+    }
+  }
+  return earliest;
+}
+
 export interface InboxPartition<TSession> {
   active: TSession[];
+  snoozed: TSession[];
   settled: TSession[];
 }
 
 /**
- * Splits sessions into the active list and the settled shelf.
+ * Splits sessions into the active list, the snoozed shelf and the settled
+ * shelf.
  *
  * Active sort is deliberately static — newest first by creation, never
  * reordered by activity — so a row holds its position from open until settled
  * and the list only moves at lifecycle transitions. Status is carried by the
  * row's label, not by its position.
  *
- * Settled rows are history, so they order by when they were parked.
+ * Snooze is checked before settle: the two are written mutually exclusively, so
+ * a session holding both markers is stale data, and the wake time is the
+ * stronger statement about when it matters again.
+ *
+ * Snoozed rows order by soonest wake ("what comes back next"); settled rows are
+ * history, so they order by when they were parked.
  */
 export function partitionInboxSessions<TSession extends InboxLifecycleSession>(
   sessions: readonly TSession[],
+  now: number,
 ): InboxPartition<TSession> {
   const active: TSession[] = [];
+  const snoozed: TSession[] = [];
   const settled: TSession[] = [];
 
   for (const session of sessions) {
+    if (isSessionSnoozed(session, now)) {
+      snoozed.push(session);
+      continue;
+    }
     if (isSessionSettled(session)) {
       settled.push(session);
       continue;
@@ -168,13 +306,18 @@ export function partitionInboxSessions<TSession extends InboxLifecycleSession>(
       right.createdAt - left.createdAt ||
       left.sessionId.localeCompare(right.sessionId),
   );
+  snoozed.sort(
+    (left, right) =>
+      resolveSnoozeWakeTimestamp(left) - resolveSnoozeWakeTimestamp(right) ||
+      left.sessionId.localeCompare(right.sessionId),
+  );
   settled.sort(
     (left, right) =>
       resolveSettledTimestamp(right) - resolveSettledTimestamp(left) ||
       left.sessionId.localeCompare(right.sessionId),
   );
 
-  return { active, settled };
+  return { active, snoozed, settled };
 }
 
 /**

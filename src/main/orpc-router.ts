@@ -1,4 +1,4 @@
-import { canSettleSession } from "@shared/session-lifecycle";
+import { canSettleSession, canSnoozeSession } from "@shared/session-lifecycle";
 import { z } from "zod";
 import { appSettingsRouter } from "./app-settings";
 import { claudeAccountsRouter } from "./claude-accounts";
@@ -19,12 +19,33 @@ import { terminalsRouter } from "./terminal-manager";
 
 const sessionsRouter = {
   markSeen: procedure
-    .input(z.object({ sessionId: z.string() }))
+    .input(
+      z.object({
+        sessionId: z.string(),
+        /** True only when the session is being opened, as opposed to left. */
+        visiting: z.boolean().optional(),
+      }),
+    )
     .handler(async ({ input, context }) => {
       context.sessions.state.updateState((state) => {
         const session = state[input.sessionId];
-        if (session?.status === "awaiting_user_response") {
+        if (!session) {
+          return;
+        }
+        if (session.status === "awaiting_user_response") {
           session.status = "idle";
+        }
+        // Opening a session spends its snooze: looking at a row is engaging with
+        // it, so the return ticket is used up. This is also what clears the
+        // "Woke" marker — the marker is just a lingering snoozedUntil, so no
+        // separate last-visited bookkeeping is needed.
+        //
+        // Gated on `visiting` because a switch also marks the session being left
+        // behind, and snoozing the open session navigates away: clearing there
+        // would undo the snooze that caused the navigation.
+        if (input.visiting) {
+          delete session.snoozedUntil;
+          delete session.snoozedAt;
         }
       });
     }),
@@ -108,6 +129,47 @@ const sessionsRouter = {
         }
         delete session.settledOverride;
         delete session.settledAt;
+      });
+    }),
+  snooze: procedure
+    .input(z.object({ sessionId: z.string(), snoozedUntil: z.number() }))
+    .handler(async ({ input, context }) => {
+      context.sessions.state.updateState((state) => {
+        const session = state[input.sessionId];
+        // Same silent no-op as settle for a raced click, plus a guard on the
+        // wake time: a past or non-finite one would persist snooze fields on a
+        // session that never hides, leaving a permanent "Woke" marker.
+        if (!session || !canSnoozeSession(session)) {
+          return;
+        }
+        const now = Date.now();
+        if (!Number.isFinite(input.snoozedUntil) || input.snoozedUntil <= now) {
+          return;
+        }
+        session.snoozedUntil = input.snoozedUntil;
+        session.snoozedAt = now;
+        // Acknowledges the session exactly as settle does — otherwise the
+        // unread flag would raise its hand and wake the row immediately.
+        if (session.status === "awaiting_user_response") {
+          session.status = "idle";
+        }
+        // Snooze and settle are alternatives, not layers. Unlike settle, no
+        // process is stopped: snooze only affects visibility, which is what
+        // makes snoozing a running session worth doing.
+        delete session.settledOverride;
+        delete session.settledAt;
+      });
+    }),
+  unsnooze: procedure
+    .input(z.object({ sessionId: z.string() }))
+    .handler(async ({ input, context }) => {
+      context.sessions.state.updateState((state) => {
+        const session = state[input.sessionId];
+        if (!session) {
+          return;
+        }
+        delete session.snoozedUntil;
+        delete session.snoozedAt;
       });
     }),
   moveSessionToProject: procedure

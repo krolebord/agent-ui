@@ -712,6 +712,11 @@ export class SessionsServiceNew {
             : "stopped";
           state[opts.sessionId].errorMessage = payload.errorMessage;
           state[opts.sessionId].offlineBuffer = payload.snapshot;
+          // An exit is the most significant activity a session has, and the
+          // inbox lifecycle reads this timestamp to decide whether a parked
+          // session concluded after it was parked. Without the bump a session
+          // that crashes while settled or snoozed stays hidden.
+          state[opts.sessionId].lastActivityAt = Date.now();
         });
       },
     });

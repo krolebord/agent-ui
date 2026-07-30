@@ -16,7 +16,14 @@ export function switchSession(nextSessionId: string | null): void {
     if (prevSessionId && prevSessionId !== nextSessionId) {
       void orpc.sessions.markSeen.call({ sessionId: prevSessionId });
     }
-    void orpc.sessions.markSeen.call({ sessionId: nextSessionId });
+    // Only the session being opened counts as visited. The departing call above
+    // must not carry the flag: snoozing the session you are looking at navigates
+    // away, and spending the snooze there would undo the write that triggered
+    // the navigation.
+    void orpc.sessions.markSeen.call({
+      sessionId: nextSessionId,
+      visiting: true,
+    });
   }
 }
 

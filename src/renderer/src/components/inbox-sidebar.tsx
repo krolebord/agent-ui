@@ -23,6 +23,12 @@ import {
 } from "@renderer/hooks/use-active-session-id";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { useSessionLifecycleActions } from "@renderer/hooks/use-session-lifecycle-actions";
+import {
+  resolveSnoozePresets,
+  type SnoozePreset,
+  snoozeWakeDescription,
+  snoozeWakeLabel,
+} from "@renderer/lib/snooze-presets";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import {
@@ -32,16 +38,22 @@ import {
 } from "@renderer/services/terminal-session-selectors";
 import {
   canSettleSession,
+  canSnoozeSession,
   type InboxStatus,
   inboxRowNeedsAttention,
   partitionInboxSessions,
   resolveInboxStatus,
   resolveNextActiveSessionId,
+  resolveNextSnoozeWakeAt,
   resolveSettledTimestamp,
+  resolveSnoozeWakeTimestamp,
+  sessionWokeFromSnooze,
 } from "@shared/session-lifecycle";
 import { useMutation } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
 import {
+  AlarmClock,
+  AlarmClockOff,
   Check,
   ChevronDown,
   EllipsisVertical,
@@ -54,7 +66,7 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAddProjectDialogStore } from "./add-project-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { ProjectFavicon } from "./project-favicon";
@@ -99,12 +111,26 @@ function relativeLabelAt(session: Session, timestamp: number): string {
 function InboxStatusOrTime({
   session,
   timestamp,
+  woke,
 }: {
   session: Session;
   timestamp: number;
+  woke: boolean;
 }) {
   const status = resolveInboxStatus(session);
   if (status === "ready") {
+    // A session that wakes into a real status already announces its return
+    // through that label, so the marker is only needed for the quiet case: the
+    // sort is static, so a timer-woken idle row would otherwise slide back in
+    // with nothing at all to distinguish it.
+    if (woke) {
+      return (
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-zinc-100">
+          <AlarmClock className="size-3 shrink-0" aria-hidden="true" />
+          <output>Woke</output>
+        </span>
+      );
+    }
     return (
       <span className="text-xs tabular-nums text-zinc-500">
         {relativeLabelAt(session, timestamp)}
@@ -139,6 +165,9 @@ function InboxStatusOrTime({
  * are always visible, grow to a 32px target and the row reserves width for them
  * instead of letting them overlap.
  */
+const ROW_ICON_BUTTON_CLASS =
+  "pointer-events-auto inline-flex h-full cursor-pointer items-center rounded-md px-1.5 text-zinc-400 opacity-0 transition hover:text-zinc-100 focus-visible:opacity-100 disabled:cursor-default disabled:opacity-40 group-hover/inbox-row:opacity-100 pointer-coarse:size-8 pointer-coarse:justify-center pointer-coarse:px-0 pointer-coarse:opacity-100";
+
 function RowIconButton({
   icon: Icon,
   label,
@@ -162,13 +191,61 @@ function RowIconButton({
         event.stopPropagation();
         onClick();
       }}
-      className={cn(
-        "pointer-events-auto inline-flex h-full cursor-pointer items-center rounded-md px-1.5 text-zinc-400 opacity-0 transition hover:text-zinc-100 focus-visible:opacity-100 disabled:cursor-default disabled:opacity-40 group-hover/inbox-row:opacity-100 pointer-coarse:size-8 pointer-coarse:justify-center pointer-coarse:px-0 pointer-coarse:opacity-100",
-        className,
-      )}
+      className={cn(ROW_ICON_BUTTON_CLASS, className)}
     >
       <Icon className="size-3.5 pointer-coarse:size-4" />
     </button>
+  );
+}
+
+/**
+ * Snooze needs a menu rather than a single click, so its hover button owns a
+ * dropdown. `data-[state=open]` keeps the trigger lit while the menu is open:
+ * without it the anchor fades out the moment the pointer leaves the row for the
+ * menu portal, since visibility is driven by the row's `group-hover`.
+ *
+ * Hidden on coarse pointers, where the row only has space for two permanent
+ * buttons and the `⋯` menu carries the same presets.
+ */
+function RowSnoozeButton({
+  presets,
+  onSnooze,
+}: {
+  presets: SnoozePreset[];
+  onSnooze: (snoozedUntil: number) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Snooze session"
+          title="Snooze session"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          className={cn(
+            ROW_ICON_BUTTON_CLASS,
+            "data-[state=open]:text-zinc-100 data-[state=open]:opacity-100 pointer-coarse:hidden",
+          )}
+        >
+          <AlarmClock className="size-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {presets.map((preset) => (
+          <DropdownMenuItem
+            key={preset.id}
+            onClick={() => onSnooze(preset.snoozedUntil)}
+          >
+            <AlarmClock className="size-3.5" />
+            {preset.label}
+            <span className="ml-auto pl-4 text-xs tabular-nums text-muted-foreground">
+              {preset.whenLabel}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -203,14 +280,20 @@ function InboxRow({
   session,
   variant,
   projectLabel,
+  now,
   onSettle,
   onUnsettle,
+  onSnooze,
+  onUnsnooze,
 }: {
   session: Session;
-  variant: "card" | "slim";
+  variant: "card" | "settled" | "snoozed";
   projectLabel: string;
+  now: number;
   onSettle: (sessionId: string) => void;
   onUnsettle: (sessionId: string) => void;
+  onSnooze: (sessionId: string, snoozedUntil: number) => void;
+  onUnsnooze: (sessionId: string) => void;
 }) {
   const isActive = useActiveSessionStore(
     (x) => x.activeSessionId === session.sessionId,
@@ -218,9 +301,18 @@ function InboxRow({
   const lifecycle = useSessionLifecycleActions(session);
   const commonActions = useCommonSessionMenuActions(session);
   const typeMeta = sessionTypeIcon[session.type];
-  const needsAttention = inboxRowNeedsAttention(session);
+  const isSnoozed = variant === "snoozed";
+  const isSettled = variant === "settled";
+  const isShelfRow = isSnoozed || isSettled;
+  // Only meaningful on an active row: a shelf row is by definition still parked.
+  const woke = !isShelfRow && sessionWokeFromSnooze(session, now);
+  const needsAttention = inboxRowNeedsAttention(session) || woke;
   const settleable = canSettleSession(session);
-  const isSettled = variant === "slim";
+  const snoozeable = canSnoozeSession(session);
+  // Recomputed per render rather than memoized: the boundaries move with the
+  // clock, and a stale "This evening" would resolve to a time the router
+  // rejects.
+  const snoozePresets = resolveSnoozePresets(now);
 
   const open = useCallback(() => {
     switchSession(session.sessionId);
@@ -243,9 +335,40 @@ function InboxRow({
   );
 
   // One action list, two renderings: the right-click context menu and, on touch,
-  // the row's `⋯` button. Settle first (status-dependent), then start/stop
-  // (always available for a session), matching the row button order.
+  // the row's `⋯` button. Snooze first, then settle (status-dependent), then
+  // start/stop (always available for a session), matching the row button order.
   const menuActions: SessionMenuAction[] = [
+    // A snoozed row keeps both: waking is the primary action, but re-snoozing
+    // to a later time without a round trip through the active list is the
+    // natural follow-up when you look and decide it can still wait.
+    ...(isSnoozed
+      ? ([
+          {
+            type: "item",
+            key: "unsnooze-session",
+            label: "Wake now",
+            icon: AlarmClockOff,
+            onSelect: () => onUnsnooze(session.sessionId),
+          },
+        ] satisfies SessionMenuAction[])
+      : []),
+    ...(snoozeable
+      ? ([
+          {
+            type: "submenu",
+            key: "snooze-session",
+            label: isSnoozed ? "Snooze again" : "Snooze",
+            icon: AlarmClock,
+            items: snoozePresets.map((preset) => ({
+              type: "item" as const,
+              key: `snooze-preset:${preset.id}`,
+              label: preset.label,
+              trailingLabel: preset.whenLabel,
+              onSelect: () => onSnooze(session.sessionId, preset.snoozedUntil),
+            })),
+          },
+        ] satisfies SessionMenuAction[])
+      : []),
     ...(isSettled
       ? ([
           {
@@ -311,7 +434,7 @@ function InboxRow({
     </ContextMenuContent>
   );
 
-  if (isSettled) {
+  if (isShelfRow) {
     return (
       <li className="group/inbox-row relative list-none">
         <ContextMenu>
@@ -327,7 +450,7 @@ function InboxRow({
               )}
             >
               {/* No project line to lean on here, so the icon is the only thing
-                  saying which project this settled session came from. */}
+                  saying which project this parked session came from. */}
               <ProjectFavicon
                 projectPath={session.startupConfig.cwd}
                 className={cn(
@@ -344,8 +467,25 @@ function InboxRow({
                   buttons, so it is scoped to pointers that can hover — on touch
                   the timestamp has its own reserved space and stays put. */}
               <span className="ml-auto flex shrink-0 items-center gap-1.5 transition pointer-fine:group-hover/inbox-row:opacity-0">
-                <span className="min-w-8 text-right text-xs tabular-nums text-zinc-500">
-                  {relativeLabelAt(session, resolveSettledTimestamp(session))}
+                <span
+                  className="min-w-8 text-right text-xs tabular-nums text-zinc-500"
+                  // The countdown is coarse ("in 2d"), so the exact wake time
+                  // stays available without spending row width on it.
+                  title={
+                    isSnoozed
+                      ? `Wakes ${snoozeWakeDescription(
+                          resolveSnoozeWakeTimestamp(session),
+                          now,
+                        )}`
+                      : undefined
+                  }
+                >
+                  {isSnoozed
+                    ? snoozeWakeLabel(resolveSnoozeWakeTimestamp(session), now)
+                    : relativeLabelAt(
+                        session,
+                        resolveSettledTimestamp(session),
+                      )}
                 </span>
                 {typeMeta ? (
                   <typeMeta.icon
@@ -359,11 +499,19 @@ function InboxRow({
           {menu}
         </ContextMenu>
         <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5">
-          <RowIconButton
-            icon={Undo2}
-            label="Un-settle session"
-            onClick={() => onUnsettle(session.sessionId)}
-          />
+          {isSnoozed ? (
+            <RowIconButton
+              icon={AlarmClockOff}
+              label="Wake now"
+              onClick={() => onUnsnooze(session.sessionId)}
+            />
+          ) : (
+            <RowIconButton
+              icon={Undo2}
+              label="Un-settle session"
+              onClick={() => onUnsettle(session.sessionId)}
+            />
+          )}
           <RowMenuButton actions={menuActions} />
         </span>
       </li>
@@ -416,6 +564,7 @@ function InboxRow({
                   <InboxStatusOrTime
                     session={session}
                     timestamp={session.lastActivityAt}
+                    woke={woke}
                   />
                 </span>
                 {typeMeta ? (
@@ -454,10 +603,20 @@ function InboxRow({
           status text on hover; centred over the whole card on touch, where the
           buttons are permanent. */}
       <span className="pointer-events-none absolute right-1 top-2 flex h-4 items-center pointer-coarse:top-0 pointer-coarse:bottom-0 pointer-coarse:h-auto pointer-coarse:gap-0.5">
-        {/* Settle is status-dependent (left); start/stop is always on the
-            session so it stays next to the menu. On touch start/stop stays
-            hidden — the two slots go to Settle and the menu, which carries
-            start/stop anyway. */}
+        {/* Snooze and settle are the two "not now" verbs, so they group; the
+            three buttons together reach a little past where the status text sat
+            and clip the project label on hover, which is an acceptable trade
+            for keeping snooze one click away. Start/stop stays next to the
+            menu. On touch start/stop stays hidden — the two slots go to
+            Settle and the menu, which carries start/stop anyway. */}
+        {snoozeable ? (
+          <RowSnoozeButton
+            presets={snoozePresets}
+            onSnooze={(snoozedUntil) =>
+              onSnooze(session.sessionId, snoozedUntil)
+            }
+          />
+        ) : null}
         {settleable ? (
           <RowIconButton
             icon={Check}
@@ -489,10 +648,12 @@ function InboxRow({
 }
 
 function ShelfHeader({
+  label,
   count,
   expanded,
   onToggle,
 }: {
+  label: string;
   count: number;
   expanded: boolean;
   onToggle: () => void;
@@ -506,7 +667,7 @@ function ShelfHeader({
         className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left pointer-coarse:min-h-10"
       >
         <span className="text-xs font-medium text-zinc-500">
-          {expanded ? "Settled" : `Settled (${count})`}
+          {expanded ? label : `${label} (${count})`}
         </span>
         <span className="h-px flex-1 bg-border/70" />
         <ChevronDown
@@ -533,6 +694,10 @@ export function InboxSidebar() {
   const settleMutation = useMutation(orpc.sessions.settle.mutationOptions());
   const unsettleMutation = useMutation(
     orpc.sessions.unsettle.mutationOptions(),
+  );
+  const snoozeMutation = useMutation(orpc.sessions.snooze.mutationOptions());
+  const unsnoozeMutation = useMutation(
+    orpc.sessions.unsnooze.mutationOptions(),
   );
 
   // Scoping filters the flat list without making the header depend on the
@@ -564,10 +729,37 @@ export function InboxSidebar() {
     );
   }, [projectScopePath, sessions]);
 
-  const { active, settled } = useMemo(
-    () => partitionInboxSessions(scopedSessions),
-    [scopedSessions],
-  );
+  // A snooze expiring is the only thing in the inbox that changes the list
+  // without a state patch to react to, so it needs a clock. The tick is bumped
+  // exactly at the next wake boundary (armed below, once the partition knows
+  // where that is) rather than polled on an interval.
+  const [wakeTick, setWakeTick] = useState(0);
+
+  const { active, snoozed, settled, now } = useMemo(() => {
+    void wakeTick;
+    const now = Date.now();
+    return { ...partitionInboxSessions(scopedSessions, now), now };
+  }, [scopedSessions, wakeTick]);
+
+  useEffect(() => {
+    const nextWakeAt = resolveNextSnoozeWakeAt(snoozed, now);
+    if (nextWakeAt === null) {
+      return;
+    }
+    // setTimeout delays are signed 32-bit, so a far-future wake would overflow
+    // and fire immediately, turning the re-arm into a tight loop. Clamped, the
+    // timer simply re-arms every ~24.8 days until the wake is in range. The
+    // small margin past the boundary keeps the re-render on the awake side of
+    // the comparison.
+    const delayMs = Math.min(
+      Math.max(0, nextWakeAt - Date.now()) + 50,
+      2_147_483_647,
+    );
+    const timer = window.setTimeout(() => {
+      setWakeTick((tick) => tick + 1);
+    }, delayMs);
+    return () => window.clearTimeout(timer);
+  }, [now, snoozed]);
 
   // Paging resets when the scope changes so a filter flip never inherits a deep
   // page state.
@@ -581,6 +773,21 @@ export function InboxSidebar() {
   }
 
   const [settledExpanded, setSettledExpanded] = useState(false);
+  const [snoozedExpanded, setSnoozedExpanded] = useState(false);
+
+  // The snoozed shelf doesn't page: it drains on its own as wake times pass, so
+  // it stays short in a way the settled shelf never does.
+  const visibleSnoozed = useMemo(() => {
+    if (snoozedExpanded) {
+      return snoozed;
+    }
+    // Same exception as the settled shelf: the open session must never vanish
+    // behind a collapsed header.
+    const openSnoozed = snoozed.find(
+      (session) => session.sessionId === activeSessionId,
+    );
+    return openSnoozed ? [openSnoozed] : [];
+  }, [activeSessionId, snoozed, snoozedExpanded]);
 
   const visibleSettled = useMemo(() => {
     if (!settledExpanded) {
@@ -631,6 +838,34 @@ export function InboxSidebar() {
       unsettleMutation.mutate({ sessionId });
     },
     [unsettleMutation],
+  );
+
+  const handleSnooze = useCallback(
+    (sessionId: string, snoozedUntil: number) => {
+      // Same forward navigation as settle: parking the row you are looking at
+      // must not leave you sitting on a hidden session.
+      const nextSessionId =
+        sessionId === activeSessionId
+          ? resolveNextActiveSessionId({
+              activeSessionIds: active.map((session) => session.sessionId),
+              settledSessionId: sessionId,
+            })
+          : null;
+
+      snoozeMutation.mutate({ sessionId, snoozedUntil });
+
+      if (nextSessionId !== null) {
+        switchSession(nextSessionId);
+      }
+    },
+    [active, activeSessionId, snoozeMutation],
+  );
+
+  const handleUnsnooze = useCallback(
+    (sessionId: string) => {
+      unsnoozeMutation.mutate({ sessionId });
+    },
+    [unsnoozeMutation],
   );
 
   const labelForPath = useCallback(
@@ -770,17 +1005,49 @@ export function InboxSidebar() {
               key={session.sessionId}
               session={session}
               variant="card"
+              now={now}
               projectLabel={
                 projectLabelByPath.get(session.startupConfig.cwd) ??
                 getProjectNameFromPath(session.startupConfig.cwd)
               }
               onSettle={handleSettle}
               onUnsettle={handleUnsettle}
+              onSnooze={handleSnooze}
+              onUnsnooze={handleUnsnooze}
+            />
+          ))}
+
+          {/* Snoozed sits between the inbox and Settled: it is "coming back",
+              which belongs nearer the live list than history does. */}
+          {snoozed.length > 0 ? (
+            <ShelfHeader
+              label="Snoozed"
+              count={snoozed.length}
+              expanded={snoozedExpanded}
+              onToggle={() => setSnoozedExpanded((value) => !value)}
+            />
+          ) : null}
+
+          {visibleSnoozed.map((session) => (
+            <InboxRow
+              key={session.sessionId}
+              session={session}
+              variant="snoozed"
+              now={now}
+              projectLabel={
+                projectLabelByPath.get(session.startupConfig.cwd) ??
+                getProjectNameFromPath(session.startupConfig.cwd)
+              }
+              onSettle={handleSettle}
+              onUnsettle={handleUnsettle}
+              onSnooze={handleSnooze}
+              onUnsnooze={handleUnsnooze}
             />
           ))}
 
           {settled.length > 0 ? (
             <ShelfHeader
+              label="Settled"
               count={settled.length}
               expanded={settledExpanded}
               onToggle={() => setSettledExpanded((value) => !value)}
@@ -791,13 +1058,16 @@ export function InboxSidebar() {
             <InboxRow
               key={session.sessionId}
               session={session}
-              variant="slim"
+              variant="settled"
+              now={now}
               projectLabel={
                 projectLabelByPath.get(session.startupConfig.cwd) ??
                 getProjectNameFromPath(session.startupConfig.cwd)
               }
               onSettle={handleSettle}
               onUnsettle={handleUnsettle}
+              onSnooze={handleSnooze}
+              onUnsnooze={handleUnsnooze}
             />
           ))}
 
@@ -817,7 +1087,7 @@ export function InboxSidebar() {
           ) : null}
         </ul>
 
-        {active.length === 0 && settled.length === 0 ? (
+        {active.length === 0 && snoozed.length === 0 && settled.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-xs text-zinc-500">
             {projects.length === 0 ? (
               <>

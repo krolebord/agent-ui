@@ -30,7 +30,10 @@ vi.mock("../../src/main/project-settings-file", () => ({
   writeProjectSettingsFile: writeProjectSettingsFileMock,
 }));
 
-import { ProjectGitService } from "../../src/main/project-git-service";
+import {
+  formatGitPushError,
+  ProjectGitService,
+} from "../../src/main/project-git-service";
 import { defineProjectState } from "../../src/main/project-service";
 
 function createDeferred<T>() {
@@ -1680,9 +1683,19 @@ describe("ProjectGitService", () => {
       expect(pushMock).not.toHaveBeenCalled();
     });
 
-    it("surfaces push failures", async () => {
+    it("surfaces push failures as friendly messages", async () => {
       checkIsRepoMock.mockResolvedValue(true);
-      pushMock.mockRejectedValue(new Error("remote: permission denied"));
+      pushMock.mockRejectedValue(
+        new Error(
+          [
+            "To https://github.com/example/repo.git",
+            " ! [rejected]        main -> main (fetch first)",
+            "error: failed to push some refs to 'https://github.com/example/repo.git'",
+            "hint: Updates were rejected because the remote contains work that you do not",
+            "hint: have locally.",
+          ].join("\n"),
+        ),
+      );
       rawMock.mockImplementation(
         async (_projectPath: string, args: string[]) => {
           if (args[0] === "symbolic-ref" && args[1] === "--short") {
@@ -1698,7 +1711,33 @@ describe("ProjectGitService", () => {
       const service = new ProjectGitService(defineProjectState());
 
       await expect(service.pushToRemote("/repo-one")).rejects.toThrow(
-        "remote: permission denied",
+        "Push rejected: remote has new commits. Pull or rebase, then push again.",
+      );
+    });
+
+    it("maps authentication push failures", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      pushMock.mockRejectedValue(
+        new Error(
+          "fatal: Authentication failed for 'https://github.com/example/repo.git'",
+        ),
+      );
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref" && args[1] === "--short") {
+            return "main\n";
+          }
+          if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
+            return "origin/main\n";
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pushToRemote("/repo-one")).rejects.toThrow(
+        "Push failed: authentication required. Check your Git credentials.",
       );
     });
 
@@ -1711,6 +1750,73 @@ describe("ProjectGitService", () => {
         "Project is not a Git repository.",
       );
       expect(pushMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("formatGitPushError", () => {
+    it("maps non-fast-forward rejections", () => {
+      expect(
+        formatGitPushError(
+          [
+            "To https://github.com/example/repo.git",
+            " ! [rejected]        main -> main (non-fast-forward)",
+            "error: failed to push some refs to 'https://github.com/example/repo.git'",
+            "hint: Updates were rejected because the tip of your current branch is behind",
+          ].join("\n"),
+        ),
+      ).toBe(
+        "Push rejected: remote has new commits. Pull or rebase, then push again.",
+      );
+    });
+
+    it("maps authentication failures", () => {
+      expect(
+        formatGitPushError(
+          "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+        ),
+      ).toBe(
+        "Push failed: authentication required. Check your Git credentials.",
+      );
+      expect(formatGitPushError("Permission denied (publickey).")).toBe(
+        "Push failed: authentication required. Check your Git credentials.",
+      );
+    });
+
+    it("maps protected branch rejections", () => {
+      expect(
+        formatGitPushError(
+          "remote: error: GH006: Protected branch update failed for refs/heads/main.",
+        ),
+      ).toBe("Push rejected: this branch is protected on the remote.");
+    });
+
+    it("maps missing remote repositories", () => {
+      expect(
+        formatGitPushError(
+          "fatal: repository 'https://github.com/example/missing.git/' not found",
+        ),
+      ).toBe("Push failed: remote repository not found or inaccessible.");
+    });
+
+    it("prefers the first error line for unrecognized dumps", () => {
+      expect(
+        formatGitPushError(
+          [
+            "Pushing to https://github.com/example/repo.git",
+            "error: failed to push some refs to 'https://github.com/example/repo.git'",
+            "Done",
+          ].join("\n"),
+        ),
+      ).toBe(
+        "error: failed to push some refs to 'https://github.com/example/repo.git'",
+      );
+    });
+
+    it("falls back when there is no usable detail", () => {
+      expect(formatGitPushError("")).toBe("Git push failed.");
+      expect(formatGitPushError("Pushing to origin\nDone")).toBe(
+        "Git push failed.",
+      );
     });
   });
 
