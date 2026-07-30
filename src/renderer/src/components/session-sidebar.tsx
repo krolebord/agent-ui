@@ -31,7 +31,7 @@ import {
   buildProjectSessionGroups,
   groupHasAwaitingUserInput,
 } from "@renderer/services/terminal-session-selectors";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarClock,
   ChevronRight,
@@ -43,6 +43,7 @@ import {
   FolderPlus,
   GitBranch,
   GitFork,
+  ImageIcon,
   MonitorSmartphone,
   PlayIcon,
   Plus,
@@ -458,6 +459,20 @@ function SortableProjectGroup({
     orpc.projects.refreshProject.mutationOptions(),
   );
 
+  const queryClient = useQueryClient();
+  // Discovery is on a long cooldown in main, so this is the escape hatch for
+  // "I just added an icon and want to see it now".
+  const refreshFaviconMutation = useMutation(
+    orpc.projects.refreshFavicon.mutationOptions({
+      onSuccess: (_data, variables) =>
+        queryClient.invalidateQueries({
+          queryKey: orpc.projects.getFavicon.key({
+            input: { path: variables.path },
+          }),
+        }),
+    }),
+  );
+
   const stopAllActiveSessionsMutation = useMutation({
     mutationFn: async (sessionsToStop: Session[]) => {
       const stopResults = await Promise.allSettled(
@@ -621,6 +636,15 @@ function SortableProjectGroup({
               >
                 <RefreshCw className="size-3.5" />
                 Refresh git status
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={locked || refreshFaviconMutation.isPending}
+                onClick={() =>
+                  refreshFaviconMutation.mutate({ path: group.path })
+                }
+              >
+                <ImageIcon className="size-3.5" />
+                Refresh project icon
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

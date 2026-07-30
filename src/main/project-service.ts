@@ -13,7 +13,10 @@ import type { Services } from "./create-services";
 import log from "./logger";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
-import { getProjectFaviconDataUrl } from "./project-favicon";
+import {
+  getProjectFaviconDataUrl,
+  invalidateProjectFavicon,
+} from "./project-favicon";
 import {
   type ProjectSettingsFile,
   readProjectSettingsFile,
@@ -369,6 +372,13 @@ export const projectsRouter = {
     .handler(async ({ input }) => ({
       dataUrl: await getProjectFaviconDataUrl(normalizeProjectPath(input.path)),
     })),
+  // Clearing is all this does: the renderer refetches `getFavicon` behind it,
+  // and that request is what pays for the rescan.
+  refreshFavicon: procedure
+    .input(z.object({ path: projectPathSchema }))
+    .handler(async ({ input }) => {
+      invalidateProjectFavicon(normalizeProjectPath(input.path));
+    }),
   getUncommittedDiff: procedure
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input, context }) => {

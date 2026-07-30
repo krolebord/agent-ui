@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getProjectFaviconDataUrl,
+  invalidateProjectFavicon,
   resetProjectFaviconCache,
 } from "../../src/main/project-favicon";
 
@@ -203,16 +204,14 @@ describe("project-favicon", () => {
     await expect(getProjectFaviconDataUrl(projectDir)).resolves.toBe(first);
   });
 
-  it("rescans after the cached icon disappears", async () => {
+  it("reports no icon once the cached one disappears, without rescanning", async () => {
     await writeProjectFile("favicon.svg", "<svg>gone soon</svg>");
     await getProjectFaviconDataUrl(projectDir);
 
     await rm(path.join(projectDir, "favicon.svg"));
     await writeProjectFile("favicon.png", "png");
 
-    expect(
-      decode((await getProjectFaviconDataUrl(projectDir)) as string).content,
-    ).toBe("png");
+    await expect(getProjectFaviconDataUrl(projectDir)).resolves.toBeNull();
   });
 
   it("does not rescan immediately after finding no icon", async () => {
@@ -221,5 +220,45 @@ describe("project-favicon", () => {
     await writeProjectFile("favicon.svg", "<svg>late</svg>");
 
     await expect(getProjectFaviconDataUrl(projectDir)).resolves.toBeNull();
+  });
+
+  describe("invalidateProjectFavicon", () => {
+    it("rescans on the next request so a new icon appears", async () => {
+      await expect(getProjectFaviconDataUrl(projectDir)).resolves.toBeNull();
+      await writeProjectFile("favicon.svg", "<svg>late</svg>");
+
+      invalidateProjectFavicon(projectDir);
+
+      expect(
+        decode((await getProjectFaviconDataUrl(projectDir)) as string).content,
+      ).toBe("<svg>late</svg>");
+    });
+
+    it("re-resolves which file wins after a higher-priority icon lands", async () => {
+      await writeProjectFile("assets/logo.png", "logo");
+      await getProjectFaviconDataUrl(projectDir);
+      await writeProjectFile("favicon.svg", "<svg>now preferred</svg>");
+
+      invalidateProjectFavicon(projectDir);
+
+      expect(
+        decode((await getProjectFaviconDataUrl(projectDir)) as string).content,
+      ).toBe("<svg>now preferred</svg>");
+    });
+
+    it("leaves other projects' cooldowns alone", async () => {
+      const otherDir = path.join(projectDir, "..", `other-${Date.now()}`);
+      await mkdir(otherDir, { recursive: true });
+      try {
+        await expect(getProjectFaviconDataUrl(otherDir)).resolves.toBeNull();
+        await writeFile(path.join(otherDir, "favicon.svg"), "<svg>other</svg>");
+
+        invalidateProjectFavicon(projectDir);
+
+        await expect(getProjectFaviconDataUrl(otherDir)).resolves.toBeNull();
+      } finally {
+        await rm(otherDir, { recursive: true, force: true });
+      }
+    });
   });
 });

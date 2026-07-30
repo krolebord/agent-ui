@@ -61,16 +61,22 @@ const MIME_TYPES_BY_EXTENSION = new Map<string, string>([
  */
 const MAX_FAVICON_BYTES = 512 * 1024;
 
-/** How long "this project has no icon" is trusted before scanning again. */
-const MISSING_RESCAN_MS = 60_000;
+/**
+ * Floor on how often a project's candidate list is walked. Between scans we
+ * still re-stat the icon we already found, so edits to a known icon show up at
+ * once — it is only *discovery* (gaining, moving or losing an icon) that waits.
+ */
+const MIN_SCAN_INTERVAL_MS = 15 * 60_000;
 
 type FaviconCacheEntry = {
   /** `null` once a scan found nothing usable. */
   readonly resolvedPath: string | null;
+  readonly mimeType: string;
   readonly mtimeMs: number;
   readonly size: number;
   readonly dataUrl: string | null;
-  readonly resolvedAt: number;
+  /** When the candidate scan behind this entry ran. */
+  readonly scannedAt: number;
 };
 
 const faviconCache = new Map<string, FaviconCacheEntry>();
@@ -78,6 +84,15 @@ const faviconCache = new Map<string, FaviconCacheEntry>();
 /** Test seam: the cache is process-wide and keyed by project path. */
 export function resetProjectFaviconCache(): void {
   faviconCache.clear();
+}
+
+/**
+ * Drops a project's scan cooldown so the next request rescans immediately.
+ * Backs the manual "Refresh project icon" action, which exists precisely
+ * because the cooldown is long enough to be worth overriding by hand.
+ */
+export function invalidateProjectFavicon(projectPath: string): void {
+  faviconCache.delete(projectPath);
 }
 
 /**
@@ -161,56 +176,87 @@ async function findFaviconFile(
   return null;
 }
 
+async function readAsDataUrl(file: FaviconFile): Promise<string | null> {
+  try {
+    const content = await readFile(file.absolutePath);
+    return `data:${file.mimeType};base64,${content.toString("base64")}`;
+  } catch (error) {
+    log.warn(`Failed to read project icon at ${file.absolutePath}:`, error);
+    return null;
+  }
+}
+
 /**
  * Returns the project's icon as a base64 data URL, or `null` when it has none.
  *
- * Results are cached per project. A cached hit costs a single `stat` on the
- * resolved file — the candidate scan and the read only rerun once that file's
- * mtime or size moves, so editing a favicon shows up without a restart.
+ * Results are cached per project, and the candidate scan behind a cached entry
+ * runs at most once every {@link MIN_SCAN_INTERVAL_MS}. Within that window a
+ * request costs a single `stat` on the already-resolved icon: unchanged serves
+ * the cached data URL, a changed mtime or size re-reads it, and a file that
+ * disappeared reports no icon until the next scan is due. `Refresh project
+ * icon` in the project menu clears the cooldown when the wait is too long.
  */
 export async function getProjectFaviconDataUrl(
   projectPath: string,
 ): Promise<string | null> {
   const cached = faviconCache.get(projectPath);
-  if (cached?.resolvedPath === null) {
-    if (Date.now() - cached.resolvedAt < MISSING_RESCAN_MS) {
+  if (cached && Date.now() - cached.scannedAt < MIN_SCAN_INTERVAL_MS) {
+    if (!cached.resolvedPath) {
       return null;
     }
-  } else if (cached?.resolvedPath) {
     const stats = await statFile(cached.resolvedPath);
-    if (stats?.mtimeMs === cached.mtimeMs && stats.size === cached.size) {
+    if (!stats) {
+      return null;
+    }
+    if (stats.mtimeMs === cached.mtimeMs && stats.size === cached.size) {
       return cached.dataUrl;
     }
+    // Same file, new bytes: re-read without disturbing the scan cooldown, so
+    // an icon being iterated on updates as fast as the UI asks for it.
+    const dataUrl = await readAsDataUrl({
+      absolutePath: cached.resolvedPath,
+      mimeType: cached.mimeType,
+      stats,
+    });
+    // A read that fails right after a successful stat is transient, so the
+    // entry keeps its old mtime and the next request tries again.
+    if (dataUrl === null) {
+      return null;
+    }
+    faviconCache.set(projectPath, {
+      ...cached,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+      dataUrl,
+    });
+    return dataUrl;
   }
 
+  const scannedAt = Date.now();
   const found = await findFaviconFile(projectPath);
   if (!found) {
     faviconCache.set(projectPath, {
       resolvedPath: null,
+      mimeType: "",
       mtimeMs: 0,
       size: 0,
       dataUrl: null,
-      resolvedAt: Date.now(),
+      scannedAt,
     });
     return null;
   }
 
-  let content: Buffer;
-  try {
-    content = await readFile(found.absolutePath);
-  } catch (error) {
-    // Left uncached: a file we just stat-ed failing to read is transient.
-    log.warn(`Failed to read project icon at ${found.absolutePath}:`, error);
+  const dataUrl = await readAsDataUrl(found);
+  if (dataUrl === null) {
     return null;
   }
-
-  const dataUrl = `data:${found.mimeType};base64,${content.toString("base64")}`;
   faviconCache.set(projectPath, {
     resolvedPath: found.absolutePath,
+    mimeType: found.mimeType,
     mtimeMs: found.stats.mtimeMs,
     size: found.stats.size,
     dataUrl,
-    resolvedAt: Date.now(),
+    scannedAt,
   });
   return dataUrl;
 }
