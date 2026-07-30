@@ -24,6 +24,7 @@ const terminalSessionSpies = vi.hoisted(() => {
         exitCode: number | null;
         signal?: number;
         errorMessage?: string;
+        stoppedByUser: boolean;
       }) => void;
     }>,
   };
@@ -141,7 +142,10 @@ describe("ProjectTerminalsManager", () => {
     manager.ensureWorkspace({ cwd: "/tmp/project" });
     const firstTerminalId = state["/tmp/project"]?.selectedTerminalId as string;
 
-    terminalSessionSpies.callbacks[0]?.onExit({ exitCode: 0 });
+    terminalSessionSpies.callbacks[0]?.onExit({
+      exitCode: 0,
+      stoppedByUser: false,
+    });
     await vi.waitFor(() => {
       expect(manager.liveTerminals.has(firstTerminalId)).toBe(false);
     });

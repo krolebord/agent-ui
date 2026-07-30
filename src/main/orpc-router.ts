@@ -87,8 +87,8 @@ const sessionsRouter = {
       });
 
       // Settling frees the live process. Stop after the marker is written so
-      // the row is already parked; re-stamp settledAt afterwards so the
-      // stop-driven lastActivityAt bump cannot un-settle it.
+      // the row is already parked. Intentional stops do not bump
+      // lastActivityAt, so teardown cannot un-settle the row.
       switch (sessionType) {
         case "claude-local-terminal":
           await context.sessionsService.stopLiveSession(input.sessionId);
@@ -110,14 +110,6 @@ const sessionsRouter = {
           return exhaustiveCheck;
         }
       }
-
-      context.sessions.state.updateState((state) => {
-        const current = state[input.sessionId];
-        if (!current || current.settledOverride !== "settled") {
-          return;
-        }
-        current.settledAt = Date.now();
-      });
     }),
   unsettle: procedure
     .input(z.object({ sessionId: z.string() }))

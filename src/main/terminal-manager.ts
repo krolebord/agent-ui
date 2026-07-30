@@ -10,6 +10,7 @@ import { savePastedFile } from "./pasted-files";
 import { assertProjectPathInteractionAllowed } from "./project-service";
 import {
   createTerminalSession,
+  type TerminalExitPayload,
   type TerminalSessionStatus,
 } from "./terminal-session";
 
@@ -25,10 +26,7 @@ const terminalAccessSchema = z.object({
 
 type TerminalAccess = z.infer<typeof terminalAccessSchema>;
 
-type TerminalExitPayload = {
-  exitCode: number | null;
-  signal?: number;
-  errorMessage?: string;
+type ManagedTerminalExitPayload = TerminalExitPayload & {
   snapshot?: string;
 };
 
@@ -39,7 +37,7 @@ type StartManagedTerminalOptions = {
   transformOutputChunk?: (chunk: string) => string;
   onData?: (chunk: string, renderedChunk: string) => void;
   onStatusChange?: (status: TerminalSessionStatus) => void;
-  onExit?: (payload: TerminalExitPayload) => void;
+  onExit?: (payload: ManagedTerminalExitPayload) => void;
 };
 
 export interface ManagedTerminalRuntime {

@@ -888,9 +888,10 @@ export class CodexSessionsManager {
           session.status = errorMessage ? "error" : "stopped";
           session.errorMessage = errorMessage;
           session.offlineBuffer = payload.snapshot;
-          // See session-service's onExit: the inbox lifecycle needs an exit to
-          // register as activity or a parked session that crashes stays hidden.
-          session.lastActivityAt = Date.now();
+          // Unexpected exits wake parked sessions; intentional stops do not.
+          if (!payload.stoppedByUser) {
+            session.lastActivityAt = Date.now();
+          }
         });
       },
     });

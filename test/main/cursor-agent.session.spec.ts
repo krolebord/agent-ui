@@ -33,6 +33,7 @@ const terminalSessionSpies = vi.hoisted(() => {
         exitCode: number | null;
         signal?: number;
         errorMessage?: string;
+        stoppedByUser: boolean;
       }) => void;
     }>,
   };

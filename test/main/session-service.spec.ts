@@ -29,6 +29,7 @@ const terminalSessionSpies = vi.hoisted(() => {
         exitCode: number | null;
         signal?: number;
         errorMessage?: string;
+        stoppedByUser: boolean;
       }) => void;
     }>,
   };
@@ -217,6 +218,61 @@ describe("SessionsServiceNew", () => {
       expect(state[sessionId]?.status).toBe("stopping");
     });
 
+    it("does not bump lastActivityAt for intentional stop transitions", async () => {
+      const { service, state } = createService();
+
+      const sessionId = await service.startNewSession(makeStartInput());
+      const session = state[sessionId];
+      expect(session).toBeDefined();
+      if (!session) {
+        return;
+      }
+      const settledAt = Date.now() - 1_000;
+      session.lastActivityAt = settledAt;
+      session.settledAt = settledAt;
+      session.settledOverride = "settled";
+
+      const callbacks = terminalSessionSpies.callbacks[0];
+      callbacks?.onStatusChange("stopping");
+      callbacks?.onStatusChange("stopped");
+      callbacks?.onExit({
+        exitCode: 0,
+        stoppedByUser: true,
+      });
+
+      await vi.waitFor(() => {
+        expect(state[sessionId]?.status).toBe("stopped");
+      });
+      expect(state[sessionId]?.lastActivityAt).toBe(settledAt);
+    });
+
+    it("bumps lastActivityAt when the process crashes", async () => {
+      const { service, state } = createService();
+
+      const sessionId = await service.startNewSession(makeStartInput());
+      const session = state[sessionId];
+      expect(session).toBeDefined();
+      if (!session) {
+        return;
+      }
+      const previousActivityAt = Date.now() - 1_000;
+      session.lastActivityAt = previousActivityAt;
+
+      const callbacks = terminalSessionSpies.callbacks[0];
+      callbacks?.onExit({
+        exitCode: 1,
+        errorMessage: "process crashed",
+        stoppedByUser: false,
+      });
+
+      await vi.waitFor(() => {
+        expect(state[sessionId]?.status).toBe("error");
+      });
+      expect(state[sessionId]?.lastActivityAt).toBeGreaterThan(
+        previousActivityAt,
+      );
+    });
+
     it("triggers title generation from first prompt submit for unnamed sessions", async () => {
       const { service, state, titleGeneration } = createService();
 
@@ -343,6 +399,7 @@ describe("SessionsServiceNew", () => {
         callbacks?.onExit({
           exitCode: 1,
           errorMessage: "start failed",
+          stoppedByUser: false,
         });
       });
 

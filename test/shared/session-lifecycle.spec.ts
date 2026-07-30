@@ -93,15 +93,16 @@ describe("canSettleSession", () => {
     expect(canSettleSession({ status: "awaiting_approval" })).toBe(false);
     expect(canSettleSession({ status: "running" })).toBe(false);
     expect(canSettleSession({ status: "starting" })).toBe(false);
-    expect(canSettleSession({ status: "stopping" })).toBe(false);
   });
 
-  it("allows finished, failed and resting sessions", () => {
+  it("allows finished, failed, resting, and stopping sessions", () => {
     // Settling an unread finished session counts as acknowledging it.
     expect(canSettleSession({ status: "awaiting_user_response" })).toBe(true);
     expect(canSettleSession({ status: "error" })).toBe(true);
     expect(canSettleSession({ status: "idle" })).toBe(true);
     expect(canSettleSession({ status: "stopped" })).toBe(true);
+    // Stopping is intentional teardown (often settle itself), not live work.
+    expect(canSettleSession({ status: "stopping" })).toBe(true);
   });
 });
 
@@ -155,8 +156,20 @@ describe("isSessionSettled", () => {
   });
 
   it("keeps a settle-driven stop parked through the stopping window", () => {
-    // Settling stops the process; stop bumps lastActivityAt while status is
-    // briefly "stopping". The row must stay on the shelf through that race.
+    // Stopping is treated like stopped for settle, and intentional stops do
+    // not bump lastActivityAt, so the timestamp check still holds.
+    expect(
+      isSessionSettled(
+        settled({
+          sessionId: "a",
+          status: "stopping",
+          lastActivityAt: 1_000,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("still un-settles stopping rows when activity is newer", () => {
     expect(
       isSessionSettled(
         settled({
@@ -165,7 +178,7 @@ describe("isSessionSettled", () => {
           lastActivityAt: 9_999,
         }),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("keeps failed and finished sessions settleable", () => {

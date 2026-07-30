@@ -622,7 +622,10 @@ export class SessionsServiceNew {
             runtime.status,
             activityMonitor,
           );
-          state[opts.sessionId].lastActivityAt = Date.now();
+          // Teardown statuses are finalized by onExit for activity purposes.
+          if (runtime.status === "starting" || runtime.status === "running") {
+            state[opts.sessionId].lastActivityAt = Date.now();
+          }
         });
       },
       onHookEvent: (event) => {
@@ -701,7 +704,11 @@ export class SessionsServiceNew {
             status,
             activityMonitor,
           );
-          state[opts.sessionId].lastActivityAt = Date.now();
+          // Intentional stop transitions through stopping/stopped/error without
+          // counting as activity; crashes bump from onExit instead.
+          if (status === "starting" || status === "running") {
+            state[opts.sessionId].lastActivityAt = Date.now();
+          }
         });
       },
       onExit: (payload) => {
@@ -712,11 +719,11 @@ export class SessionsServiceNew {
             : "stopped";
           state[opts.sessionId].errorMessage = payload.errorMessage;
           state[opts.sessionId].offlineBuffer = payload.snapshot;
-          // An exit is the most significant activity a session has, and the
-          // inbox lifecycle reads this timestamp to decide whether a parked
-          // session concluded after it was parked. Without the bump a session
-          // that crashes while settled or snoozed stays hidden.
-          state[opts.sessionId].lastActivityAt = Date.now();
+          // Unexpected exits wake parked sessions. User-initiated stops
+          // (including settle) must not, or the row flashes out of Settled.
+          if (!payload.stoppedByUser) {
+            state[opts.sessionId].lastActivityAt = Date.now();
+          }
         });
       },
     });

@@ -71,3 +71,79 @@ describe("createTerminalSession shell launch", () => {
     );
   });
 });
+
+describe("createTerminalSession exit reason", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.SHELL = "/bin/bash";
+    ptyMocks.spawn.mockReturnValue({
+      onData: ptyMocks.onData,
+      onExit: ptyMocks.onExit,
+      write: ptyMocks.write,
+      resize: ptyMocks.resize,
+      kill: ptyMocks.kill,
+    });
+  });
+
+  afterEach(() => {
+    process.env.SHELL = originalShell;
+  });
+
+  it("marks stop()-driven exits as stoppedByUser", async () => {
+    const onExit = vi.fn();
+    const session = createTerminalSession({
+      onData: vi.fn(),
+      onExit,
+      onStatusChange: vi.fn(),
+    });
+    session.start({ runWithShell: true, cwd: "/tmp/project" });
+
+    const ptyOnExit = ptyMocks.onExit.mock.calls.at(0)?.at(0) as
+      | ((payload: { exitCode: number; signal?: number }) => void)
+      | undefined;
+    expect(ptyOnExit).toBeTypeOf("function");
+
+    const stopPromise = session.stop();
+    ptyOnExit?.({ exitCode: 0 });
+    await stopPromise;
+    // onExit is emitted after dispose finishes; stop() can resolve earlier
+    // when waitForExit is released by that same dispose.
+    await vi.waitFor(() => {
+      expect(onExit).toHaveBeenCalled();
+    });
+
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exitCode: 0,
+        stoppedByUser: true,
+      }),
+    );
+  });
+
+  it("marks unexpected exits as not stoppedByUser", async () => {
+    const onExit = vi.fn();
+    const session = createTerminalSession({
+      onData: vi.fn(),
+      onExit,
+      onStatusChange: vi.fn(),
+    });
+    session.start({ runWithShell: true, cwd: "/tmp/project" });
+
+    const ptyOnExit = ptyMocks.onExit.mock.calls.at(0)?.at(0) as
+      | ((payload: { exitCode: number; signal?: number }) => void)
+      | undefined;
+    expect(ptyOnExit).toBeTypeOf("function");
+
+    ptyOnExit?.({ exitCode: 1 });
+    await vi.waitFor(() => {
+      expect(onExit).toHaveBeenCalled();
+    });
+
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        exitCode: 1,
+        stoppedByUser: false,
+      }),
+    );
+  });
+});

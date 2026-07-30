@@ -79,10 +79,17 @@ export function inboxRowNeedsAttention(
  *
  * `failed` is settleable too: the error is already visible in the row, and
  * parking a broken session is a legitimate decision.
+ *
+ * `stopping` is treated like `stopped` for settle: it is only reached by an
+ * intentional teardown (often settle itself), not live work that must stay
+ * visible.
  */
 export function isSessionSettleBlocked(
   session: Pick<InboxLifecycleSession, "status">,
 ): boolean {
+  if (session.status === "stopping") {
+    return false;
+  }
   const status = resolveInboxStatus(session);
   return status === "approval" || status === "working";
 }
@@ -98,17 +105,17 @@ export function canSettleSession(
  *
  * Blockers are checked first and hold a session out of the shelf regardless of
  * any stored override, so a settle can never bury an approval or live work.
- *
- * Exception: `stopping` is allowed through when the override is already set.
- * Settling stops the live process, and that stop briefly lands in `stopping`
- * (and bumps `lastActivityAt`) before `settledAt` can be re-stamped — without
- * this carve-out the row would flash back into the active list mid-settle.
+ * `stopping` is not a blocker (see `isSessionSettleBlocked`): settle stops the
+ * live process, and intentional stops do not bump `lastActivityAt`, so the row
+ * stays parked through teardown without a special case here.
  *
  * Past the blockers, the override only counts while it is newer than the
  * session's last activity. That comparison is what un-settles on activity:
- * every activity monitor already bumps `lastActivityAt`, so a settled session
- * that starts working, errors, or gets a reply returns to the active list on
- * its own — no write path, and no status write site to keep in sync.
+ * activity monitors and unexpected process exits bump `lastActivityAt`, so a
+ * settled session that starts working, errors, or crashes returns to the
+ * active list on its own — no write path, and no status write site to keep in
+ * sync. Intentional stops do not bump, so settle-driven teardown cannot bounce
+ * the row back out.
  */
 export function isSessionSettled(session: InboxLifecycleSession): boolean {
   if (session.settledOverride !== "settled") {
@@ -116,10 +123,6 @@ export function isSessionSettled(session: InboxLifecycleSession): boolean {
   }
   if (session.settledAt === undefined) {
     return false;
-  }
-
-  if (session.status === "stopping") {
-    return true;
   }
 
   if (isSessionSettleBlocked(session)) {

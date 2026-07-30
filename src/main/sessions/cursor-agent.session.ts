@@ -393,14 +393,19 @@ export class CursorAgentSessionsManager {
       },
     });
 
-    const setSessionStatus = (nextStatus: SessionStatus) => {
+    const setSessionStatus = (
+      nextStatus: SessionStatus,
+      opts?: { bumpActivity?: boolean },
+    ) => {
       state.updateState((state) => {
         const target = state[sessionId];
         if (!target) {
           return;
         }
         target.status = nextStatus;
-        target.lastActivityAt = Date.now();
+        if (opts?.bumpActivity !== false) {
+          target.lastActivityAt = Date.now();
+        }
       });
     };
 
@@ -424,6 +429,10 @@ export class CursorAgentSessionsManager {
             }
             setSessionStatus(
               getCursorSessionStatus(runtime.status, activityState),
+              {
+                bumpActivity:
+                  runtime.status === "starting" || runtime.status === "running",
+              },
             );
           },
           onHookEvent: (event) => {
@@ -495,7 +504,9 @@ export class CursorAgentSessionsManager {
           : undefined,
       },
       onStatusChange: (status) => {
-        setSessionStatus(getCursorSessionStatus(status, activityState));
+        setSessionStatus(getCursorSessionStatus(status, activityState), {
+          bumpActivity: status === "starting" || status === "running",
+        });
       },
       onExit: (payload) => {
         void this.stopLiveSession(sessionId, payload.snapshot);
@@ -503,9 +514,10 @@ export class CursorAgentSessionsManager {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
           state[sessionId].offlineBuffer = payload.snapshot;
-          // See session-service's onExit: the inbox lifecycle needs an exit to
-          // register as activity or a parked session that crashes stays hidden.
-          state[sessionId].lastActivityAt = Date.now();
+          // Unexpected exits wake parked sessions; intentional stops do not.
+          if (!payload.stoppedByUser) {
+            state[sessionId].lastActivityAt = Date.now();
+          }
         });
       },
     });

@@ -15,14 +15,22 @@ export type TerminalSessionStatus =
   | "stopped"
   | "error";
 
+export type TerminalExitPayload = {
+  exitCode: number | null;
+  signal?: number;
+  errorMessage?: string;
+  /**
+   * True when this exit is the result of `stop()` (settle, Stop button, etc.).
+   * False when the process died on its own. Callers use this to decide whether
+   * the exit counts as fresh activity for inbox settle/snooze.
+   */
+  stoppedByUser: boolean;
+};
+
 type TerminalSessionOpts = {
   onStatusChange: (status: TerminalSessionStatus) => void;
   onData: (payload: { chunk: string; bufferedOutput: string }) => void;
-  onExit: (payload: {
-    exitCode: number | null;
-    signal?: number;
-    errorMessage?: string;
-  }) => void;
+  onExit: (payload: TerminalExitPayload) => void;
 };
 
 type TerminalStartOpts = {
@@ -137,12 +145,16 @@ export function createTerminalSession(events: TerminalSessionOpts) {
       return;
     }
 
+    // Capture before dispose: `stopping` is set only by `stop()`, so it is the
+    // signal that distinguishes an intentional teardown from a crash.
+    const stoppedByUser = stopping;
     await disposable.dispose();
     changeSessionStatus(status);
     events.onExit({
       exitCode,
       signal,
       errorMessage,
+      stoppedByUser,
     });
   };
 

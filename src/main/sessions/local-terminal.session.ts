@@ -228,9 +228,10 @@ export class LocalTerminalSessionsManager {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
           state[sessionId].offlineBuffer = payload.snapshot;
-          // See session-service's onExit: the inbox lifecycle needs an exit to
-          // register as activity or a parked session that crashes stays hidden.
-          state[sessionId].lastActivityAt = Date.now();
+          // Unexpected exits wake parked sessions; intentional stops do not.
+          if (!payload.stoppedByUser) {
+            state[sessionId].lastActivityAt = Date.now();
+          }
         });
       },
     });
