@@ -9,6 +9,12 @@ const SETTINGS_FILE = "settings.jsonc";
 
 export const projectSettingsFileSchema = z.object({
   worktreeSetupCommands: z.string().optional().catch(undefined),
+  /**
+   * Project-relative path to the icon shown for this project, checked before
+   * the conventional favicon locations. Read-only for us: nothing in the app
+   * writes it, so a repository can check it in and keep it.
+   */
+  iconPath: z.string().trim().min(1).optional().catch(undefined),
 });
 
 export type ProjectSettingsFile = z.infer<typeof projectSettingsFileSchema>;

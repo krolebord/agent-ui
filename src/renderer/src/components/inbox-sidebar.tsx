@@ -58,6 +58,7 @@ import {
 import { useCallback, useMemo, useState } from "react";
 import { useAddProjectDialogStore } from "./add-project-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
+import { ProjectFavicon } from "./project-favicon";
 import {
   CommonSessionContextMenuItems,
   sessionTypeIcon,
@@ -606,7 +607,13 @@ export function InboxSidebar() {
               className="h-7 w-full justify-start gap-1.5 px-1.5 text-xs text-zinc-300"
               aria-label="Filter sessions by project"
             >
-              <Folder className="size-3.5 shrink-0" />
+              {/* Scoped to one project, the trigger is the only place its
+                  identity shows, so it carries that project's icon. */}
+              {projectScopePath === null ? (
+                <Folder className="size-3.5 shrink-0" />
+              ) : (
+                <ProjectFavicon projectPath={projectScopePath} />
+              )}
               <span className="min-w-0 flex-1 truncate text-left">
                 {scopeLabel}
               </span>
@@ -630,6 +637,7 @@ export function InboxSidebar() {
                       key={project.path}
                       value={project.path}
                     >
+                      <ProjectFavicon projectPath={project.path} />
                       <span className="min-w-0 truncate">
                         {getProjectDisplayName(project)}
                       </span>

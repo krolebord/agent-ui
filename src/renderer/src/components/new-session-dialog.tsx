@@ -463,24 +463,31 @@ export function NewSessionDialog() {
             {isEditing ? "Edit scheduled session" : "Start new session"}
           </DialogTitle>
           <div className="flex items-start justify-between gap-2">
-            <DialogDescription>
+            <DialogDescription className="min-w-0">
               {isEditing ? (
-                <span className="text-foreground">Edit scheduled session</span>
-              ) : (
-                "Start a new session"
-              )}
+                <>
+                  <span className="text-foreground">
+                    Edit scheduled session
+                  </span>
+                  <br />
+                </>
+              ) : null}
+              <span className="inline-flex max-w-full items-center gap-0.5">
+                Project:
+                <ProjectPicker
+                  id="new-session-project"
+                  value={projectPath}
+                  onChange={setPickedProjectPath}
+                />
+              </span>
+              <br />
+              <span className="text-xs text-muted-foreground">
+                {projectPath}
+              </span>
             </DialogDescription>
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
               <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
             </span>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="new-session-project">Project</Label>
-            <ProjectPicker
-              id="new-session-project"
-              value={projectPath}
-              onChange={setPickedProjectPath}
-            />
           </div>
         </DialogHeader>
 

@@ -13,6 +13,7 @@ import type { Services } from "./create-services";
 import log from "./logger";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
+import { getProjectFaviconDataUrl } from "./project-favicon";
 import {
   type ProjectSettingsFile,
   readProjectSettingsFile,
@@ -363,6 +364,11 @@ export const projectsRouter = {
       assertProjectPathInteractionAllowed(input.path, context);
       return refreshTrackedProject(input.path, context);
     }),
+  getFavicon: procedure
+    .input(z.object({ path: projectPathSchema }))
+    .handler(async ({ input }) => ({
+      dataUrl: await getProjectFaviconDataUrl(normalizeProjectPath(input.path)),
+    })),
   getUncommittedDiff: procedure
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input, context }) => {
