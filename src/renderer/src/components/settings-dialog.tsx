@@ -366,7 +366,7 @@ function DockBadgeForAttentionToggle() {
   );
 }
 
-const machineStatsIntervalOptions = [15, 30, 60, 300] as const;
+const machineStatsIntervalOptions = [5, 15, 30, 60, 300] as const;
 
 type MachineStatsIntervalSeconds = (typeof machineStatsIntervalOptions)[number];
 

@@ -17,9 +17,10 @@ export type SleepBlockMode = (typeof sleepBlockModes)[number];
 export const sidebarViews = ["projects", "inbox"] as const;
 export type SidebarView = (typeof sidebarViews)[number];
 
-export const machineStatsPollIntervalSeconds = [15, 30, 60, 300] as const;
+export const machineStatsPollIntervalSeconds = [5, 15, 30, 60, 300] as const;
 
 const machineStatsPollIntervalSchema = z.union([
+  z.literal(5),
   z.literal(15),
   z.literal(30),
   z.literal(60),
