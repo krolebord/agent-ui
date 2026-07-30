@@ -210,7 +210,9 @@ function getSessionInitialPrompt(session: Session): string | undefined {
   return prompt || undefined;
 }
 
-function useCommonSessionMenuActions(session: Session): SessionMenuAction[] {
+export function useCommonSessionMenuActions(
+  session: Session,
+): SessionMenuAction[] {
   const openRename = useRenameSessionDialogStore((x) => x.open);
   const openRawState = useRawSessionStateDialogStore((x) => x.open);
   const moveSessionToProjectActions = useMoveSessionToProjectActions(session);
@@ -289,7 +291,7 @@ function useCommonSessionMenuActions(session: Session): SessionMenuAction[] {
   ];
 }
 
-function renderContextMenuActions(actions: SessionMenuAction[]) {
+export function renderContextMenuActions(actions: SessionMenuAction[]) {
   return actions.map((action, index) => {
     const key = action.key ?? `${action.type}:${index}`;
 
@@ -340,7 +342,7 @@ function renderContextMenuActions(actions: SessionMenuAction[]) {
   });
 }
 
-function renderDropdownMenuActions(actions: SessionMenuAction[]) {
+export function renderDropdownMenuActions(actions: SessionMenuAction[]) {
   return actions.map((action, index) => {
     const key = action.key ?? `${action.type}:${index}`;
 
@@ -389,16 +391,6 @@ function renderDropdownMenuActions(actions: SessionMenuAction[]) {
       </DropdownMenuItem>
     );
   });
-}
-
-export function CommonSessionContextMenuItems({
-  session,
-}: {
-  session: Session;
-}) {
-  const actions = useCommonSessionMenuActions(session);
-
-  return <>{renderContextMenuActions(actions)}</>;
 }
 
 export const SessionSidebarItemTrigger = forwardRef<

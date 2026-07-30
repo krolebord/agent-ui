@@ -4,8 +4,6 @@ import { Button } from "@renderer/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@renderer/components/ui/context-menu";
 import {
@@ -49,6 +47,7 @@ import {
   EllipsisVertical,
   Folder,
   FolderPlus,
+  MoreHorizontal,
   PlayIcon,
   Plus,
   SquareIcon,
@@ -60,9 +59,12 @@ import { useAddProjectDialogStore } from "./add-project-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { ProjectFavicon } from "./project-favicon";
 import {
-  CommonSessionContextMenuItems,
+  renderContextMenuActions,
+  renderDropdownMenuActions,
+  type SessionMenuAction,
   sessionTypeIcon,
   statusIndicatorMeta,
+  useCommonSessionMenuActions,
 } from "./session-sidebar-item";
 import { SidebarNavMenuItems, SidebarViewToggle } from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
@@ -131,19 +133,24 @@ function InboxStatusOrTime({
 
 /**
  * Rendered as a sibling of the row button, never a child: the row itself is a
- * native <button>, so a nested button would be invalid markup. The wrapper
- * positions these over the time/status slot, which fades out on hover.
+ * native <button>, so a nested button would be invalid markup. On a fine
+ * pointer the wrapper positions these over the time/status slot, which fades
+ * out on hover; on a coarse pointer there is no hover to reveal them, so they
+ * are always visible, grow to a 32px target and the row reserves width for them
+ * instead of letting them overlap.
  */
 function RowIconButton({
   icon: Icon,
   label,
   onClick,
   disabled,
+  className,
 }: {
   icon: LucideIcon;
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  className?: string;
 }) {
   return (
     <button
@@ -155,10 +162,40 @@ function RowIconButton({
         event.stopPropagation();
         onClick();
       }}
-      className="pointer-events-auto inline-flex h-full cursor-pointer items-center rounded-md px-1.5 text-zinc-400 opacity-0 transition hover:text-zinc-100 focus-visible:opacity-100 disabled:cursor-default disabled:opacity-40 group-hover/inbox-row:opacity-100 pointer-coarse:opacity-100"
+      className={cn(
+        "pointer-events-auto inline-flex h-full cursor-pointer items-center rounded-md px-1.5 text-zinc-400 opacity-0 transition hover:text-zinc-100 focus-visible:opacity-100 disabled:cursor-default disabled:opacity-40 group-hover/inbox-row:opacity-100 pointer-coarse:size-8 pointer-coarse:justify-center pointer-coarse:px-0 pointer-coarse:opacity-100",
+        className,
+      )}
     >
-      <Icon className="size-3.5" />
+      <Icon className="size-3.5 pointer-coarse:size-4" />
     </button>
+  );
+}
+
+/**
+ * Touch has no right-click, so the row's context menu is unreachable without a
+ * visible trigger. Mirrors the project tree's coarse-pointer session menu: same
+ * actions, same 32px button, hidden wherever a real context menu exists.
+ */
+function RowMenuButton({ actions }: { actions: SessionMenuAction[] }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label="Session actions"
+          title="Session actions"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          className="pointer-events-auto hidden size-8 cursor-pointer items-center justify-center rounded-md text-zinc-400 transition hover:bg-white/10 hover:text-zinc-100 pointer-coarse:flex"
+        >
+          <MoreHorizontal className="size-4" aria-hidden="true" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {renderDropdownMenuActions(actions)}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -179,6 +216,7 @@ function InboxRow({
     (x) => x.activeSessionId === session.sessionId,
   );
   const lifecycle = useSessionLifecycleActions(session);
+  const commonActions = useCommonSessionMenuActions(session);
   const typeMeta = sessionTypeIcon[session.type];
   const needsAttention = inboxRowNeedsAttention(session);
   const settleable = canSettleSession(session);
@@ -204,48 +242,72 @@ function InboxRow({
           : "text-zinc-300 hover:bg-white/8 hover:text-zinc-100",
   );
 
+  // One action list, two renderings: the right-click context menu and, on touch,
+  // the row's `⋯` button. Settle first (status-dependent), then start/stop
+  // (always available for a session), matching the row button order.
+  const menuActions: SessionMenuAction[] = [
+    ...(isSettled
+      ? ([
+          {
+            type: "item",
+            key: "unsettle-session",
+            label: "Un-settle session",
+            icon: Undo2,
+            onSelect: () => onUnsettle(session.sessionId),
+          },
+        ] satisfies SessionMenuAction[])
+      : settleable
+        ? ([
+            {
+              type: "item",
+              key: "settle-session",
+              label: "Settle session",
+              icon: Check,
+              onSelect: () => onSettle(session.sessionId),
+            },
+          ] satisfies SessionMenuAction[])
+        : []),
+    ...(lifecycle.resume
+      ? ([
+          {
+            type: "item",
+            key: "resume-session",
+            label: "Resume session",
+            icon: PlayIcon,
+            onSelect: lifecycle.resume,
+            disabled: lifecycle.isResumePending,
+          },
+        ] satisfies SessionMenuAction[])
+      : []),
+    ...(lifecycle.stop
+      ? ([
+          {
+            type: "item",
+            key: "stop-session",
+            label: lifecycle.stopLabel,
+            icon: SquareIcon,
+            onSelect: lifecycle.stop,
+            disabled: lifecycle.isStopPending,
+          },
+        ] satisfies SessionMenuAction[])
+      : []),
+    { type: "separator", key: "after-lifecycle" },
+    ...commonActions,
+    { type: "separator", key: "before-delete-session" },
+    {
+      type: "item",
+      key: "delete-session",
+      label: "Delete session",
+      icon: Trash2,
+      onSelect: lifecycle.remove,
+      disabled: lifecycle.isRemovePending,
+      variant: "destructive",
+    },
+  ];
+
   const menu = (
     <ContextMenuContent>
-      {lifecycle.resume ? (
-        <ContextMenuItem
-          onClick={lifecycle.resume}
-          disabled={lifecycle.isResumePending}
-        >
-          <PlayIcon className="size-3.5" />
-          Resume session
-        </ContextMenuItem>
-      ) : null}
-      {lifecycle.stop ? (
-        <ContextMenuItem
-          onClick={lifecycle.stop}
-          disabled={lifecycle.isStopPending}
-        >
-          <SquareIcon className="size-3.5" />
-          {lifecycle.stopLabel}
-        </ContextMenuItem>
-      ) : null}
-      {isSettled ? (
-        <ContextMenuItem onClick={() => onUnsettle(session.sessionId)}>
-          <Undo2 className="size-3.5" />
-          Un-settle session
-        </ContextMenuItem>
-      ) : settleable ? (
-        <ContextMenuItem onClick={() => onSettle(session.sessionId)}>
-          <Check className="size-3.5" />
-          Settle session
-        </ContextMenuItem>
-      ) : null}
-      <ContextMenuSeparator />
-      <CommonSessionContextMenuItems session={session} />
-      <ContextMenuSeparator />
-      <ContextMenuItem
-        variant="destructive"
-        onClick={lifecycle.remove}
-        disabled={lifecycle.isRemovePending}
-      >
-        <Trash2 className="size-3.5" />
-        Delete session
-      </ContextMenuItem>
+      {renderContextMenuActions(menuActions)}
     </ContextMenuContent>
   );
 
@@ -257,35 +319,52 @@ function InboxRow({
             <button
               type="button"
               onClick={open}
-              className={cn(rowClassName, "flex h-8 items-center gap-2")}
+              className={cn(
+                rowClassName,
+                // Coarse: taller row, and width reserved for the two
+                // always-visible buttons so they never sit on the timestamp.
+                "flex h-8 items-center gap-2 pointer-coarse:h-11 pointer-coarse:pr-[4.75rem]",
+              )}
             >
-              {typeMeta ? (
-                <typeMeta.icon
-                  className={cn(
-                    "size-3 shrink-0 transition",
-                    isActive
-                      ? "text-zinc-300"
-                      : "text-zinc-600 group-hover/inbox-row:text-zinc-400",
-                  )}
-                  aria-hidden="true"
-                />
-              ) : null}
+              {/* No project line to lean on here, so the icon is the only thing
+                  saying which project this settled session came from. */}
+              <ProjectFavicon
+                projectPath={session.startupConfig.cwd}
+                className={cn(
+                  "transition",
+                  isActive
+                    ? "text-zinc-300"
+                    : "text-zinc-600 group-hover/inbox-row:text-zinc-400",
+                )}
+              />
               <span className="min-w-0 flex-1 truncate text-sm">
                 {session.title}
               </span>
-              <span className="ml-auto min-w-8 shrink-0 text-right text-xs tabular-nums text-zinc-500 transition group-hover/inbox-row:opacity-0 pointer-coarse:opacity-0">
-                {relativeLabelAt(session, resolveSettledTimestamp(session))}
+              {/* The fade only exists to clear room for the hover-revealed
+                  buttons, so it is scoped to pointers that can hover — on touch
+                  the timestamp has its own reserved space and stays put. */}
+              <span className="ml-auto flex shrink-0 items-center gap-1.5 transition pointer-fine:group-hover/inbox-row:opacity-0">
+                <span className="min-w-8 text-right text-xs tabular-nums text-zinc-500">
+                  {relativeLabelAt(session, resolveSettledTimestamp(session))}
+                </span>
+                {typeMeta ? (
+                  <typeMeta.icon
+                    className="size-3 shrink-0 text-zinc-600"
+                    aria-hidden="true"
+                  />
+                ) : null}
               </span>
             </button>
           </ContextMenuTrigger>
           {menu}
         </ContextMenu>
-        <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center">
+        <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5">
           <RowIconButton
             icon={Undo2}
             label="Un-settle session"
             onClick={() => onUnsettle(session.sessionId)}
           />
+          <RowMenuButton actions={menuActions} />
         </span>
       </li>
     );
@@ -298,31 +377,28 @@ function InboxRow({
           <button
             type="button"
             onClick={open}
-            className={cn(rowClassName, "py-2")}
+            className={cn(
+              rowClassName,
+              "py-2 pointer-coarse:py-2.5 pointer-coarse:pr-[4.75rem]",
+            )}
           >
             {/* Phrasing content only: the row is a <button>, so the lines are
                 spans made block/flex rather than divs. */}
             <span className="flex h-4 min-w-0 items-center gap-1.5">
-              {typeMeta ? (
-                <span
-                  className="inline-flex shrink-0"
-                  title={typeMeta.label}
-                  role="img"
-                  aria-label={typeMeta.label}
-                >
-                  <typeMeta.icon
-                    className={cn(
-                      "size-3",
-                      // Steps down with the title so the project line stays
-                      // secondary rather than matching a greyed-out title.
-                      session.status === "stopped"
-                        ? "text-zinc-600"
-                        : "text-zinc-500",
-                    )}
-                    aria-hidden="true"
-                  />
-                </span>
-              ) : null}
+              {/* The line names the project, so it leads with the project's own
+                  icon; the agent type moved beside the timestamp, where the
+                  project tree's session rows already keep it. */}
+              <ProjectFavicon
+                projectPath={session.startupConfig.cwd}
+                className={cn(
+                  "size-3.5",
+                  // Steps down with the title so the project line stays
+                  // secondary rather than matching a greyed-out title.
+                  session.status === "stopped"
+                    ? "text-zinc-600"
+                    : "text-zinc-500",
+                )}
+              />
               <span
                 className={cn(
                   "min-w-0 flex-1 truncate text-xs",
@@ -333,11 +409,33 @@ function InboxRow({
               >
                 {projectLabel}
               </span>
-              <span className="ml-auto flex min-w-8 shrink-0 justify-end transition group-hover/inbox-row:opacity-0 pointer-coarse:opacity-0">
-                <InboxStatusOrTime
-                  session={session}
-                  timestamp={session.lastActivityAt}
-                />
+              {/* Status is the point of this view, so on touch it keeps its own
+                  space rather than being traded away for the action buttons. */}
+              <span className="ml-auto flex shrink-0 items-center gap-1.5 transition pointer-fine:group-hover/inbox-row:opacity-0">
+                <span className="flex min-w-8 justify-end">
+                  <InboxStatusOrTime
+                    session={session}
+                    timestamp={session.lastActivityAt}
+                  />
+                </span>
+                {typeMeta ? (
+                  <span
+                    className="inline-flex shrink-0"
+                    title={typeMeta.label}
+                    role="img"
+                    aria-label={typeMeta.label}
+                  >
+                    <typeMeta.icon
+                      className={cn(
+                        "size-3",
+                        session.status === "stopped"
+                          ? "text-zinc-600"
+                          : "text-zinc-500",
+                      )}
+                      aria-hidden="true"
+                    />
+                  </span>
+                ) : null}
               </span>
             </span>
             <span
@@ -352,22 +450,14 @@ function InboxRow({
         </ContextMenuTrigger>
         {menu}
       </ContextMenu>
-      <span className="pointer-events-none absolute right-1 top-2 flex h-4 items-center">
-        {lifecycle.resume ? (
-          <RowIconButton
-            icon={PlayIcon}
-            label="Resume session"
-            disabled={lifecycle.isResumePending}
-            onClick={lifecycle.resume}
-          />
-        ) : lifecycle.stop ? (
-          <RowIconButton
-            icon={SquareIcon}
-            label={lifecycle.stopLabel}
-            disabled={lifecycle.isStopPending}
-            onClick={lifecycle.stop}
-          />
-        ) : null}
+      {/* Pinned to the status line on a fine pointer, where it replaces the
+          status text on hover; centred over the whole card on touch, where the
+          buttons are permanent. */}
+      <span className="pointer-events-none absolute right-1 top-2 flex h-4 items-center pointer-coarse:top-0 pointer-coarse:bottom-0 pointer-coarse:h-auto pointer-coarse:gap-0.5">
+        {/* Settle is status-dependent (left); start/stop is always on the
+            session so it stays next to the menu. On touch start/stop stays
+            hidden — the two slots go to Settle and the menu, which carries
+            start/stop anyway. */}
         {settleable ? (
           <RowIconButton
             icon={Check}
@@ -375,6 +465,24 @@ function InboxRow({
             onClick={() => onSettle(session.sessionId)}
           />
         ) : null}
+        {lifecycle.resume ? (
+          <RowIconButton
+            icon={PlayIcon}
+            label="Resume session"
+            disabled={lifecycle.isResumePending}
+            onClick={lifecycle.resume}
+            className="pointer-coarse:hidden"
+          />
+        ) : lifecycle.stop ? (
+          <RowIconButton
+            icon={SquareIcon}
+            label={lifecycle.stopLabel}
+            disabled={lifecycle.isStopPending}
+            onClick={lifecycle.stop}
+            className="pointer-coarse:hidden"
+          />
+        ) : null}
+        <RowMenuButton actions={menuActions} />
       </span>
     </li>
   );
@@ -395,7 +503,7 @@ function ShelfHeader({
         type="button"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+        className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left pointer-coarse:min-h-10"
       >
         <span className="text-xs font-medium text-zinc-500">
           {expanded ? "Settled" : `Settled (${count})`}
@@ -604,7 +712,7 @@ export function InboxSidebar() {
           <DropdownMenuTrigger asChild>
             <Button
               variant="flat"
-              className="h-7 w-full justify-start gap-1.5 px-1.5 text-xs text-zinc-300"
+              className="h-7 w-full justify-start gap-1.5 px-1.5 text-xs text-zinc-300 pointer-coarse:h-10 pointer-coarse:px-2 pointer-coarse:text-sm"
               aria-label="Filter sessions by project"
             >
               {/* Scoped to one project, the trigger is the only place its
@@ -700,7 +808,7 @@ export function InboxSidebar() {
                 onClick={() =>
                   setSettledVisibleCount((count) => count + SETTLED_PAGE_COUNT)
                 }
-                className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2.5 text-left text-sm text-zinc-500 transition hover:bg-white/8 hover:text-zinc-200"
+                className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-2.5 text-left text-sm text-zinc-500 transition hover:bg-white/8 hover:text-zinc-200 pointer-coarse:h-11"
               >
                 <Plus className="size-3.5 shrink-0" aria-hidden="true" />
                 Show {Math.min(hiddenSettledCount, SETTLED_PAGE_COUNT)} more
@@ -717,7 +825,7 @@ export function InboxSidebar() {
                 <button
                   type="button"
                   onClick={openAddProjectDialog}
-                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1 font-medium text-zinc-400 transition hover:bg-white/8 hover:text-zinc-100"
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1 font-medium text-zinc-400 transition hover:bg-white/8 hover:text-zinc-100 pointer-coarse:min-h-10 pointer-coarse:px-3 pointer-coarse:text-sm"
                 >
                   <FolderPlus className="size-3" />
                   Add project

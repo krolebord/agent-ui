@@ -38,7 +38,6 @@ import {
   EllipsisVertical,
   Eye,
   EyeOff,
-  Folder,
   FolderOpen,
   FolderPlus,
   GitBranch,
@@ -60,6 +59,7 @@ import { useAddProjectDialogStore } from "./add-project-dialog";
 import { useConfirmDialogStore } from "./confirm-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
+import { ProjectFavicon } from "./project-favicon";
 import { useProjectWorktreeDialogStore } from "./project-worktree-dialog";
 import { RawSessionStateDialog } from "./raw-session-state-dialog";
 import { RenameSessionDialog } from "./rename-session-dialog";
@@ -533,22 +533,25 @@ function SortableProjectGroup({
         >
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1 text-sm font-medium text-zinc-100">
-              {group.collapsed ? (
-                <Folder
-                  className={cn(
-                    "size-3 shrink-0",
-                    hasAwaitingUserInput ? "text-violet-400" : "text-zinc-400",
-                  )}
-                />
-              ) : (
-                <FolderOpen
-                  className={cn(
-                    "size-3 shrink-0",
-                    hasAwaitingUserInput ? "text-violet-400" : "text-zinc-400",
-                  )}
-                />
-              )}
-              <span className="truncate">{group.displayName}</span>
+              {/* The project's own icon, with no collapsed/expanded variant:
+                  whether the sessions are showing says that already. The
+                  awaiting-input tint the folder used to carry moves to the
+                  name, since an arbitrary image can't be recolored. */}
+              <ProjectFavicon
+                projectPath={group.path}
+                className={cn(
+                  "size-3.5",
+                  hasAwaitingUserInput ? "text-violet-400" : "text-zinc-400",
+                )}
+              />
+              <span
+                className={cn(
+                  "truncate",
+                  hasAwaitingUserInput && "text-violet-300",
+                )}
+              >
+                {group.displayName}
+              </span>
               {group.hidden ? (
                 <EyeOff
                   className="size-3 shrink-0 text-zinc-500"

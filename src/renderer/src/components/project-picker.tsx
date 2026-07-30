@@ -16,6 +16,7 @@ import { cn } from "@renderer/lib/utils";
 import { buildProjectPickerOptions } from "@renderer/services/terminal-session-selectors";
 import { Check, ChevronsUpDown, GitFork } from "lucide-react";
 import { useMemo, useState } from "react";
+import { ProjectFavicon } from "./project-favicon";
 
 interface ProjectPickerProps {
   value: string;
@@ -59,6 +60,9 @@ export function ProjectPicker({
           disabled={disabled}
           className="text-foreground -mr-1 h-6 max-w-full gap-1 px-1 font-normal"
         >
+          {selected ? (
+            <ProjectFavicon projectPath={selected.path} className="size-3.5" />
+          ) : null}
           <span className="truncate">
             {selected?.label ?? "Select project"}
           </span>
@@ -106,6 +110,12 @@ export function ProjectPicker({
                       "size-3 shrink-0",
                       option.path === value ? "opacity-100" : "opacity-0",
                     )}
+                  />
+                  {/* Falls back to a folder rather than nothing so the labels
+                      stay in one column whether a project has an icon or not. */}
+                  <ProjectFavicon
+                    projectPath={option.path}
+                    className="size-3.5"
                   />
                   <span className="truncate text-sm">{option.label}</span>
                   {option.isWorktree && (
