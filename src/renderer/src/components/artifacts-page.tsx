@@ -17,7 +17,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 function formatBytes(bytes: number): string {
@@ -62,10 +62,15 @@ export function ArtifactsPage() {
     orpc.artifacts.refreshAvailability.mutationOptions(),
   );
   const { mutate: refresh } = refreshAvailability;
+  const refreshedIds = useRef<Set<string>>(new Set());
 
+  // Re-check availability on mount and whenever an agent publishes something new.
   useEffect(() => {
-    refresh(undefined);
-  }, [refresh]);
+    const ids = Object.keys(artifactsById);
+    const hasNewArtifact = ids.some((id) => !refreshedIds.current.has(id));
+    refreshedIds.current = new Set(ids);
+    if (hasNewArtifact) refresh(undefined);
+  }, [artifactsById, refresh]);
 
   const artifacts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
