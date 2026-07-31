@@ -73,6 +73,7 @@ const sessionsRouter = {
       }
       const sessionType = session.type;
 
+      let didSettle = false;
       context.sessions.state.updateState((state) => {
         const current = state[input.sessionId];
         if (!current || !canSettleSession(current)) {
@@ -85,7 +86,14 @@ const sessionsRouter = {
         if (current.status === "awaiting_user_response") {
           current.status = "idle";
         }
+        didSettle = true;
       });
+
+      // The session may have become busy or entered approval between the
+      // snapshot above and this update. Do not stop work we failed to park.
+      if (!didSettle) {
+        return;
+      }
 
       // Settling frees the live process. Stop after the marker is written so
       // the row is already parked. Intentional stops do not bump

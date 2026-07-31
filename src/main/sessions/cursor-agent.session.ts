@@ -189,6 +189,7 @@ export const cursorAgentSessionsRouter = {
 interface CursorAgentSessionRecord {
   terminalId: string;
   activityMonitor: CursorActivityMonitor | null;
+  beginDispose: () => void;
   dispose: () => Promise<void>;
 }
 
@@ -391,6 +392,7 @@ export class CursorAgentSessionsManager {
         log.error("Error starting cursor agent live session", error);
       },
     });
+    let isDisposing = false;
 
     const setSessionStatus = (
       nextStatus: SessionStatus,
@@ -419,6 +421,9 @@ export class CursorAgentSessionsManager {
 
     const activityMonitor = new CursorActivityMonitor({
       onStatusChange: (nextActivityStatus) => {
+        if (isDisposing) {
+          return;
+        }
         activityState = nextActivityStatus;
         const runtime = this.terminalManager.getRuntime(sessionId);
         if (!runtime) {
@@ -477,7 +482,14 @@ export class CursorAgentSessionsManager {
       plan,
     });
 
-    disposable.addDisposable(() => activityMonitor.stopMonitoring());
+    const beginDispose = () => {
+      if (isDisposing) {
+        return;
+      }
+      isDisposing = true;
+      activityMonitor.stopMonitoring({ preserveState: true });
+    };
+    disposable.addDisposable(beginDispose);
     if (hookLogFilePath) {
       await activityMonitor.startMonitoring({
         stateFilePath: hookLogFilePath,
@@ -503,7 +515,9 @@ export class CursorAgentSessionsManager {
       },
       transformInput: (data) => data.replaceAll(CURSOR_FOCUS_IN, ""),
       onData: (chunk) => {
-        activityMonitor.handleTerminalOutput(chunk);
+        if (!isDisposing) {
+          activityMonitor.handleTerminalOutput(chunk);
+        }
 
         const focusReportingOutput = focusReportingOutputTail + chunk;
         if (focusReportingOutput.includes(CURSOR_FOCUS_REPORTING_ENABLED)) {
@@ -546,12 +560,14 @@ export class CursorAgentSessionsManager {
     const session: CursorAgentSessionRecord = {
       terminalId: sessionId,
       activityMonitor,
+      beginDispose,
       dispose: disposable.dispose,
     };
     this.liveSessions.set(sessionId, session);
     disposable.addDisposable(() => this.liveSessions.delete(sessionId));
 
     if (!this.terminalManager.getRuntime(sessionId)) {
+      session.beginDispose();
       await disposable.dispose();
     }
   }
@@ -561,6 +577,7 @@ export class CursorAgentSessionsManager {
     if (!liveSession) {
       return;
     }
+    liveSession.beginDispose();
     this.persistOfflineBuffer(
       sessionId,
       offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),

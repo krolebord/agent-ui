@@ -39,6 +39,7 @@ interface SessionRecord {
   terminalId: string;
   activityMonitor: ClaudeActivityMonitor;
   stateFilePath: string;
+  beginDispose: () => void;
   dispose: () => Promise<void>;
 }
 interface SessionServiceOptions {
@@ -594,6 +595,7 @@ export class SessionsServiceNew {
         });
       },
     });
+    let isDisposing = false;
     const stateFilePath = await this.stateFileManager.create(opts.sessionId);
     disposable.addDisposable(() =>
       this.stateFileManager.cleanup(stateFilePath),
@@ -612,6 +614,9 @@ export class SessionsServiceNew {
 
     const activityMonitor = new ClaudeActivityMonitor({
       onStatusChange: () => {
+        if (isDisposing) {
+          return;
+        }
         const runtime = this.terminalManager.getRuntime(opts.sessionId);
         if (!runtime) {
           return;
@@ -649,7 +654,16 @@ export class SessionsServiceNew {
         this.requestTitleFromPrompt(opts.sessionId, prompt);
       },
     });
-    disposable.addDisposable(() => activityMonitor.stopMonitoring());
+    const beginDispose = () => {
+      if (isDisposing) {
+        return;
+      }
+      isDisposing = true;
+      // Stop hook delivery before terminal teardown. Preserving the last state
+      // avoids turning an internal reset to `unknown` into activity.
+      activityMonitor.stopMonitoring({ preserveState: true });
+    };
+    disposable.addDisposable(beginDispose);
     activityMonitor.startMonitoring(stateFilePath);
 
     const claudeArgs = buildClaudeArgs({
@@ -734,6 +748,7 @@ export class SessionsServiceNew {
       terminalId: opts.sessionId,
       activityMonitor,
       stateFilePath,
+      beginDispose,
       dispose: disposable.dispose,
     };
 
@@ -742,6 +757,7 @@ export class SessionsServiceNew {
     disposable.addDisposable(() => this.titleGeneration.forget(opts.sessionId));
 
     if (!this.terminalManager.getRuntime(opts.sessionId)) {
+      liveSession.beginDispose();
       await disposable.dispose();
       return null;
     }
@@ -788,6 +804,7 @@ export class SessionsServiceNew {
     if (!liveSession) {
       return;
     }
+    liveSession.beginDispose();
     this.persistOfflineBuffer(
       sessionId,
       offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),

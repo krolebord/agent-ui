@@ -241,6 +241,7 @@ interface CodexSessionRecord {
   terminalId: string;
   appServer: CodexAppServerProcess;
   tracker: CodexAppServerTracker;
+  beginDispose: () => void;
   dispose: () => Promise<void>;
 }
 
@@ -724,6 +725,7 @@ export class CodexSessionsManager {
 
     let trackerState: CodexAppServerSessionState | null = null;
     let runtimeErrorMessage: string | undefined;
+    let isDisposing = false;
 
     const syncSessionStatus = () => {
       const runtime = this.terminalManager.getRuntime(sessionId);
@@ -731,6 +733,9 @@ export class CodexSessionsManager {
       setSessionStatus(getCodexSessionStatus(terminalStatus, trackerState));
     };
     const updateSubagent = (update: CodexAppServerSubagentUpdate) => {
+      if (isDisposing) {
+        return;
+      }
       state.updateState((state) => {
         const session = state[sessionId];
         if (!session || session.type !== "codex-local-terminal") {
@@ -901,6 +906,9 @@ export class CodexSessionsManager {
       terminalId: sessionId,
       appServer,
       tracker,
+      beginDispose: () => {
+        isDisposing = true;
+      },
       dispose: async () => {
         await this.terminalManager.stopTerminal(sessionId);
         await tracker.stop();
@@ -910,6 +918,7 @@ export class CodexSessionsManager {
     this.liveSessions.set(sessionId, session);
 
     if (!this.terminalManager.getRuntime(sessionId)) {
+      session.beginDispose();
       await session.dispose();
       this.liveSessions.delete(sessionId);
       return;
@@ -978,6 +987,7 @@ export class CodexSessionsManager {
       return;
     }
 
+    liveSession.beginDispose();
     this.markSubagentsStopped(sessionId);
     this.persistOfflineBuffer(
       sessionId,

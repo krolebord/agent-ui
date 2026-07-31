@@ -417,6 +417,33 @@ describe("SessionsServiceNew", () => {
   });
 
   describe("stopLiveSession", () => {
+    it("ignores the activity monitor reset while stopping a settled session", async () => {
+      const { service, state } = createService();
+      const sessionId = await service.startNewSession(makeStartInput());
+      const session = state[sessionId];
+      expect(session).toBeDefined();
+      if (!session) {
+        return;
+      }
+
+      terminalSessionSpies.callbacks[0]?.onStatusChange("running");
+      const settledAt = Date.now();
+      session.lastActivityAt = settledAt;
+      session.settledAt = settledAt;
+      session.settledOverride = "settled";
+
+      activityMonitorSpies.stopMonitoring.mockImplementationOnce(() => {
+        activityMonitorSpies.callbacks[0]?.onStatusChange("unknown");
+      });
+
+      await service.stopLiveSession(sessionId);
+
+      expect(activityMonitorSpies.stopMonitoring).toHaveBeenCalledWith({
+        preserveState: true,
+      });
+      expect(state[sessionId]?.lastActivityAt).toBe(settledAt);
+    });
+
     it("cleans up the created state file path", async () => {
       const { service, state, stateFileManager, titleGeneration } =
         createService();

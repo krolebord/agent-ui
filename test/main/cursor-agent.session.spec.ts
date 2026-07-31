@@ -303,6 +303,45 @@ describe("CursorAgentSessionsManager", () => {
     );
   });
 
+  it("ignores the activity monitor reset while stopping a settled session", async () => {
+    const sessionsState = createState();
+    const state = sessionsState.state as Record<string, CursorAgentSessionData>;
+    seedCursorSession(state, "session-settled");
+
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      sessionLogFileManager: {
+        create: vi.fn(() => "/tmp/cursor-session-settled.ndjson"),
+        cleanup: vi.fn(),
+      },
+    });
+
+    await manager.startLiveSession({
+      sessionId: "session-settled",
+      cwd: "/tmp/project",
+      permissionMode: "default",
+      cursorChatId: undefined,
+    });
+    terminalSessionSpies.callbacks[0]?.onStatusChange("running");
+
+    const settledAt = Date.now();
+    state["session-settled"].lastActivityAt = settledAt;
+    state["session-settled"].settledAt = settledAt;
+    state["session-settled"].settledOverride = "settled";
+
+    const monitor = activityMonitorSpies.instances[0];
+    monitor?.stopMonitoring.mockImplementationOnce(() => {
+      monitor.callbacks.onStatusChange("unknown");
+    });
+
+    await manager.stopLiveSession("session-settled");
+
+    expect(monitor?.stopMonitoring).toHaveBeenCalledWith({
+      preserveState: true,
+    });
+    expect(state["session-settled"].lastActivityAt).toBe(settledAt);
+  });
+
   it("stores offlineBuffer when a cursor terminal is stopped", async () => {
     const sessionsState = createState();
     seedCursorSession(
