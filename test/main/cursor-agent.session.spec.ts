@@ -147,7 +147,6 @@ describe("CursorAgentSessionsManager", () => {
     const sessionsState = createState();
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
-      cursorConfigDir: "/tmp/cursor-config",
       sessionLogFileManager: {
         create: vi.fn(() => "/tmp/cursor-session-1.ndjson"),
         cleanup: vi.fn(),
@@ -180,7 +179,6 @@ describe("CursorAgentSessionsManager", () => {
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
-      cursorConfigDir: "/tmp/cursor-config",
       sessionLogFileManager,
     });
 
@@ -199,9 +197,11 @@ describe("CursorAgentSessionsManager", () => {
       expect.objectContaining({
         env: {
           AGENT_UI_CURSOR_STATE_FILE: "/tmp/cursor-session-1.ndjson",
-          CURSOR_CONFIG_DIR: "/tmp/cursor-config",
         },
       }),
+    );
+    expect(monitor?.startMonitoring.mock.invocationCallOrder[0]).toBeLessThan(
+      terminalSessionSpies.start.mock.invocationCallOrder[0],
     );
 
     const callbacks = terminalSessionSpies.callbacks[0];
@@ -255,7 +255,6 @@ describe("CursorAgentSessionsManager", () => {
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
-      cursorConfigDir: "/tmp/cursor-config",
       sessionLogFileManager,
     });
 
@@ -296,7 +295,6 @@ describe("CursorAgentSessionsManager", () => {
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
-      cursorConfigDir: null,
       sessionLogFileManager: null,
     });
 
@@ -339,7 +337,6 @@ describe("CursorAgentSessionsManager", () => {
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
-      cursorConfigDir: "/tmp/cursor-config",
       sessionLogFileManager: {
         create: vi.fn(() => "/tmp/cursor-session-title.ndjson"),
         cleanup: vi.fn(),
@@ -388,7 +385,6 @@ describe("CursorAgentSessionsManager", () => {
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
-      cursorConfigDir: "/tmp/cursor-config",
       sessionLogFileManager: {
         create: vi.fn(() => "/tmp/cursor-session-named.ndjson"),
         cleanup: vi.fn(),
@@ -421,7 +417,6 @@ describe("CursorAgentSessionsManager", () => {
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
-      cursorConfigDir: null,
       sessionLogFileManager: null,
     });
 

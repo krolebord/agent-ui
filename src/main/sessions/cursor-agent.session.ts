@@ -193,7 +193,6 @@ interface CursorAgentSessionsManagerOptions {
   state: SessionServiceState;
   terminalManager?: TerminalManager;
   titleGeneration?: TitleGenerationService;
-  cursorConfigDir?: string | null;
   sessionLogFileManager?: CursorSessionLogFileStore | null;
   cursorHooksWarning?: string | null;
 }
@@ -225,7 +224,6 @@ export class CursorAgentSessionsManager {
   private readonly sessionsState: SessionServiceState;
   private readonly terminalManager: TerminalManager;
   private readonly titleGeneration: TitleGenerationService | null;
-  private readonly cursorConfigDir: string | null;
   private readonly sessionLogFileManager: CursorSessionLogFileStore | null;
   private readonly cursorHooksWarning: string | null;
 
@@ -236,7 +234,6 @@ export class CursorAgentSessionsManager {
       this.sessionsState = options;
       this.terminalManager = new TerminalManager();
       this.titleGeneration = null;
-      this.cursorConfigDir = null;
       this.sessionLogFileManager = null;
       this.cursorHooksWarning = null;
       for (const [sessionId, session] of Object.entries(
@@ -252,7 +249,6 @@ export class CursorAgentSessionsManager {
     this.sessionsState = options.state;
     this.terminalManager = options.terminalManager ?? new TerminalManager();
     this.titleGeneration = options.titleGeneration ?? null;
-    this.cursorConfigDir = options.cursorConfigDir ?? null;
     this.sessionLogFileManager = options.sessionLogFileManager ?? null;
     this.cursorHooksWarning = options.cursorHooksWarning ?? null;
     for (const [sessionId, session] of Object.entries(
@@ -269,7 +265,7 @@ export class CursorAgentSessionsManager {
       return this.cursorHooksWarning;
     }
 
-    if (!this.cursorConfigDir || !this.sessionLogFileManager) {
+    if (!this.sessionLogFileManager) {
       return "Cursor hook monitoring is disabled; live status may be less accurate.";
     }
 
@@ -409,10 +405,9 @@ export class CursorAgentSessionsManager {
       });
     };
 
-    const hookLogFilePath =
-      this.cursorConfigDir && this.sessionLogFileManager
-        ? this.sessionLogFileManager.create(sessionId)
-        : null;
+    const hookLogFilePath = this.sessionLogFileManager
+      ? this.sessionLogFileManager.create(sessionId)
+      : null;
     if (hookLogFilePath) {
       disposable.addDisposable(() =>
         this.sessionLogFileManager?.cleanup(hookLogFilePath),
@@ -483,6 +478,13 @@ export class CursorAgentSessionsManager {
       plan,
     });
 
+    if (activityMonitor && hookLogFilePath) {
+      disposable.addDisposable(() => activityMonitor.stopMonitoring());
+      await activityMonitor.startMonitoring({
+        stateFilePath: hookLogFilePath,
+      });
+    }
+
     const terminal = this.terminalManager.startTerminal({
       terminalId: sessionId,
       launch: {
@@ -492,14 +494,9 @@ export class CursorAgentSessionsManager {
         cwd,
         cols,
         rows,
-        env: this.cursorConfigDir
+        env: hookLogFilePath
           ? {
-              CURSOR_CONFIG_DIR: this.cursorConfigDir,
-              ...(hookLogFilePath
-                ? {
-                    AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath,
-                  }
-                : {}),
+              AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath,
             }
           : undefined,
       },
@@ -522,15 +519,6 @@ export class CursorAgentSessionsManager {
       },
     });
     disposable.addDisposable(() => terminal.stop());
-    if (activityMonitor) {
-      disposable.addDisposable(() => activityMonitor.stopMonitoring());
-    }
-
-    if (activityMonitor && hookLogFilePath) {
-      await activityMonitor.startMonitoring({
-        stateFilePath: hookLogFilePath,
-      });
-    }
 
     // Mark initial prompt as sent so subsequent resumes don't re-send it
     if (initialPrompt) {

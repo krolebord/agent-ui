@@ -1,4 +1,4 @@
-import { chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { type ParseError, parse } from "jsonc-parser";
@@ -8,7 +8,7 @@ import log from "./logger";
 const HOOK_CONFIG_VERSION = 1;
 
 interface ManagedCursorHooks {
-  configDir: string;
+  scriptPath: string;
 }
 
 type HookConfigEntry = {
@@ -58,7 +58,6 @@ function buildHooksConfig(
       beforeReadFile: [hook],
       afterFileEdit: [hook],
       beforeSubmitPrompt: [hook],
-      afterAgentResponse: [hook],
       stop: [hook],
     },
   };
@@ -111,19 +110,33 @@ async function upsertManagedUserHooksConfig(
     }
   }
 
+  // Strip our managed script from every hook first so removed managed hooks
+  // (e.g. afterAgentResponse) do not keep firing from a stale user config.
+  // Also match the legacy path under cursor-hooks/config/hooks/.
+  const managedHooksRoot = path.dirname(managedScriptPath);
+  for (const [hookName, hookEntries] of Object.entries(nextHooks)) {
+    nextHooks[hookName] = hookEntries.filter((entry) => {
+      if (!isRecord(entry) || typeof entry.command !== "string") {
+        return true;
+      }
+      return !(
+        entry.command.includes(managedHooksRoot) &&
+        entry.command.includes("emit-state.mjs")
+      );
+    });
+  }
+
   for (const [hookName, managedHookEntries] of Object.entries(
     managedHooksConfig.hooks ?? {},
   )) {
     const managedEntries = managedHookEntries.filter(isHookConfigEntry);
-    const preservedEntries = (nextHooks[hookName] ?? []).filter((entry) => {
-      if (!isRecord(entry) || typeof entry.command !== "string") {
-        return true;
-      }
-      // Match by script path so runtime changes (node→bun) replace the old entry
-      return !entry.command.includes(managedScriptPath);
-    });
+    nextHooks[hookName] = [...(nextHooks[hookName] ?? []), ...managedEntries];
+  }
 
-    nextHooks[hookName] = [...preservedEntries, ...managedEntries];
+  for (const [hookName, hookEntries] of Object.entries(nextHooks)) {
+    if (hookEntries.length === 0) {
+      delete nextHooks[hookName];
+    }
   }
 
   nextConfig.version =
@@ -272,29 +285,15 @@ main().catch(() => {
 `;
 }
 
-async function copyUserCliConfigIfPresent(configDir: string): Promise<void> {
-  const source = path.join(homedir(), ".cursor", "cli-config.json");
-  const destination = path.join(configDir, "cli-config.json");
-
-  try {
-    await copyFile(source, destination);
-  } catch {
-    // Best effort only: sessions can still run with the managed defaults.
-  }
-}
-
 export async function ensureManagedCursorStateHooks(
   userDataPath: string,
 ): Promise<ManagedCursorHooks> {
   const root = path.join(userDataPath, "cursor-hooks");
-  const configDir = path.join(root, "config");
-  const hooksDir = path.join(configDir, "hooks");
-  const scriptPath = path.join(hooksDir, "emit-state.mjs");
-  const hooksPath = path.join(configDir, "hooks.json");
+  const scriptPath = path.join(root, "emit-state.mjs");
 
   const runtime = await detectHookRuntime();
 
-  await mkdir(hooksDir, { recursive: true });
+  await mkdir(root, { recursive: true });
 
   await writeFile(scriptPath, buildHookScript(runtime), "utf8");
   if (process.platform !== "win32") {
@@ -302,24 +301,18 @@ export async function ensureManagedCursorStateHooks(
   }
 
   const hooksConfig = buildHooksConfig(runtime, scriptPath);
-  await writeFile(
-    hooksPath,
-    `${JSON.stringify(hooksConfig, null, 2)}\n`,
-    "utf8",
-  );
   await upsertManagedUserHooksConfig(
     path.join(homedir(), ".cursor", "hooks.json"),
     hooksConfig,
     scriptPath,
   );
-  await copyUserCliConfigIfPresent(configDir);
 
   log.info("Managed Cursor hooks created", {
-    configDir,
+    scriptPath,
     runtime,
   });
 
   return {
-    configDir,
+    scriptPath,
   };
 }

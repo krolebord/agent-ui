@@ -115,9 +115,6 @@ export class CursorActivityMonitor {
       case "beforeReadFile": {
         return "awaiting_approval";
       }
-      case "afterAgentResponse": {
-        return "awaiting_user_response";
-      }
       default: {
         return this.state;
       }

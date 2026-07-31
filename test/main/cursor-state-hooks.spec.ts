@@ -18,7 +18,7 @@ afterAll(async () => {
 });
 
 describe("ensureManagedCursorStateHooks", () => {
-  it("creates managed hook config and user hooks config", async () => {
+  it("creates emit script and user hooks config", async () => {
     const userDataPath = await mkdtemp(
       path.join(tmpdir(), "cursor-state-hooks-test-"),
     );
@@ -31,34 +31,25 @@ describe("ensureManagedCursorStateHooks", () => {
     });
 
     const managed = await ensureManagedCursorStateHooks(userDataPath);
-    const hooksConfigRaw = await readFile(
-      path.join(managed.configDir, "hooks.json"),
-      "utf8",
-    );
-    const script = await readFile(
-      path.join(managed.configDir, "hooks", "emit-state.mjs"),
-      "utf8",
-    );
+    const script = await readFile(managed.scriptPath, "utf8");
     const userHooksRaw = await readFile(
       path.join(homePath, ".cursor", "hooks.json"),
       "utf8",
     );
 
-    const hooksConfig = JSON.parse(hooksConfigRaw) as {
+    const userHooksConfig = JSON.parse(userHooksRaw) as {
       version: number;
       hooks: Record<string, Array<{ command: string }>>;
     };
-    const userHooksConfig = JSON.parse(userHooksRaw) as {
-      hooks: Record<string, Array<{ command: string }>>;
-    };
 
-    expect(hooksConfig.version).toBe(1);
-    expect(hooksConfig.hooks.preToolUse?.length).toBe(1);
-    expect(hooksConfig.hooks.sessionStart?.length).toBe(1);
-    expect(hooksConfig.hooks.stop?.length).toBe(1);
+    expect(managed.scriptPath).toBe(
+      path.join(userDataPath, "cursor-hooks", "emit-state.mjs"),
+    );
+    expect(userHooksConfig.version).toBe(1);
     expect(userHooksConfig.hooks.preToolUse?.length).toBe(1);
     expect(userHooksConfig.hooks.sessionStart?.length).toBe(1);
     expect(userHooksConfig.hooks.stop?.length).toBe(1);
+    expect(userHooksConfig.hooks.afterAgentResponse).toBeUndefined();
     expect(userHooksConfig.hooks.sessionStart?.[0]?.command).toContain(
       "emit-state.mjs",
     );
@@ -84,8 +75,6 @@ describe("ensureManagedCursorStateHooks", () => {
     const managedScriptPath = path.join(
       userDataPath,
       "cursor-hooks",
-      "config",
-      "hooks",
       "emit-state.mjs",
     );
     // Use a different runtime than what detectHookRuntime may return,
@@ -100,6 +89,7 @@ describe("ensureManagedCursorStateHooks", () => {
           { command: staleCommand, timeout: 5 },
         ],
         beforeReadFile: [{ command: "echo keep-before-read", timeout: 5 }],
+        afterAgentResponse: [{ command: staleCommand, timeout: 5 }],
       },
     };
 
@@ -132,5 +122,6 @@ describe("ensureManagedCursorStateHooks", () => {
       beforeReadFileCommands.filter((cmd) => cmd.includes(managedScriptPath))
         .length,
     ).toBe(1);
+    expect(mergedConfig.hooks.afterAgentResponse).toBeUndefined();
   });
 });

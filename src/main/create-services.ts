@@ -89,7 +89,6 @@ interface ManagedPluginInitializationResult {
 }
 
 interface ManagedCursorHooksInitializationResult {
-  cursorConfigDir: string | null;
   cursorHooksWarning: string | null;
 }
 
@@ -129,14 +128,12 @@ async function initializeManagedCursorHooks(
   userDataPath: string,
 ): Promise<ManagedCursorHooksInitializationResult> {
   try {
-    const managedHooks = await ensureManagedCursorStateHooks(userDataPath);
+    await ensureManagedCursorStateHooks(userDataPath);
     return {
-      cursorConfigDir: managedHooks.configDir,
       cursorHooksWarning: null,
     };
   } catch (error) {
     return {
-      cursorConfigDir: null,
       cursorHooksWarning:
         error instanceof Error
           ? `Cursor hook monitoring failed to initialize: ${error.message}`
@@ -153,7 +150,7 @@ export async function createServices(options: CreateServicesOptions) {
   const userDataPath = host.paths.userData;
   const [
     { managedPluginDir, pluginWarning },
-    { cursorConfigDir, cursorHooksWarning },
+    { cursorHooksWarning },
     { shellIntegrationEnv },
   ] = await Promise.all([
     initializeManagedPlugin(userDataPath),
@@ -308,7 +305,6 @@ export async function createServices(options: CreateServicesOptions) {
     state: sessionsState,
     terminalManager,
     titleGeneration: titleGenerationService,
-    cursorConfigDir,
     sessionLogFileManager: cursorSessionLogFileManager,
     cursorHooksWarning,
   });
