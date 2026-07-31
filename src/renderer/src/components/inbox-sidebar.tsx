@@ -59,6 +59,8 @@ import {
   EllipsisVertical,
   Folder,
   FolderPlus,
+  GitBranch,
+  GitFork,
   MoreHorizontal,
   PlayIcon,
   Plus,
@@ -97,6 +99,94 @@ const INBOX_STATUS_LABEL: Record<Exclude<InboxStatus, "ready">, string> = {
   working: "Working",
   failed: "Failed",
 };
+
+/**
+ * Branch and diff line for a card row. The project is looked up here rather than
+ * threaded down with `projectLabel` because only this one variant needs it, and
+ * the state slice is a stable object reference between patches.
+ *
+ * Git state is per-folder, so two sessions sharing a cwd read the same numbers —
+ * correct for the worktree-per-session flow this mostly serves, and no more
+ * wrong than the project tree already is for the rest.
+ */
+function InboxRowGitLine({
+  projectPath,
+  dimmed,
+}: {
+  projectPath: string;
+  dimmed: boolean;
+}) {
+  const project = useAppState((x) =>
+    x.projects.find((candidate) => candidate.path === projectPath),
+  );
+  if (!project?.gitBranch) {
+    return null;
+  }
+  const isWorktree = Boolean(project.worktreeOriginPath);
+  const BranchIcon = isWorktree ? GitFork : GitBranch;
+  const aheadCommits = project.gitUpstreamDiffStats?.aheadCommits || undefined;
+  const behindCommits =
+    project.gitUpstreamDiffStats?.behindCommits || undefined;
+  const addedLines = project.gitDiffStats?.addedLines || undefined;
+  const deletedLines = project.gitDiffStats?.deletedLines || undefined;
+
+  return (
+    // Stays visible on hover, unlike the status cluster above it, so the action
+    // buttons never cover the branch.
+    <span
+      className={cn(
+        "mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-[10px]",
+        dimmed ? "text-zinc-600" : "text-zinc-500",
+      )}
+    >
+      <BranchIcon className="size-3 shrink-0" aria-hidden="true" />
+      {aheadCommits || behindCommits ? (
+        <span
+          className="shrink-0 font-mono"
+          title={
+            project.gitUpstreamDiffStats
+              ? `${aheadCommits ?? 0} ahead, ${behindCommits ?? 0} behind ${project.gitUpstreamDiffStats.upstreamBranch}`
+              : undefined
+          }
+        >
+          {aheadCommits ? <span>↑{aheadCommits}</span> : null}
+          {behindCommits ? (
+            <span className={aheadCommits ? "ml-1" : undefined}>
+              ↓{behindCommits}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+      <span className="min-w-0 truncate" title={project.gitBranch}>
+        {project.gitBranch}
+      </span>
+      {addedLines || deletedLines ? (
+        // Right-aligned so the churn numbers line up down the list instead of
+        // drifting with branch name length.
+        <span
+          className="ml-auto shrink-0 font-mono"
+          title={`${addedLines ?? 0} added, ${deletedLines ?? 0} deleted (uncommitted)`}
+        >
+          {addedLines ? (
+            <span className={dimmed ? "text-emerald-700" : "text-emerald-500"}>
+              +{addedLines}
+            </span>
+          ) : null}
+          {deletedLines ? (
+            <span
+              className={cn(
+                addedLines && "ml-1",
+                dimmed ? "text-rose-800" : "text-rose-500",
+              )}
+            >
+              -{deletedLines}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 /**
  * Relative label for an arbitrary session timestamp. Settled rows read "how long
@@ -595,6 +685,10 @@ function InboxRow({
             >
               {session.title}
             </span>
+            <InboxRowGitLine
+              projectPath={session.startupConfig.cwd}
+              dimmed={session.status === "stopped"}
+            />
           </button>
         </ContextMenuTrigger>
         {menu}
