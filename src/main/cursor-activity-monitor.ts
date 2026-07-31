@@ -110,9 +110,7 @@ export class CursorActivityMonitor {
         return "idle";
       }
       case "preToolUse":
-      case "beforeShellExecution":
       case "beforeMCPExecution":
-      case "beforeReadFile":
       case "beforeSubmitPrompt":
         return "working";
       default: {

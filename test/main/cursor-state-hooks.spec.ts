@@ -47,8 +47,11 @@ describe("ensureManagedCursorStateHooks", () => {
     );
     expect(userHooksConfig.version).toBe(1);
     expect(userHooksConfig.hooks.preToolUse?.length).toBe(1);
+    expect(userHooksConfig.hooks.beforeMCPExecution?.length).toBe(1);
     expect(userHooksConfig.hooks.sessionStart?.length).toBe(1);
     expect(userHooksConfig.hooks.stop?.length).toBe(1);
+    expect(userHooksConfig.hooks.beforeShellExecution).toBeUndefined();
+    expect(userHooksConfig.hooks.beforeReadFile).toBeUndefined();
     expect(userHooksConfig.hooks.postToolUse).toBeUndefined();
     expect(userHooksConfig.hooks.postToolUseFailure).toBeUndefined();
     expect(userHooksConfig.hooks.afterShellExecution).toBeUndefined();
@@ -128,7 +131,7 @@ describe("ensureManagedCursorStateHooks", () => {
     expect(
       beforeReadFileCommands.filter((cmd) => cmd.includes(managedScriptPath))
         .length,
-    ).toBe(1);
+    ).toBe(0);
     expect(mergedConfig.hooks.afterAgentResponse).toBeUndefined();
   });
 });

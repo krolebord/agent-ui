@@ -150,7 +150,7 @@ describe("CursorActivityMonitor", () => {
       filePath,
       `${JSON.stringify({
         timestamp: new Date().toISOString(),
-        hook_event_name: "beforeShellExecution",
+        hook_event_name: "beforeMCPExecution",
       })}\n`,
     );
 

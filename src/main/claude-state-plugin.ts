@@ -37,7 +37,6 @@ function buildHooksConfig(runtime: HookRuntime) {
       SessionStart: [noMatcher()],
       UserPromptSubmit: [noMatcher()],
       PreToolUse: [anyMatcher()],
-      PostToolUse: [anyMatcher()],
       PermissionRequest: [anyMatcher()],
       Notification: [anyMatcher()],
       Stop: [noMatcher()],

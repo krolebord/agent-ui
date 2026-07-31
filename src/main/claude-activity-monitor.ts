@@ -93,9 +93,7 @@ export class ClaudeActivityMonitor {
         return "awaiting_user_response";
       }
       case "UserPromptSubmit":
-      case "PreToolUse":
-      case "PostToolUse":
-      case "PostToolUseFailure": {
+      case "PreToolUse": {
         return "working";
       }
       case "PermissionRequest": {
