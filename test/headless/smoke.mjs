@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
@@ -94,6 +94,11 @@ try {
     await readFile(path.join(userDataPath, "agent-ui.json"), "utf8"),
   );
   assert.equal(persistedState.schemaVersion, 3);
+  const databasePath = path.join(userDataPath, "agent-ui.sqlite3");
+  await access(databasePath);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(databasePath)).mode & 0o777, 0o600);
+  }
   assert.match(
     await readFile(path.join(userDataPath, "logs", "headless.log"), "utf8"),
     /Web app server started/,

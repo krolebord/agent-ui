@@ -23,6 +23,7 @@ import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import type { CursorAgentMode, CursorAgentPermissionMode } from "./cursor-cli";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
+import { DatabaseService } from "./database/database-service";
 import { defineHandoffsState, HandoffsService } from "./handoffs-service";
 import log from "./logger";
 import { defineMachineStatsState, MachineStatsMonitor } from "./machine-stats";
@@ -415,6 +416,8 @@ export async function createServices(options: CreateServicesOptions) {
     },
   });
 
+  const databaseService = await DatabaseService.create(userDataPath);
+
   const shutdownDisposable = createDisposable({
     onError: (error) => {
       log.error("Error while shutting down services", error);
@@ -449,6 +452,13 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(() => stateService.dispose());
   shutdownDisposable.addDisposable(() => persistenceService.dispose());
 
+  const shutdown = async () => {
+    await shutdownDisposable.dispose();
+    // Keep the database alive until every service has finished its shutdown
+    // work. Database-backed services added later can safely flush first.
+    await databaseService.close();
+  };
+
   return {
     appSettingsState,
     artifactsService,
@@ -463,7 +473,8 @@ export async function createServices(options: CreateServicesOptions) {
     terminalManager,
     projectTerminalsManager,
     stateService,
-    shutdown: shutdownDisposable.dispose,
+    databaseService,
+    shutdown,
     managedPluginDir,
     pluginWarning,
     handoffsService,
