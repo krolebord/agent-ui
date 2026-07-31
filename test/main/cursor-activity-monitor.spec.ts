@@ -125,4 +125,40 @@ describe("CursorActivityMonitor", () => {
 
     monitor.stopMonitoring();
   });
+
+  it("uses Cursor terminal notifications for approval state", () => {
+    const onStatusChange = vi.fn();
+    const monitor = new CursorActivityMonitor({ onStatusChange });
+    const message = Buffer.from("Approve command: python3").toString("base64");
+    const notification = `\u001b]99;i=cursor:e=1:p=body;${message}\u0007`;
+
+    monitor.handleTerminalOutput(notification.slice(0, 20));
+    expect(onStatusChange).not.toHaveBeenCalled();
+
+    monitor.handleTerminalOutput(notification.slice(20));
+    expect(onStatusChange).toHaveBeenCalledOnce();
+    expect(onStatusChange).toHaveBeenCalledWith("awaiting_approval");
+  });
+
+  it("treats pre-execution hooks as working rather than approval", async () => {
+    const filePath = path.join(tempDir, "events.ndjson");
+    const onStatusChange = vi.fn();
+    const monitor = new CursorActivityMonitor({ onStatusChange });
+
+    await monitor.startMonitoring({ stateFilePath: filePath });
+    await appendRaw(
+      filePath,
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        hook_event_name: "beforeShellExecution",
+      })}\n`,
+    );
+
+    await vi.waitFor(() => {
+      expect(onStatusChange).toHaveBeenCalledWith("working");
+      expect(onStatusChange).not.toHaveBeenCalledWith("awaiting_approval");
+    });
+
+    monitor.stopMonitoring();
+  });
 });

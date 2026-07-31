@@ -3,6 +3,10 @@ import {
   type CursorHookEvent,
   cursorHookEventSchema,
 } from "../shared/cursor-hooks";
+import {
+  CursorTerminalNotificationParser,
+  isCursorApprovalNotification,
+} from "./cursor-terminal-notifications";
 import log from "./logger";
 import { NdjsonFileWatcher } from "./ndjson-file-watcher";
 
@@ -19,6 +23,7 @@ export class CursorActivityMonitor {
   private state: ClaudeActivityState = "unknown";
   private watcher: NdjsonFileWatcher<CursorHookEvent> | null = null;
   private watcherGeneration = 0;
+  private readonly notificationParser = new CursorTerminalNotificationParser();
 
   constructor(callbacks: CursorActivityMonitorEvents) {
     this.callbacks = callbacks;
@@ -26,6 +31,14 @@ export class CursorActivityMonitor {
 
   getState(): ClaudeActivityState {
     return this.state;
+  }
+
+  handleTerminalOutput(chunk: string): void {
+    for (const notification of this.notificationParser.push(chunk)) {
+      if (isCursorApprovalNotification(notification)) {
+        this.setState("awaiting_approval");
+      }
+    }
   }
 
   async startMonitoring(input: { stateFilePath: string }): Promise<void> {
@@ -85,10 +98,6 @@ export class CursorActivityMonitor {
   }
 
   private reduceState(event: CursorHookEvent): ClaudeActivityState {
-    if (event.permission === "ask") {
-      return "awaiting_approval";
-    }
-
     switch (event.hook_event_name) {
       case "sessionStart":
       case "sessionEnd": {
@@ -101,20 +110,11 @@ export class CursorActivityMonitor {
         return "idle";
       }
       case "preToolUse":
-      case "postToolUse":
-      case "postToolUseFailure":
-      case "afterShellExecution":
-      case "afterMCPExecution":
-      case "afterFileEdit":
-      case "beforeSubmitPrompt":
-      case "afterAgentThought": {
-        return "working";
-      }
       case "beforeShellExecution":
       case "beforeMCPExecution":
-      case "beforeReadFile": {
-        return "awaiting_approval";
-      }
+      case "beforeReadFile":
+      case "beforeSubmitPrompt":
+        return "working";
       default: {
         return this.state;
       }

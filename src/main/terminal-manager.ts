@@ -34,6 +34,7 @@ type StartManagedTerminalOptions = {
   terminalId: string;
   launch: Parameters<ReturnType<typeof createTerminalSession>["start"]>[0];
   access?: TerminalAccess;
+  transformInput?: (data: string) => string;
   transformOutputChunk?: (chunk: string) => string;
   onData?: (chunk: string, renderedChunk: string) => void;
   onStatusChange?: (status: TerminalSessionStatus) => void;
@@ -193,6 +194,7 @@ export class TerminalManager {
     terminalId,
     launch,
     access,
+    transformInput,
     transformOutputChunk,
     onData,
     onStatusChange,
@@ -272,7 +274,10 @@ export class TerminalManager {
     const runtime: ManagedTerminalRuntime = {
       terminalId,
       write: (data) => {
-        terminal.write(data);
+        const transformedData = transformInput?.(data) ?? data;
+        if (transformedData) {
+          terminal.write(transformedData);
+        }
       },
       resize: (nextCols, nextRows) => {
         const size = getSafeTerminalSize(nextCols, nextRows);

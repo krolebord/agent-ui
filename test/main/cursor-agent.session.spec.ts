@@ -4,6 +4,7 @@ import {
   CursorAgentSessionsManager,
 } from "../../src/main/sessions/cursor-agent.session";
 import type { SessionServiceState } from "../../src/main/sessions/state";
+import { TerminalManager } from "../../src/main/terminal-manager";
 import type { TitleGenerationService } from "../../src/main/title-generation-service";
 
 type HookState =
@@ -45,6 +46,7 @@ const activityMonitorSpies = vi.hoisted(() => {
     instances: [] as Array<{
       startMonitoring: ReturnType<typeof vi.fn>;
       stopMonitoring: ReturnType<typeof vi.fn>;
+      handleTerminalOutput: ReturnType<typeof vi.fn>;
       callbacks: {
         onStatusChange: (status: HookState) => void;
         onHookEvent?: (event: {
@@ -94,6 +96,7 @@ vi.mock("../../src/main/cursor-activity-monitor", () => ({
     const instance = {
       startMonitoring: vi.fn().mockResolvedValue(undefined),
       stopMonitoring: vi.fn(),
+      handleTerminalOutput: vi.fn(),
       callbacks,
       getState: () => activityMonitorSpies.state,
     };
@@ -176,10 +179,12 @@ describe("CursorAgentSessionsManager", () => {
       create: vi.fn(() => "/tmp/cursor-session-1.ndjson"),
       cleanup: vi.fn(),
     };
+    const terminalManager = new TerminalManager();
 
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
       sessionLogFileManager,
+      terminalManager,
     });
 
     await manager.startLiveSession({
@@ -197,12 +202,24 @@ describe("CursorAgentSessionsManager", () => {
       expect.objectContaining({
         env: {
           AGENT_UI_CURSOR_STATE_FILE: "/tmp/cursor-session-1.ndjson",
+          TERM_PROGRAM: "vscode",
+          TERM_PROGRAM_VERSION: "1.0",
         },
       }),
     );
     expect(monitor?.startMonitoring.mock.invocationCallOrder[0]).toBeLessThan(
       terminalSessionSpies.start.mock.invocationCallOrder[0],
     );
+
+    terminalManager.writeToTerminal("session-1", "a\u001b[Ib");
+    expect(terminalSessionSpies.write).toHaveBeenCalledWith("ab");
+
+    terminalSessionSpies.callbacks[0]?.onData({
+      chunk: "\u001b[?1004h",
+      bufferedOutput: "\u001b[?1004h",
+    });
+    expect(terminalSessionSpies.write).toHaveBeenCalledWith("\u001b[O");
+    expect(monitor?.handleTerminalOutput).toHaveBeenCalledWith("\u001b[?1004h");
 
     const callbacks = terminalSessionSpies.callbacks[0];
     callbacks?.onStatusChange("running");
@@ -408,7 +425,7 @@ describe("CursorAgentSessionsManager", () => {
     expect(titleGeneration.requestFromPrompt).not.toHaveBeenCalled();
   });
 
-  it("falls back to terminal-only status when hook monitor is unavailable", async () => {
+  it("keeps terminal notification monitoring when hooks are unavailable", async () => {
     const sessionsState = createState();
     seedCursorSession(
       sessionsState.state as Record<string, CursorAgentSessionData>,
@@ -427,7 +444,10 @@ describe("CursorAgentSessionsManager", () => {
       cursorChatId: undefined,
     });
 
-    expect(activityMonitorSpies.instances).toHaveLength(0);
+    expect(activityMonitorSpies.instances).toHaveLength(1);
+    expect(
+      activityMonitorSpies.instances[0]?.startMonitoring,
+    ).not.toHaveBeenCalled();
     const callbacks = terminalSessionSpies.callbacks[0];
     callbacks?.onStatusChange("running");
     expect(

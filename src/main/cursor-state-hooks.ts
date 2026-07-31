@@ -49,14 +49,9 @@ function buildHooksConfig(
       sessionStart: [hook],
       sessionEnd: [hook],
       preToolUse: [hook],
-      postToolUse: [hook],
-      postToolUseFailure: [hook],
       beforeShellExecution: [hook],
-      afterShellExecution: [hook],
       beforeMCPExecution: [hook],
-      afterMCPExecution: [hook],
       beforeReadFile: [hook],
-      afterFileEdit: [hook],
       beforeSubmitPrompt: [hook],
       stop: [hook],
     },
@@ -170,23 +165,11 @@ function readStdin() {
 }
 
 function defaultResponse() {
-  return {
-    continue: true,
-    decision: "allow",
-    permission: "allow",
-  };
+  return {};
 }
 
 function buildHookResponse(hookEventName) {
   switch (hookEventName) {
-    case "beforeShellExecution":
-    case "beforeMCPExecution":
-    case "beforeReadFile":
-    case "beforeTabFileRead":
-      return { permission: "allow" };
-    case "preToolUse":
-    case "subagentStart":
-      return { decision: "allow" };
     case "sessionStart":
     case "beforeSubmitPrompt":
       return { continue: true };

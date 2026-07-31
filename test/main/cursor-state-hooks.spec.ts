@@ -49,6 +49,11 @@ describe("ensureManagedCursorStateHooks", () => {
     expect(userHooksConfig.hooks.preToolUse?.length).toBe(1);
     expect(userHooksConfig.hooks.sessionStart?.length).toBe(1);
     expect(userHooksConfig.hooks.stop?.length).toBe(1);
+    expect(userHooksConfig.hooks.postToolUse).toBeUndefined();
+    expect(userHooksConfig.hooks.postToolUseFailure).toBeUndefined();
+    expect(userHooksConfig.hooks.afterShellExecution).toBeUndefined();
+    expect(userHooksConfig.hooks.afterMCPExecution).toBeUndefined();
+    expect(userHooksConfig.hooks.afterFileEdit).toBeUndefined();
     expect(userHooksConfig.hooks.afterAgentResponse).toBeUndefined();
     expect(userHooksConfig.hooks.sessionStart?.[0]?.command).toContain(
       "emit-state.mjs",
@@ -56,6 +61,8 @@ describe("ensureManagedCursorStateHooks", () => {
     expect(script).toContain("hook_event_name");
     expect(script).toContain("AGENT_UI_CURSOR_STATE_FILE");
     expect(script).toContain("payload.prompt");
+    expect(script).not.toContain('permission: "allow"');
+    expect(script).not.toContain('decision: "allow"');
   });
 
   it("merges managed hooks with existing user hooks without duplicates", async () => {

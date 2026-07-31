@@ -23,6 +23,9 @@ import {
 import type { SessionServiceState } from "./state";
 
 const DEFAULT_CURSOR_AGENT_SESSION_TITLE = "Cursor Agent Session";
+const CURSOR_FOCUS_REPORTING_ENABLED = "\u001b[?1004h";
+const CURSOR_FOCUS_OUT = "\u001b[O";
+const CURSOR_FOCUS_IN = "\u001b[I";
 
 const cursorAgentModeSchema = z.enum(["plan", "ask"]).optional();
 const cursorAgentPermissionModeSchema = z
@@ -414,59 +417,55 @@ export class CursorAgentSessionsManager {
       );
     }
 
-    const activityMonitor = hookLogFilePath
-      ? new CursorActivityMonitor({
-          onStatusChange: (nextActivityStatus) => {
-            activityState = nextActivityStatus;
-            const runtime = this.terminalManager.getRuntime(sessionId);
-            if (!runtime) {
-              return;
-            }
-            setSessionStatus(
-              getCursorSessionStatus(runtime.status, activityState),
-              {
-                bumpActivity:
-                  runtime.status === "starting" || runtime.status === "running",
-              },
-            );
+    const activityMonitor = new CursorActivityMonitor({
+      onStatusChange: (nextActivityStatus) => {
+        activityState = nextActivityStatus;
+        const runtime = this.terminalManager.getRuntime(sessionId);
+        if (!runtime) {
+          return;
+        }
+        setSessionStatus(
+          getCursorSessionStatus(runtime.status, activityState),
+          {
+            bumpActivity:
+              runtime.status === "starting" || runtime.status === "running",
           },
-          onHookEvent: (event) => {
-            if (event.hook_event_name === "beforeSubmitPrompt") {
-              const session = state.state[sessionId];
-              if (
-                session?.type === "cursor-agent" &&
-                session.title === DEFAULT_CURSOR_AGENT_SESSION_TITLE
-              ) {
-                const prompt = event.prompt?.trim();
-                if (prompt) {
-                  this.requestTitleFromUserPrompt(sessionId, prompt);
-                }
-              }
+        );
+      },
+      onHookEvent: (event) => {
+        if (event.hook_event_name === "beforeSubmitPrompt") {
+          const session = state.state[sessionId];
+          if (
+            session?.type === "cursor-agent" &&
+            session.title === DEFAULT_CURSOR_AGENT_SESSION_TITLE
+          ) {
+            const prompt = event.prompt?.trim();
+            if (prompt) {
+              this.requestTitleFromUserPrompt(sessionId, prompt);
             }
+          }
+        }
 
-            const hydratedCursorChatId =
-              event.conversation_id ?? event.session_id;
-            if (!hydratedCursorChatId) {
-              return;
-            }
+        const hydratedCursorChatId = event.conversation_id ?? event.session_id;
+        if (!hydratedCursorChatId) {
+          return;
+        }
 
-            state.updateState((state) => {
-              const session = state[sessionId];
-              if (!session || session.type !== "cursor-agent") {
-                return;
-              }
-              if (session.cursorChatId) {
-                return;
-              }
-              session.cursorChatId = hydratedCursorChatId;
-            });
-          },
-        })
-      : null;
+        state.updateState((state) => {
+          const session = state[sessionId];
+          if (!session || session.type !== "cursor-agent") {
+            return;
+          }
+          if (session.cursorChatId) {
+            return;
+          }
+          session.cursorChatId = hydratedCursorChatId;
+        });
+      },
+    });
 
-    let activityState: ClaudeActivityState | null = activityMonitor
-      ? activityMonitor.getState()
-      : null;
+    let activityState: ClaudeActivityState | null = activityMonitor.getState();
+    let focusReportingOutputTail = "";
 
     const { args: finalArgs } = buildCursorAgentArgs({
       cursorChatId,
@@ -478,8 +477,8 @@ export class CursorAgentSessionsManager {
       plan,
     });
 
-    if (activityMonitor && hookLogFilePath) {
-      disposable.addDisposable(() => activityMonitor.stopMonitoring());
+    disposable.addDisposable(() => activityMonitor.stopMonitoring());
+    if (hookLogFilePath) {
       await activityMonitor.startMonitoring({
         stateFilePath: hookLogFilePath,
       });
@@ -494,11 +493,25 @@ export class CursorAgentSessionsManager {
         cwd,
         cols,
         rows,
-        env: hookLogFilePath
-          ? {
-              AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath,
-            }
-          : undefined,
+        env: {
+          ...(hookLogFilePath
+            ? { AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath }
+            : {}),
+          TERM_PROGRAM: "vscode",
+          TERM_PROGRAM_VERSION: "1.0",
+        },
+      },
+      transformInput: (data) => data.replaceAll(CURSOR_FOCUS_IN, ""),
+      onData: (chunk) => {
+        activityMonitor.handleTerminalOutput(chunk);
+
+        const focusReportingOutput = focusReportingOutputTail + chunk;
+        if (focusReportingOutput.includes(CURSOR_FOCUS_REPORTING_ENABLED)) {
+          this.terminalManager.writeToTerminal(sessionId, CURSOR_FOCUS_OUT);
+        }
+        focusReportingOutputTail = focusReportingOutput.slice(
+          -(CURSOR_FOCUS_REPORTING_ENABLED.length - 1),
+        );
       },
       onStatusChange: (status) => {
         setSessionStatus(getCursorSessionStatus(status, activityState), {
