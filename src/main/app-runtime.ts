@@ -60,6 +60,7 @@ export async function startAppRuntime(
         webAppServer
           ? `${webAppServer.url}${MCP_PATH}?token=${mcpSessionTokens.sign(context)}`
           : null,
+      getWebAppUrl: () => webAppServer?.url ?? null,
     });
 
     log.info("Plugin initialization result", {

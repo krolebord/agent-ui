@@ -786,6 +786,7 @@ export class CodexSessionsManager {
       mcpEnabled === false
         ? null
         : (this.getMcpServerUrl?.({
+            sessionId,
             cwd,
             canScheduleSessions: mcpCanScheduleSessions !== false,
           }) ?? null);

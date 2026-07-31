@@ -65,6 +65,60 @@ function isMcpRequest(req: IncomingMessage) {
   return pathname === MCP_PATH;
 }
 
+function getArtifactDownloadId(req: IncomingMessage): string | null {
+  const pathname = new URL(req.url ?? "/", "http://agent-ui.local").pathname;
+  const match = pathname.match(/^\/artifacts\/([^/]+)\/download$/);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function contentDispositionAttachment(filename: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: response headers cannot contain control bytes
+  const unsafeHeaderCharacters = /[\u0000-\u001f\u007f"\\]/g;
+  const fallback = path
+    .basename(filename)
+    .replace(unsafeHeaderCharacters, "_")
+    .slice(0, 200);
+  return `attachment; filename="${fallback || "artifact"}"; filename*=UTF-8''${encodeURIComponent(path.basename(filename))}`;
+}
+
+async function serveArtifact(
+  req: IncomingMessage,
+  res: ServerResponse,
+  services: Services,
+  artifactId: string,
+) {
+  const artifact = services.artifactsService.state.state[artifactId];
+  if (!artifact) {
+    sendText(res, 404, "Artifact not found");
+    return;
+  }
+
+  const stats = await stat(artifact.path).catch(() => null);
+  if (!stats?.isFile()) {
+    services.artifactsService.markUnavailable(artifactId);
+    sendText(res, 404, "Artifact file is no longer available");
+    return;
+  }
+
+  res.writeHead(200, {
+    "content-type": artifact.mimeType ?? "application/octet-stream",
+    "content-length": stats.size,
+    "content-disposition": contentDispositionAttachment(artifact.name),
+    "cache-control": "private, no-store",
+    "x-content-type-options": "nosniff",
+  });
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  createReadStream(artifact.path).pipe(res);
+}
+
 function getWebSocketUrl(req: IncomingMessage, port: number) {
   const hostHeader = req.headers.host;
   const host = hostHeader?.replace(/:\d+$/, "") || "127.0.0.1";
@@ -183,6 +237,17 @@ export async function startWebAppServer(options: WebAppServerOptions) {
         return;
       }
       void handleMcpHttpRequest(req, res, services);
+      return;
+    }
+
+    const artifactId = getArtifactDownloadId(req);
+    if (artifactId) {
+      const services = options.getServices();
+      if (!services) {
+        sendText(res, 503, "Service unavailable");
+        return;
+      }
+      void serveArtifact(req, res, services, artifactId);
       return;
     }
 

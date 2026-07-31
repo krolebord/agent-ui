@@ -44,6 +44,7 @@ import {
   GitFork,
   ImageIcon,
   MonitorSmartphone,
+  PackageOpen,
   PlayIcon,
   Plus,
   RefreshCw,
@@ -151,6 +152,7 @@ export function SessionSidebar() {
     (state) => state.toggleScheduledSessions,
   );
   const toggleAccounts = useMainViewStore((state) => state.toggleAccounts);
+  const toggleArtifacts = useMainViewStore((state) => state.toggleArtifacts);
 
   const groups: ProjectSessionGroup[] = useMemo(
     () =>
@@ -250,7 +252,8 @@ export function SessionSidebar() {
                   "h-full w-9 shrink-0 px-0",
                   (mainView === "skills" ||
                     mainView === "scheduledSessions" ||
-                    mainView === "accounts") &&
+                    mainView === "accounts" ||
+                    mainView === "artifacts") &&
                     "text-zinc-100",
                 )}
                 aria-label="More sidebar actions"
@@ -271,6 +274,10 @@ export function SessionSidebar() {
               <DropdownMenuItem onClick={toggleAccounts}>
                 <Users className="size-3.5" />
                 Accounts
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={toggleArtifacts}>
+                <PackageOpen className="size-3.5" />
+                Artifacts
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

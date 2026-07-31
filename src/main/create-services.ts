@@ -6,6 +6,11 @@ import {
   defineAppSettingsPersistence,
   defineAppSettingsState,
 } from "./app-settings";
+import {
+  ArtifactsService,
+  defineArtifactsPersistence,
+  defineArtifactsState,
+} from "./artifacts-service";
 import { ClaudeAccountLoginService } from "./claude-account-login";
 import {
   ClaudeAccountsService,
@@ -77,6 +82,7 @@ interface CreateServicesOptions {
   disposeSignal: AbortSignal;
   mcpSessionTokens?: McpSessionTokens;
   getMcpServerUrl?: (context: McpRequestContext) => string | null;
+  getWebAppUrl?: () => string | null;
 }
 
 interface ShellIntegrationInitResult {
@@ -146,6 +152,7 @@ export type CreateServicesResult = Awaited<ReturnType<typeof createServices>>;
 
 export async function createServices(options: CreateServicesOptions) {
   const { host, disposeSignal, getMcpServerUrl } = options;
+  const getWebAppUrl = options.getWebAppUrl ?? (() => null);
   const mcpSessionTokens = options.mcpSessionTokens ?? new McpSessionTokens();
   const userDataPath = host.paths.userData;
   const [
@@ -223,6 +230,12 @@ export async function createServices(options: CreateServicesOptions) {
   persistenceService.registerAndHydrate(
     defineProjectStatePersistence(projectsState),
   );
+
+  const artifactsState = defineArtifactsState();
+  persistenceService.registerAndHydrate(
+    defineArtifactsPersistence(artifactsState),
+  );
+  const artifactsService = new ArtifactsService(artifactsState);
 
   const projectTerminalsState = defineProjectTerminalsState();
   persistenceService.registerAndHydrate(
@@ -398,6 +411,7 @@ export async function createServices(options: CreateServicesOptions) {
       machineStats: machineStatsState,
       skills: skillsState,
       scheduledSessions: scheduledSessionsState,
+      artifacts: artifactsState,
     },
   });
 
@@ -437,6 +451,7 @@ export async function createServices(options: CreateServicesOptions) {
 
   return {
     appSettingsState,
+    artifactsService,
     claudeAccounts: claudeAccountsService,
     claudeAccountLogin,
     machineStatsState,
@@ -455,6 +470,7 @@ export async function createServices(options: CreateServicesOptions) {
     skillsService,
     scheduledSessionsService,
     mcpSessionTokens,
+    getWebAppUrl,
     sessions: {
       state: sessionsState,
       localTerminal: localTerminalSessionsManager,

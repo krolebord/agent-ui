@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { AccountsPage } from "./accounts-page";
+import { ArtifactsPage } from "./artifacts-page";
 import { ScheduledSessionsPage } from "./scheduled-sessions-page";
 import { SkillsPage } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
@@ -83,6 +84,10 @@ export function SessionPage() {
 
   if (mainView === "accounts") {
     return <AccountsPage />;
+  }
+
+  if (mainView === "artifacts") {
+    return <ArtifactsPage />;
   }
 
   if (!session) {

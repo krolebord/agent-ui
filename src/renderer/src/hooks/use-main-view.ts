@@ -1,7 +1,12 @@
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 
-export type MainView = "sessions" | "skills" | "scheduledSessions" | "accounts";
+export type MainView =
+  | "sessions"
+  | "skills"
+  | "scheduledSessions"
+  | "accounts"
+  | "artifacts";
 
 export const useMainViewStore = create(
   combine({ view: "sessions" as MainView }, (set) => ({
@@ -21,6 +26,14 @@ export const useMainViewStore = create(
     },
     showAccounts: () => {
       set({ view: "accounts" });
+    },
+    showArtifacts: () => {
+      set({ view: "artifacts" });
+    },
+    toggleArtifacts: () => {
+      set((state) => ({
+        view: state.view === "artifacts" ? "sessions" : "artifacts",
+      }));
     },
     toggleAccounts: () => {
       set((state) => ({

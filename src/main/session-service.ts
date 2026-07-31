@@ -669,6 +669,7 @@ export class SessionsServiceNew {
         opts.mcpEnabled === false
           ? null
           : (this.getMcpServerUrl?.({
+              sessionId: opts.sessionId,
               cwd: opts.cwd,
               canScheduleSessions: opts.mcpCanScheduleSessions !== false,
             }) ?? null),

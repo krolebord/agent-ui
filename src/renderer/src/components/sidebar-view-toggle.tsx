@@ -11,6 +11,7 @@ import {
   CalendarClock,
   Inbox,
   ListTree,
+  PackageOpen,
   Settings,
   Sparkles,
   Users,
@@ -63,6 +64,7 @@ export function SidebarNavMenuItems() {
     (state) => state.toggleScheduledSessions,
   );
   const toggleAccounts = useMainViewStore((state) => state.toggleAccounts);
+  const toggleArtifacts = useMainViewStore((state) => state.toggleArtifacts);
 
   return (
     <>
@@ -77,6 +79,10 @@ export function SidebarNavMenuItems() {
       <DropdownMenuItem onClick={toggleAccounts}>
         <Users className="size-3.5" />
         Accounts
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={toggleArtifacts}>
+        <PackageOpen className="size-3.5" />
+        Artifacts
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem onClick={openSettingsDialog}>

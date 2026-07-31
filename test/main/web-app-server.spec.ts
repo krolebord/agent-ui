@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Services } from "../../src/main/create-services";
 import { startWebAppServer } from "../../src/main/web-app-server";
 
 async function reservePort() {
@@ -83,5 +84,48 @@ describe("web app server", () => {
     servers.push(server);
 
     expect(server.url).toBe(`http://127.0.0.1:${reservation.port + 1}`);
+  });
+
+  it("streams published artifacts as attachments", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    const artifactPath = path.join(rendererDist, "generated report.txt");
+    await writeFile(artifactPath, "agent output");
+    const services = {
+      artifactsService: {
+        state: {
+          state: {
+            artifact1: {
+              id: "artifact1",
+              sessionId: "session1",
+              path: artifactPath,
+              name: "generated report.txt",
+              size: 12,
+              mimeType: "text/plain",
+              createdAt: Date.now(),
+              available: true,
+            },
+          },
+        },
+        markUnavailable() {},
+      },
+    } as unknown as Services;
+
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => services,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${server.url}/artifacts/artifact1/download`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toContain(
+      'attachment; filename="generated report.txt"',
+    );
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await response.text()).toBe("agent output");
   });
 });

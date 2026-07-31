@@ -3,6 +3,8 @@ import { z } from "zod";
 
 /** Per-request context recovered from the token in a session's MCP URL. */
 export interface McpRequestContext {
+  /** Agent UI session that owns this MCP endpoint. */
+  sessionId?: string | null;
   /** Working directory of the CLI session that made the request. */
   cwd: string | null;
   /**
@@ -14,6 +16,7 @@ export interface McpRequestContext {
 }
 
 const payloadSchema = z.object({
+  sessionId: z.string().nullable().optional(),
   cwd: z.string().nullable(),
   canScheduleSessions: z.boolean(),
 });

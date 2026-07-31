@@ -14,6 +14,20 @@ describe("McpSessionTokens", () => {
     });
   });
 
+  it("round-trips the originating Agent UI session", () => {
+    const tokens = new McpSessionTokens();
+    const token = tokens.sign({
+      sessionId: "session-123",
+      cwd: "/home/user/project",
+      canScheduleSessions: true,
+    });
+    expect(tokens.verify(token)).toEqual({
+      sessionId: "session-123",
+      cwd: "/home/user/project",
+      canScheduleSessions: true,
+    });
+  });
+
   it("round-trips a null cwd", () => {
     const tokens = new McpSessionTokens();
     const token = tokens.sign({ cwd: null, canScheduleSessions: true });
