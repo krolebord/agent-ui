@@ -25,6 +25,7 @@ import {
   useActiveSessionStore,
 } from "@renderer/hooks/use-active-session-id";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
+import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import {
@@ -42,6 +43,7 @@ import {
   LoaderCircle,
   type LucideIcon,
   MessageCircleQuestionMark,
+  MonitorSmartphone,
   MoreHorizontal,
   Pencil,
   ShieldAlert,
@@ -211,6 +213,126 @@ function getSessionInitialPrompt(session: Session): string | undefined {
   }
   const prompt = session.startupConfig.initialPrompt?.trim();
   return prompt || undefined;
+}
+
+/**
+ * Fork / remote-control and other type-only menu items. Shared by the project
+ * tree and inbox so those extras cannot drift between views. Accepts undefined
+ * so callers can keep a "session missing" guard below the hook calls.
+ */
+export function useTypeSpecificSessionMenuActions(
+  session: Session | undefined,
+): SessionMenuAction[] {
+  const forkClaudeMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const { cols, rows } = getTerminalSize();
+      return await orpc.sessions.localClaude.forkSession.call({
+        sessionId,
+        cols,
+        rows,
+      });
+    },
+    onSuccess: (newId) => {
+      switchSession(newId);
+      useMobileNavStore.getState().closeSidebar();
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to fork session",
+      );
+    },
+  });
+
+  const forkCodexMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const { cols, rows } = getTerminalSize();
+      return await orpc.sessions.codex.forkSession.call({
+        sessionId,
+        cols,
+        rows,
+      });
+    },
+    onSuccess: ({ sessionId: newId }) => {
+      switchSession(newId);
+      useMobileNavStore.getState().closeSidebar();
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to fork session",
+      );
+    },
+  });
+
+  const isClaude = session?.type === "claude-local-terminal";
+  const isRunning = session !== undefined && session.status !== "stopped";
+  const isRemote =
+    isClaude && session.type === "claude-local-terminal"
+      ? (session.startupConfig.remoteControl ?? false)
+      : false;
+
+  const toggleRemoteControlMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const nextRemote = !isRemote;
+      if (isRunning) {
+        await orpc.sessions.localClaude.stopLiveSession.call({ sessionId });
+      }
+      const { cols, rows } = getTerminalSize();
+      await orpc.sessions.localClaude.resumeSession.call({
+        sessionId,
+        cols,
+        rows,
+        remoteControl: nextRemote,
+      });
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to toggle remote control",
+      );
+    },
+  });
+
+  if (session?.type === "claude-local-terminal") {
+    const verb = isRunning ? "Restart" : "Start";
+    const remoteControlLabel = isRemote
+      ? `${verb} without remote control`
+      : `${verb} with remote control`;
+
+    return [
+      {
+        type: "item",
+        key: "fork-session",
+        label: "Fork session",
+        icon: GitFork,
+        onSelect: () => forkClaudeMutation.mutate(session.sessionId),
+        disabled: forkClaudeMutation.isPending,
+      },
+      {
+        type: "item",
+        key: "toggle-remote-control",
+        label: remoteControlLabel,
+        icon: MonitorSmartphone,
+        onSelect: () => toggleRemoteControlMutation.mutate(session.sessionId),
+        disabled: toggleRemoteControlMutation.isPending,
+      },
+    ];
+  }
+
+  if (session?.type === "codex-local-terminal") {
+    return [
+      {
+        type: "item",
+        key: "fork-session",
+        label: "Fork session",
+        icon: GitFork,
+        onSelect: () => forkCodexMutation.mutate(session.sessionId),
+        disabled: forkCodexMutation.isPending || !session.codexSessionId,
+      },
+    ];
+  }
+
+  return [];
 }
 
 export function useCommonSessionMenuActions(

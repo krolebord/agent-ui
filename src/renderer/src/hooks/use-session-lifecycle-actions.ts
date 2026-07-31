@@ -7,8 +7,8 @@ import { useMutation } from "@tanstack/react-query";
 /**
  * Start/stop/delete for every session type, in one place so both the project
  * tree and the inbox drive sessions identically. Type-specific extras that are
- * not lifecycle (fork, Claude's remote-control toggle) stay with the view that
- * offers them.
+ * not lifecycle (fork, Claude's remote-control toggle) live in
+ * `useTypeSpecificSessionMenuActions`.
  */
 
 /** Stops a live session, whatever its type. Also used for bulk stop. */

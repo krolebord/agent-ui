@@ -79,6 +79,7 @@ import {
   sessionTypeIcon,
   statusIndicatorMeta,
   useCommonSessionMenuActions,
+  useTypeSpecificSessionMenuActions,
 } from "./session-sidebar-item";
 import { SidebarNavMenuItems, SidebarViewToggle } from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
@@ -389,6 +390,7 @@ function InboxRow({
     (x) => x.activeSessionId === session.sessionId,
   );
   const lifecycle = useSessionLifecycleActions(session);
+  const typeSpecificActions = useTypeSpecificSessionMenuActions(session);
   const commonActions = useCommonSessionMenuActions(session);
   const typeMeta = sessionTypeIcon[session.type];
   const isSnoozed = variant === "snoozed";
@@ -505,6 +507,7 @@ function InboxRow({
         ] satisfies SessionMenuAction[])
       : []),
     { type: "separator", key: "after-lifecycle" },
+    ...typeSpecificActions,
     ...commonActions,
     { type: "separator", key: "before-delete-session" },
     {

@@ -14,15 +14,12 @@ import {
 } from "@renderer/components/ui/dropdown-menu";
 import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import { UsagePanel } from "@renderer/components/usage-panel";
-import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
-import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import {
   stopSession,
   useSessionLifecycleActions,
 } from "@renderer/hooks/use-session-lifecycle-actions";
-import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -43,7 +40,6 @@ import {
   GitBranch,
   GitFork,
   ImageIcon,
-  MonitorSmartphone,
   PackageOpen,
   PlayIcon,
   Plus,
@@ -66,9 +62,9 @@ import { RawSessionStateDialog } from "./raw-session-state-dialog";
 import { RenameSessionDialog } from "./rename-session-dialog";
 import {
   BaseSessionSidebarItem,
-  type SessionMenuAction,
   SidebarIconButton,
   statusIndicatorMeta,
+  useTypeSpecificSessionMenuActions,
 } from "./session-sidebar-item";
 import { useSettingsStore } from "./settings-dialog";
 import { SidebarViewToggle } from "./sidebar-view-toggle";
@@ -749,11 +745,6 @@ function GroupSessionsList({
   );
 }
 
-function activateSessionAndCloseSidebar(sessionId: string) {
-  useActiveSessionStore.getState().setActiveSessionId(sessionId);
-  useMobileNavStore.getState().closeSidebar();
-}
-
 function ClaudeLocalTerminalSessionSidebarItem({
   sessionId,
 }: {
@@ -761,73 +752,7 @@ function ClaudeLocalTerminalSessionSidebarItem({
 }) {
   const session = useAppState((x) => x.sessions[sessionId]);
   const lifecycle = useSessionLifecycleActions(session);
-
-  const forkMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { cols, rows } = getTerminalSize();
-      return await orpc.sessions.localClaude.forkSession.call({
-        sessionId: id,
-        cols,
-        rows,
-      });
-    },
-    onSuccess: (newId) => {
-      activateSessionAndCloseSidebar(newId);
-    },
-  });
-
-  const isRunning = session.status !== "stopped";
-  const isRemote =
-    session.type === "claude-local-terminal"
-      ? (session.startupConfig.remoteControl ?? false)
-      : false;
-
-  const toggleRemoteControlMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const nextRemote = !isRemote;
-      if (isRunning) {
-        await orpc.sessions.localClaude.stopLiveSession.call({ sessionId: id });
-      }
-      const { cols, rows } = getTerminalSize();
-      await orpc.sessions.localClaude.resumeSession.call({
-        sessionId: id,
-        cols,
-        rows,
-        remoteControl: nextRemote,
-      });
-    },
-    onError: (error) => {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to toggle remote control",
-      );
-    },
-  });
-
-  const verb = isRunning ? "Restart" : "Start";
-  const remoteControlLabel = isRemote
-    ? `${verb} without remote control`
-    : `${verb} with remote control`;
-
-  const extraMenuActions: SessionMenuAction[] = [
-    {
-      type: "item",
-      key: "fork-session",
-      label: "Fork session",
-      icon: GitFork,
-      onSelect: () => forkMutation.mutate(sessionId),
-      disabled: forkMutation.isPending,
-    },
-    {
-      type: "item",
-      key: "toggle-remote-control",
-      label: remoteControlLabel,
-      icon: MonitorSmartphone,
-      onSelect: () => toggleRemoteControlMutation.mutate(sessionId),
-      disabled: toggleRemoteControlMutation.isPending,
-    },
-  ];
+  const extraMenuActions = useTypeSpecificSessionMenuActions(session);
 
   return (
     <BaseSessionSidebarItem
@@ -864,25 +789,7 @@ function CodexLocalTerminalSessionSidebarItem({
   const session = useAppState((x) => x.sessions[sessionId]);
   const [subagentsCollapsed, setSubagentsCollapsed] = useState(false);
   const lifecycle = useSessionLifecycleActions(session);
-
-  const forkMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const { cols, rows } = getTerminalSize();
-      return await orpc.sessions.codex.forkSession.call({
-        sessionId: id,
-        cols,
-        rows,
-      });
-    },
-    onSuccess: ({ sessionId: newId }) => {
-      activateSessionAndCloseSidebar(newId);
-    },
-    onError: (error) => {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to fork session",
-      );
-    },
-  });
+  const extraMenuActions = useTypeSpecificSessionMenuActions(session);
 
   if (!session || session.type !== "codex-local-terminal") {
     return null;
@@ -901,16 +808,6 @@ function CodexLocalTerminalSessionSidebarItem({
       Boolean(subagent),
     );
   const hasSubagents = subagents.length > 0;
-  const extraMenuActions: SessionMenuAction[] = [
-    {
-      type: "item",
-      key: "fork-session",
-      label: "Fork session",
-      icon: GitFork,
-      onSelect: () => forkMutation.mutate(sessionId),
-      disabled: forkMutation.isPending || !session.codexSessionId,
-    },
-  ];
 
   return (
     <>
