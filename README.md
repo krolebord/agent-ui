@@ -57,9 +57,8 @@ Open the usage panel to track usage buckets, reset times, and extra-usage / cred
 
 ### TypeScript Tooling
 
-- `pnpm typecheck` and `pnpm build` use `tsgo` from `@typescript/native-preview`.
-- The repo still keeps `typescript` installed for tool compatibility, but `tsc` is not the default checker.
-- In VS Code and Cursor, install the recommended `TypeScriptTeam.native-preview` extension. The committed workspace setting enables `tsgo` automatically.
+- `pnpm typecheck` and `pnpm build` use the native TypeScript 7 `tsc` compiler.
+- In VS Code and Cursor, install the recommended `TypeScriptTeam.native-preview` extension for the TypeScript 7 language server.
 
 ### Run in Development
 
@@ -94,7 +93,7 @@ data directory with logs stored below it.
 pnpm build
 ```
 
-This runs `tsgo --noEmit` before the Vite build.
+This runs `tsc --noEmit` before the Vite build.
 
 ### Package macOS App
 
