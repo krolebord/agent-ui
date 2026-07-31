@@ -40,7 +40,7 @@ export async function readProjectSettingsFile(
 
   try {
     const errors: ParseError[] = [];
-    const raw = parse(content, errors);
+    const raw = parse(content, errors, { allowTrailingComma: true });
     if (errors.length > 0) {
       log.warn(`JSONC parse errors in ${filePath}:`, errors);
       return null;

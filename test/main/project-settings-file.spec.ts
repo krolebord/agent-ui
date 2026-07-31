@@ -64,6 +64,24 @@ describe("project-settings-file", () => {
       expect(result).toBeNull();
     });
 
+    it("allows trailing commas", async () => {
+      await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
+      await writeFile(
+        settingsPath(),
+        `{
+  "iconPath": "brand/logo.png",
+  "worktreeSetupCommands": "pnpm install",
+}`,
+        "utf-8",
+      );
+
+      const result = await readProjectSettingsFile(tempDir);
+      expect(result).toEqual({
+        iconPath: "brand/logo.png",
+        worktreeSetupCommands: "pnpm install",
+      });
+    });
+
     it("strips unknown keys", async () => {
       await mkdir(path.join(tempDir, ".agent-ui"), { recursive: true });
       await writeFile(
