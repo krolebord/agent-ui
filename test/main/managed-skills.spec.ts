@@ -58,6 +58,25 @@ describe("ensureManagedSkills", () => {
     expect(await readlink(linkPath)).toBe(source);
     expect(result.warnings).toEqual([]);
 
+    const agentUiSource = path.join(result.managedSkillsRoot, "agent-ui");
+    const agentUiContents = await readFile(
+      path.join(agentUiSource, "SKILL.md"),
+      "utf8",
+    );
+    expect(agentUiContents).toContain("managed-by: agent-ui-builtin");
+    expect(agentUiContents).toContain("disable-model-invocation: true");
+    expect(agentUiContents).toContain(".agent-ui/settings.jsonc");
+    expect(agentUiContents).toContain("worktreeSetupCommands");
+    expect(agentUiContents).toContain("## What it does");
+    expect(agentUiContents).not.toContain("src/main/");
+    expect(agentUiContents).not.toContain("src/renderer/");
+    expect(
+      await readFile(path.join(agentUiSource, "agents", "openai.yaml"), "utf8"),
+    ).toContain("allow_implicit_invocation: false");
+    expect(await readlink(path.join(agentsSkillsDir(), "agent-ui"))).toBe(
+      agentUiSource,
+    );
+
     const skillsSource = path.join(result.managedSkillsRoot, "agent-ui-skills");
     const skillsContents = await readFile(
       path.join(skillsSource, "SKILL.md"),

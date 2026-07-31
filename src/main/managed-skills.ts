@@ -27,6 +27,62 @@ interface ManagedSkillContext {
 function buildSkills(ctx: ManagedSkillContext): ManagedSkill[] {
   return [
     {
+      name: "agent-ui",
+      files: {
+        // Keep this reference skill user-invokable: it is useful when asked
+        // for, but should not compete with task-specific project guidance.
+        [OPENAI_POLICY_FILE]: OPENAI_POLICY_CONTENTS,
+        "SKILL.md": `---
+name: agent-ui
+description: Explain what Agent UI is, what it does, and how its project-local .agent-ui configuration works. Use when the user explicitly invokes this skill for product or per-project configuration guidance.
+disable-model-invocation: true
+managed-by: agent-ui-builtin
+---
+
+# Agent UI
+
+Use this reference to explain Agent UI and help users configure it for a project.
+
+## What Agent UI is
+
+Agent UI is a desktop workspace for running CLI coding agents and terminal sessions across multiple projects. It supports Claude Code, Codex, Cursor Agent, and plain terminals in one interface.
+
+## What it does
+
+- Organizes agent and terminal sessions by project.
+- Runs multiple sessions at once and shows whether each is working, waiting for input or approval, stopped, or in an error state.
+- Lets users start, stop, resume, rename, move, and delete sessions.
+- Supports project worktrees and can prepare each new worktree with project-defined setup commands.
+- Provides Git history, diffs, review comments, and commit-message generation.
+- Tracks usage for supported coding agents.
+- Remembers projects and sessions between app launches.
+
+## Project-local .agent-ui configuration
+
+\`.agent-ui\` is a project-local directory. There is no literal \`.agent-ui/config\` file in the current format; when someone says “.agent-ui config,” they normally mean \`.agent-ui/settings.jsonc\` and related files in that directory.
+
+\`.agent-ui/settings.jsonc\` accepts JSON with comments and currently supports:
+
+\`\`\`jsonc
+{
+  // Run sequentially when Agent UI creates a worktree.
+  "worktreeSetupCommands": "pnpm install\\npnpm build",
+
+  // Optional project-relative image path used in the Agent UI sidebar.
+  "iconPath": "assets/logo.svg"
+}
+\`\`\`
+
+- Worktree setup commands run from the new worktree root and stop at the first failure. They receive \`$PROJECT_ROOT\` and \`$WORKTREE_ROOT\`.
+- \`iconPath\` must stay inside the project and use a supported image extension. Without it, Agent UI checks conventional locations, beginning with \`.agent-ui/icon.svg\` and \`.agent-ui/icon.png\`.
+- Unknown or invalid fields are ignored. Invalid JSONC causes the project file to be ignored.
+- Model, effort, permission, and other session defaults are app-managed settings, not supported project-file keys.
+
+The directory and its settings may be checked into the repository so everyone using the project gets the same setup commands and icon. Preserve comments and unrelated valid content when editing the file.
+`,
+      },
+    },
+    {
       name: "agent-ui-handoff",
       files: {
         // disable-model-invocation only covers Claude Code; the openai.yaml
