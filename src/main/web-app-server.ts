@@ -77,11 +77,10 @@ function getArtifactDownloadId(req: IncomingMessage): string | null {
 }
 
 function contentDispositionAttachment(filename: string): string {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: response headers cannot contain control bytes
-  const unsafeHeaderCharacters = /[\u0000-\u001f\u007f"\\]/g;
+  const unsafeFallbackCharacters = /[^\u0020-\u007e]|["\\]/gu;
   const fallback = path
     .basename(filename)
-    .replace(unsafeHeaderCharacters, "_")
+    .replace(unsafeFallbackCharacters, "_")
     .slice(0, 200);
   return `attachment; filename="${fallback || "artifact"}"; filename*=UTF-8''${encodeURIComponent(path.basename(filename))}`;
 }

@@ -128,4 +128,46 @@ describe("web app server", () => {
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(await response.text()).toBe("agent output");
   });
+
+  it("uses an ASCII fallback for artifact names with Unicode characters", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    const artifactPath = path.join(rendererDist, "unicode-artifact.txt");
+    await writeFile(artifactPath, "agent output");
+    const services = {
+      artifactsService: {
+        state: {
+          state: {
+            artifact1: {
+              id: "artifact1",
+              sessionId: "session1",
+              path: artifactPath,
+              name: "报告-📊.txt",
+              size: 12,
+              mimeType: "text/plain",
+              createdAt: Date.now(),
+              available: true,
+            },
+          },
+        },
+        markUnavailable() {},
+      },
+    } as unknown as Services;
+
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => services,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${server.url}/artifacts/artifact1/download`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      `attachment; filename="__-_.txt"; filename*=UTF-8''${encodeURIComponent("报告-📊.txt")}`,
+    );
+    expect(await response.text()).toBe("agent output");
+  });
 });
