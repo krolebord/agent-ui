@@ -104,18 +104,32 @@ async function serveArtifact(
     return;
   }
 
-  res.writeHead(200, {
+  const headers = {
     "content-type": artifact.mimeType ?? "application/octet-stream",
     "content-length": stats.size,
     "content-disposition": contentDispositionAttachment(artifact.name),
     "cache-control": "private, no-store",
     "x-content-type-options": "nosniff",
-  });
+  };
   if (req.method === "HEAD") {
+    res.writeHead(200, headers);
     res.end();
     return;
   }
-  createReadStream(artifact.path).pipe(res);
+
+  const artifactStream = createReadStream(artifact.path);
+  artifactStream.once("error", () => {
+    services.artifactsService.markUnavailable(artifactId);
+    if (!res.headersSent) {
+      sendText(res, 404, "Artifact file is no longer available");
+      return;
+    }
+    res.destroy();
+  });
+  artifactStream.once("open", () => {
+    res.writeHead(200, headers);
+    artifactStream.pipe(res);
+  });
 }
 
 function getWebSocketUrl(req: IncomingMessage, port: number) {
