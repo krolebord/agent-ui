@@ -1,4 +1,5 @@
 import type { Session } from "@main/sessions/state";
+import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
 import { useTerminalAttachFiles } from "@renderer/hooks/use-terminal-attach-files";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
@@ -9,7 +10,9 @@ import {
 } from "@shared/open-in-app";
 import { useMutation } from "@tanstack/react-query";
 import {
+  Check,
   ChevronDown,
+  Copy,
   FileDiff,
   FolderOpen,
   GitFork,
@@ -136,6 +139,36 @@ function AttachFileButton({ terminalId }: { terminalId: string }) {
   );
 }
 
+function BranchName({ branch }: { branch: string }) {
+  const { copied, copy } = useCopyToClipboard();
+
+  return (
+    <div className="flex min-w-0 items-center gap-0.5 text-xs text-muted-foreground">
+      <span className="truncate" title={branch}>
+        {branch}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={cn(
+          "size-5 shrink-0 px-0",
+          copied
+            ? "text-emerald-400 hover:text-emerald-300"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+        onClick={() => {
+          void copy(branch);
+        }}
+        aria-label={copied ? "Copied branch name" : "Copy branch name"}
+        title={copied ? "Copied" : "Copy branch name"}
+      >
+        {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      </Button>
+    </div>
+  );
+}
+
 export function SessionHeader({ session }: { session: Session }) {
   const Icon = sessionTypeConfig[session.type]?.icon;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -250,9 +283,7 @@ export function SessionHeader({ session }: { session: Session }) {
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{session.title}</div>
         {activeProject?.gitBranch ? (
-          <div className="truncate text-xs text-muted-foreground">
-            {activeProject.gitBranch}
-          </div>
+          <BranchName branch={activeProject.gitBranch} />
         ) : null}
       </div>
       {addedLines || deletedLines || aheadCommits || behindCommits ? (
