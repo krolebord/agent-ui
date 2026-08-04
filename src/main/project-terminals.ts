@@ -1,3 +1,5 @@
+import path from "node:path";
+import type { ResolvedProjectCommand } from "@shared/project-commands";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
 import { z } from "zod";
@@ -5,6 +7,10 @@ import { defineServiceState } from "../shared/service-state";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
 import { assertProjectPathInteractionAllowed } from "./project-service";
+import {
+  PROJECT_SETTINGS_RELATIVE_PATH,
+  readProjectCommands,
+} from "./project-settings-file";
 import {
   generateUniqueSessionId,
   sessionStatusSchema,
@@ -24,6 +30,13 @@ export const projectTerminalInstanceSchema = z.object({
   status: sessionStatusSchema.catch("stopped"),
   errorMessage: z.string().optional(),
   bufferedOutput: z.string().optional(),
+  /** Set when the tab was opened from a `.agent-ui` command preset. */
+  commandId: z.string().optional().catch(undefined),
+  /**
+   * Absolute directory the PTY was spawned in. Only differs from the workspace
+   * cwd when a preset declares its own `cwd`.
+   */
+  launchCwd: z.string().optional().catch(undefined),
 });
 export type ProjectTerminalInstanceData = z.infer<
   typeof projectTerminalInstanceSchema
@@ -124,7 +137,44 @@ interface LiveProjectTerminal {
   terminalId: string;
   terminal: ManagedTerminalRuntime;
   shellMonitor: ShellIntegrationMonitor;
+  /** Command text waiting for the shell to reach a prompt. */
+  pendingInput: string | null;
+  pendingInputTimer: ReturnType<typeof setTimeout> | null;
+  promptSeen: boolean;
   dispose: () => Promise<void>;
+}
+
+/**
+ * How long to wait for an OSC 133 prompt marker before typing anyway. Shells
+ * without our integration (fish, plain sh) never send one, and typing early is
+ * better than never running the command.
+ */
+const PROMPT_WAIT_TIMEOUT_MS = 1500;
+
+/**
+ * The precmd marker arrives just before the shell paints its prompt. Typing in
+ * that gap echoes the command above the prompt and then again inside it, so
+ * hold back briefly and let the prompt land first.
+ */
+const PROMPT_PAINT_DELAY_MS = 120;
+
+/**
+ * Resolves a preset's project-relative `cwd`, refusing anything that escapes
+ * the project the preset was read from.
+ */
+function resolveCommandCwd(projectPath: string, relativePath?: string): string {
+  if (!relativePath) {
+    return projectPath;
+  }
+  if (path.isAbsolute(relativePath)) {
+    throw new Error("Command cwd must be a project-relative path.");
+  }
+  const absolutePath = path.resolve(projectPath, relativePath);
+  const relative = path.relative(projectPath, absolutePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Command cwd must stay inside the project.");
+  }
+  return absolutePath;
 }
 
 function selectAdjacentTerminalId(
@@ -168,6 +218,32 @@ export const projectTerminalsRouter = {
     .handler(async ({ input, context }) => {
       assertProjectPathInteractionAllowed(input.cwd, context);
       return context.projectTerminalsManager.createTerminal(input);
+    }),
+  runCommand: procedure
+    .input(
+      z.object({
+        cwd: z.string(),
+        commandId: z.string(),
+        cols: z.number().optional(),
+        rows: z.number().optional(),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      assertProjectPathInteractionAllowed(input.cwd, context);
+      return context.projectTerminalsManager.runCommand(input);
+    }),
+  rerunCommand: procedure
+    .input(
+      z.object({
+        cwd: z.string(),
+        terminalId: z.string(),
+        cols: z.number().optional(),
+        rows: z.number().optional(),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      assertProjectPathInteractionAllowed(input.cwd, context);
+      return context.projectTerminalsManager.rerunCommand(input);
     }),
   selectTerminal: procedure
     .input(
@@ -249,6 +325,13 @@ export class ProjectTerminalsManager {
     private readonly state: ProjectTerminalsState,
     private readonly shellIntegrationEnv: Record<string, string> = {},
     private readonly terminalManager: TerminalManager = new TerminalManager(),
+    /**
+     * Maps a worktree cwd back to its main checkout, which is what command
+     * presets see as `$PROJECT_ROOT`.
+     */
+    private readonly resolveProjectRoot: (
+      cwd: string,
+    ) => string | undefined = () => undefined,
   ) {
     for (const workspace of Object.values(this.state.state)) {
       for (const terminalId of Object.keys(workspace.terminals)) {
@@ -290,10 +373,18 @@ export class ProjectTerminalsManager {
     cwd,
     cols,
     rows,
+    title,
+    commandId,
+    launchCwd,
+    env,
   }: {
     cwd: string;
     cols?: number;
     rows?: number;
+    title?: string;
+    commandId?: string;
+    launchCwd?: string;
+    env?: Record<string, string>;
   }) {
     const terminalId = generateUniqueSessionId();
     const now = Date.now();
@@ -313,11 +404,13 @@ export class ProjectTerminalsManager {
 
       workspace.terminals[terminalId] = {
         terminalId,
-        title: `Terminal ${ordinal}`,
+        title: title ?? `Terminal ${ordinal}`,
         cwd,
         createdAt: now,
         lastActivityAt: now,
         status: "stopped",
+        commandId,
+        launchCwd: launchCwd && launchCwd !== cwd ? launchCwd : undefined,
       };
       workspace.order.push(terminalId);
       workspace.selectedTerminalId = terminalId;
@@ -325,8 +418,125 @@ export class ProjectTerminalsManager {
       state[cwd] = workspace;
     });
 
-    this.startLiveTerminal({ cwd, terminalId, cols, rows });
+    this.startLiveTerminal({ cwd, terminalId, cols, rows, env });
 
+    return { terminalId };
+  }
+
+  /**
+   * Opens (or focuses) a terminal running a `.agent-ui` command preset. The
+   * preset is resolved from disk here rather than trusted from the renderer, so
+   * a stale dropdown can never launch a command the file no longer defines.
+   */
+  async runCommand({
+    cwd,
+    commandId,
+    cols,
+    rows,
+  }: {
+    cwd: string;
+    commandId: string;
+    cols?: number;
+    rows?: number;
+  }) {
+    const command = await this.resolveCommand(cwd, commandId);
+    const launchCwd = resolveCommandCwd(cwd, command.cwd);
+    const env = this.buildCommandEnv(cwd, command);
+
+    const workspace = this.state.state[cwd];
+    const existingTerminalId = command.singleton
+      ? workspace?.order.find(
+          (terminalId) =>
+            workspace.terminals[terminalId]?.commandId === command.id,
+        )
+      : undefined;
+
+    if (existingTerminalId) {
+      this.state.updateState((state) => {
+        const draftWorkspace = state[cwd];
+        const terminal = draftWorkspace?.terminals[existingTerminalId];
+        if (!draftWorkspace || !terminal) {
+          return;
+        }
+        terminal.title = command.name;
+        terminal.launchCwd = launchCwd !== cwd ? launchCwd : undefined;
+        draftWorkspace.selectedTerminalId = existingTerminalId;
+      });
+      this.startLiveTerminal({
+        cwd,
+        terminalId: existingTerminalId,
+        cols,
+        rows,
+        env,
+      });
+
+      // Something is already running in that shell — a dev server, most
+      // likely. Focus it instead of stacking a second copy on top.
+      const live = this.liveTerminals.get(existingTerminalId);
+      if (live?.shellMonitor.getState() === "running") {
+        return { terminalId: existingTerminalId, started: false };
+      }
+
+      this.queueCommandInput(existingTerminalId, command.run);
+      return { terminalId: existingTerminalId, started: true };
+    }
+
+    const { terminalId } = this.createTerminal({
+      cwd,
+      cols,
+      rows,
+      title: command.name,
+      commandId: command.id,
+      launchCwd,
+      env,
+    });
+    this.queueCommandInput(terminalId, command.run);
+    return { terminalId, started: true };
+  }
+
+  /**
+   * Re-runs the preset behind an existing tab. A shell that is busy gets an
+   * interrupt first, which is what makes this a restart for dev servers.
+   */
+  async rerunCommand({
+    cwd,
+    terminalId,
+    cols,
+    rows,
+  }: {
+    cwd: string;
+    terminalId: string;
+    cols?: number;
+    rows?: number;
+  }) {
+    const terminalState = this.state.state[cwd]?.terminals[terminalId];
+    if (!terminalState?.commandId) {
+      throw new Error("This terminal was not started from a command.");
+    }
+
+    const command = await this.resolveCommand(cwd, terminalState.commandId);
+    const launchCwd = resolveCommandCwd(cwd, command.cwd);
+    const env = this.buildCommandEnv(cwd, command);
+
+    this.state.updateState((state) => {
+      const draftWorkspace = state[cwd];
+      const terminal = draftWorkspace?.terminals[terminalId];
+      if (!draftWorkspace || !terminal) {
+        return;
+      }
+      terminal.title = command.name;
+      terminal.launchCwd = launchCwd !== cwd ? launchCwd : undefined;
+      draftWorkspace.selectedTerminalId = terminalId;
+    });
+
+    this.startLiveTerminal({ cwd, terminalId, cols, rows, env });
+
+    const live = this.liveTerminals.get(terminalId);
+    if (live?.shellMonitor.getState() === "running") {
+      this.terminalManager.writeToTerminal(terminalId, "\x03");
+    }
+
+    this.queueCommandInput(terminalId, command.run);
     return { terminalId };
   }
 
@@ -430,16 +640,103 @@ export class ProjectTerminalsManager {
     );
   }
 
+  /**
+   * Reads the preset from the worktree's own settings file, falling back to the
+   * main checkout for worktrees that predate the file being added.
+   */
+  private async resolveCommand(
+    cwd: string,
+    commandId: string,
+  ): Promise<ResolvedProjectCommand> {
+    let commands = await readProjectCommands(cwd);
+    const projectRoot = this.resolveProjectRoot(cwd);
+    if (commands.length === 0 && projectRoot && projectRoot !== cwd) {
+      commands = await readProjectCommands(projectRoot);
+    }
+
+    const command = commands.find((entry) => entry.id === commandId);
+    if (!command) {
+      throw new Error(
+        `Command "${commandId}" is no longer defined in ${PROJECT_SETTINGS_RELATIVE_PATH}.`,
+      );
+    }
+    return command;
+  }
+
+  private buildCommandEnv(cwd: string, command: ResolvedProjectCommand) {
+    return {
+      ...this.shellIntegrationEnv,
+      PROJECT_ROOT: this.resolveProjectRoot(cwd) ?? cwd,
+      WORKTREE_ROOT: cwd,
+      ...command.env,
+    };
+  }
+
+  /**
+   * Types a command into the shell rather than launching it as the PTY program:
+   * interrupting it then leaves a usable shell in the right directory instead of
+   * closing the tab.
+   */
+  private queueCommandInput(terminalId: string, run: string) {
+    const live = this.liveTerminals.get(terminalId);
+    if (!live) {
+      return;
+    }
+
+    live.pendingInput = `${run}\n`;
+
+    // A shell already sitting at a prompt won't announce another one, so there
+    // is nothing to wait for beyond the paint delay.
+    this.scheduleFlush(
+      terminalId,
+      live.promptSeen && live.shellMonitor.getState() === "idle"
+        ? PROMPT_PAINT_DELAY_MS
+        : PROMPT_WAIT_TIMEOUT_MS,
+    );
+  }
+
+  private scheduleFlush(terminalId: string, delayMs: number) {
+    const live = this.liveTerminals.get(terminalId);
+    if (!live?.pendingInput) {
+      return;
+    }
+
+    if (live.pendingInputTimer) {
+      clearTimeout(live.pendingInputTimer);
+    }
+    live.pendingInputTimer = setTimeout(() => {
+      this.flushPendingInput(terminalId);
+    }, delayMs);
+    live.pendingInputTimer.unref?.();
+  }
+
+  private flushPendingInput(terminalId: string) {
+    const live = this.liveTerminals.get(terminalId);
+    if (!live?.pendingInput) {
+      return;
+    }
+
+    const data = live.pendingInput;
+    live.pendingInput = null;
+    if (live.pendingInputTimer) {
+      clearTimeout(live.pendingInputTimer);
+      live.pendingInputTimer = null;
+    }
+    this.terminalManager.writeToTerminal(terminalId, data);
+  }
+
   private startLiveTerminal({
     cwd,
     terminalId,
     cols,
     rows,
+    env,
   }: {
     cwd: string;
     terminalId: string;
     cols?: number;
     rows?: number;
+    env?: Record<string, string>;
   }) {
     if (this.liveTerminals.has(terminalId)) {
       return;
@@ -463,6 +760,12 @@ export class ProjectTerminalsManager {
           terminal.status = activity === "running" ? "running" : "idle";
         });
       },
+      onPrompt: () => {
+        const live = this.liveTerminals.get(terminalId);
+        if (!live) return;
+        live.promptSeen = true;
+        this.scheduleFlush(terminalId, PROMPT_PAINT_DELAY_MS);
+      },
     });
 
     const terminal = this.terminalManager.startTerminal({
@@ -472,10 +775,10 @@ export class ProjectTerminalsManager {
       },
       launch: {
         runWithShell: true,
-        cwd,
+        cwd: terminalState.launchCwd ?? cwd,
         cols,
         rows,
-        env: this.shellIntegrationEnv,
+        env: env ?? this.shellIntegrationEnv,
       },
       transformOutputChunk: (chunk) => shellMonitor.processChunk(chunk),
       onData: () => {
@@ -512,9 +815,18 @@ export class ProjectTerminalsManager {
       terminalId,
       terminal,
       shellMonitor,
+      pendingInput: null,
+      pendingInputTimer: null,
+      promptSeen: false,
       dispose: disposable.dispose,
     });
-    disposable.addDisposable(() => this.liveTerminals.delete(terminalId));
+    disposable.addDisposable(() => {
+      const live = this.liveTerminals.get(terminalId);
+      if (live?.pendingInputTimer) {
+        clearTimeout(live.pendingInputTimer);
+      }
+      this.liveTerminals.delete(terminalId);
+    });
 
     if (!this.terminalManager.getRuntime(terminalId)) {
       void disposable.dispose();

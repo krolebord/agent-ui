@@ -69,11 +69,23 @@ Agent UI is a desktop workspace for running CLI coding agents and terminal sessi
   "worktreeSetupCommands": "pnpm install\\npnpm build",
 
   // Optional project-relative image path used in the Agent UI sidebar.
-  "iconPath": "assets/logo.svg"
+  "iconPath": "assets/logo.svg",
+
+  // Command presets, launched on demand from the project terminal pane.
+  "commands": [
+    {
+      "name": "Dev server",
+      "run": "ssh vps -t 'cd /srv/app && just dev'",
+      "singleton": true
+    }
+  ]
 }
 \`\`\`
 
 - Worktree setup commands run from the new worktree root and stop at the first failure. They receive \`$PROJECT_ROOT\` and \`$WORKTREE_ROOT\`.
+- Each entry in \`commands\` needs \`name\` and \`run\`. Optional keys: \`id\` (stable key; otherwise derived from the name, so set it when the name may change), \`cwd\` (project-relative, must stay inside the project), \`env\` (string map), and \`singleton\` (focus the existing terminal for this preset instead of opening another).
+- Presets are typed into a project terminal when the user picks them, so \`$PROJECT_ROOT\` and \`$WORKTREE_ROOT\` are available and interrupting one leaves a usable shell. Nothing runs a preset automatically.
+- Entries that fail validation are skipped; the rest of the list still loads. Users can also edit presets in the app under the project menu → Commands.
 - \`iconPath\` must stay inside the project and use a supported image extension. Without it, Agent UI checks conventional locations, beginning with \`.agent-ui/icon.svg\` and \`.agent-ui/icon.png\`.
 - Unknown or invalid fields are ignored. Invalid JSONC causes the project file to be ignored.
 - Model, effort, permission, and other session defaults are app-managed settings, not supported project-file keys.

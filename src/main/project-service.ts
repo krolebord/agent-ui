@@ -7,6 +7,10 @@ import {
   type CommitProgressEvent,
   formatCommittedWithPlaceholderNote,
 } from "../shared/commit-message-generation";
+import {
+  PROJECT_COMMANDS_LIMIT,
+  projectCommandWriteSchema,
+} from "../shared/project-commands";
 import { defineServiceState } from "../shared/service-state";
 import { generateCommitMessage } from "./commit-message-generation";
 import type { Services } from "./create-services";
@@ -19,7 +23,9 @@ import {
 } from "./project-favicon";
 import {
   type ProjectSettingsFile,
+  readProjectCommands,
   readProjectSettingsFile,
+  writeProjectCommands,
   writeProjectSettingsFile,
 } from "./project-settings-file";
 import type { Session } from "./sessions/state";
@@ -639,6 +645,33 @@ export const projectsRouter = {
       });
 
       await writeProjectSettingsFile(path, { worktreeSetupCommands });
+    }),
+  // Read straight from disk on every call: the file is checked into the repo
+  // and edited outside the app, so a cached copy would go stale unnoticed.
+  listCommands: procedure
+    .input(z.object({ path: projectPathSchema }))
+    .handler(async ({ input }) => {
+      const path = normalizeProjectPath(input.path);
+      if (!path) return { commands: [] };
+      return { commands: await readProjectCommands(path) };
+    }),
+  setCommands: procedure
+    .input(
+      z.object({
+        path: projectPathSchema,
+        commands: z
+          .array(projectCommandWriteSchema)
+          .max(PROJECT_COMMANDS_LIMIT),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const path = normalizeProjectPath(input.path);
+      if (!path) return { commands: [] };
+
+      assertProjectPathInteractionAllowed(path, context);
+
+      await writeProjectCommands(path, input.commands);
+      return { commands: await readProjectCommands(path) };
     }),
   deleteProject: procedure
     .input(z.object({ path: z.string().trim().min(1) }))

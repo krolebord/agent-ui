@@ -307,6 +307,9 @@ export async function createServices(options: CreateServicesOptions) {
     projectTerminalsState,
     shellIntegrationEnv,
     terminalManager,
+    (cwd) =>
+      projectsState.state.find((project) => project.path === cwd)
+        ?.worktreeOriginPath,
   );
   const codexSessionsManager = new CodexSessionsManager({
     state: sessionsState,

@@ -15,5 +15,27 @@
   "localCursor": {
     "model": "composer-2",
     "permissionMode": "yolo"
-  }
+  },
+
+  // Shell aliases installed on the VPS by scripts/setup-headless-service.sh.
+  // They resolve in project terminals because those run an interactive shell.
+  "commands": [
+    {
+      "id": "deploy",
+      "name": "Deploy",
+      "run": "agent-ui-deploy",
+      "singleton": true
+    },
+    { "id": "start", "name": "Start server", "run": "agent-ui-start" },
+    { "id": "stop", "name": "Stop server", "run": "agent-ui-stop" },
+    { "id": "restart", "name": "Restart server", "run": "agent-ui-restart" },
+    { "id": "status", "name": "Service status", "run": "agent-ui-status" },
+    {
+      "id": "logs",
+      "name": "Server logs",
+      "run": "agent-ui-logs",
+      "singleton": true
+    },
+    { "id": "help", "name": "Alias help", "run": "agent-ui-help" }
+  ]
 }

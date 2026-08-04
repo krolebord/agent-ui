@@ -47,6 +47,7 @@ import {
   Settings,
   Sparkles,
   SquareIcon,
+  TerminalSquare,
   Trash2,
   Users,
 } from "lucide-react";
@@ -55,6 +56,7 @@ import { toast } from "sonner";
 import { useAddProjectDialogStore } from "./add-project-dialog";
 import { useConfirmDialogStore } from "./confirm-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
+import { useProjectCommandsDialogStore } from "./project-commands-dialog";
 import { useProjectDefaultsDialogStore } from "./project-defaults-dialog";
 import { ProjectFavicon } from "./project-favicon";
 import { useProjectWorktreeDialogStore } from "./project-worktree-dialog";
@@ -171,6 +173,9 @@ export function SessionSidebar() {
     [groups],
   );
   const setOpenProjectCwd = useProjectDefaultsDialogStore(
+    (x) => x.setOpenProjectCwd,
+  );
+  const setOpenProjectCommandsCwd = useProjectCommandsDialogStore(
     (x) => x.setOpenProjectCwd,
   );
   const setOpenProjectWorktreePath = useProjectWorktreeDialogStore(
@@ -327,6 +332,7 @@ export function SessionSidebar() {
               onCreateWorktree={() => setOpenProjectWorktreePath(group.path)}
               canCreateWorktree={Boolean(group.gitBranch) && !group.isWorktree}
               onOpenSettings={() => setOpenProjectCwd(group.path)}
+              onOpenCommands={() => setOpenProjectCommandsCwd(group.path)}
               onOpenFolder={() => openFolderMutation.mutate(group.path)}
               onDelete={() => {
                 if (group.isWorktree) {
@@ -415,6 +421,7 @@ function SortableProjectGroup({
   onCreateWorktree,
   canCreateWorktree,
   onOpenSettings,
+  onOpenCommands,
   onOpenFolder,
   onDelete,
   isDeleting,
@@ -428,6 +435,7 @@ function SortableProjectGroup({
   onCreateWorktree: () => void;
   canCreateWorktree: boolean;
   onOpenSettings: () => void;
+  onOpenCommands: () => void;
   onOpenFolder: () => void;
   onDelete: () => void;
   isDeleting: boolean;
@@ -629,6 +637,10 @@ function SortableProjectGroup({
               <DropdownMenuItem disabled={locked} onClick={onOpenSettings}>
                 <Settings className="size-3.5" />
                 Settings
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={locked} onClick={onOpenCommands}>
+                <TerminalSquare className="size-3.5" />
+                Commands
               </DropdownMenuItem>
               {hasNativeDesktopShell ? (
                 <DropdownMenuItem disabled={locked} onClick={onOpenFolder}>

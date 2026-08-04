@@ -2,6 +2,14 @@ import { LiveTerminalSurface } from "@renderer/components/live-terminal-surface"
 import { TerminalKeyBar } from "@renderer/components/terminal-key-bar";
 import { Button } from "@renderer/components/ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@renderer/components/ui/dropdown-menu";
+import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
@@ -10,9 +18,20 @@ import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
-import { AlertCircle, CircleDot, Plus, TerminalSquare, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  AlertCircle,
+  ChevronDown,
+  CircleDot,
+  Play,
+  Plus,
+  RotateCw,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { useProjectCommandsDialogStore } from "./project-commands-dialog";
 import { useAppState } from "./sync-state-provider";
 
 function getTerminalStatusMeta(status: string) {
@@ -38,6 +57,80 @@ function getTerminalStatusMeta(status: string) {
         className: "text-zinc-400",
       };
   }
+}
+
+/**
+ * Lists the project's command presets. The list is fetched when the menu opens
+ * rather than cached: `.agent-ui/settings.jsonc` is edited outside the app.
+ */
+function ProjectCommandsMenu({
+  cwd,
+  disabled,
+  triggerClassName,
+  onRun,
+}: {
+  cwd: string;
+  disabled: boolean;
+  triggerClassName: string;
+  onRun: (commandId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const setCommandsDialogCwd = useProjectCommandsDialogStore(
+    (s) => s.setOpenProjectCwd,
+  );
+
+  const commandsQuery = useQuery({
+    ...orpc.projects.listCommands.queryOptions({ input: { path: cwd } }),
+    enabled: open,
+    staleTime: 0,
+    gcTime: 0,
+  });
+  const commands = commandsQuery.data?.commands ?? [];
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="flat"
+          className={triggerClassName}
+          disabled={disabled}
+          aria-label="Project commands"
+        >
+          <ChevronDown className="size-3" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel>Commands</DropdownMenuLabel>
+        {commandsQuery.isPending ? (
+          <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
+        ) : commands.length === 0 ? (
+          <DropdownMenuItem disabled>
+            None in .agent-ui/settings.jsonc
+          </DropdownMenuItem>
+        ) : (
+          commands.map((command) => (
+            <DropdownMenuItem
+              key={command.id}
+              onSelect={() => {
+                onRun(command.id);
+              }}
+            >
+              <Play className="size-3.5" />
+              <span className="truncate">{command.name}</span>
+            </DropdownMenuItem>
+          ))
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={() => {
+            setCommandsDialogCwd(cwd);
+          }}
+        >
+          Manage commands…
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 function ProjectTerminalSurface({
@@ -222,6 +315,55 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
     }
   }, [cwd, getCurrentSize, projectLocked]);
 
+  const handleRunCommand = useCallback(
+    async (commandId: string) => {
+      if (!cwd || projectLocked) {
+        return;
+      }
+
+      setIsCreating(true);
+      try {
+        const { cols, rows } = getCurrentSize();
+        await orpc.projectTerminals.runCommand.call({
+          cwd,
+          commandId,
+          cols,
+          rows,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to run command: ${message}`);
+      } finally {
+        setIsCreating(false);
+      }
+    },
+    [cwd, getCurrentSize, projectLocked],
+  );
+
+  const handleRerunCommand = useCallback(
+    async (terminalId: string) => {
+      if (!cwd || projectLocked) {
+        return;
+      }
+
+      try {
+        const { cols, rows } = getCurrentSize();
+        await orpc.projectTerminals.rerunCommand.call({
+          cwd,
+          terminalId,
+          cols,
+          rows,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Unknown error";
+        toast.error(`Failed to restart command: ${message}`);
+      }
+    },
+    [cwd, getCurrentSize, projectLocked],
+  );
+
   const handleSelectTerminal = useCallback(
     async (terminalId: string) => {
       if (!cwd || projectLocked) {
@@ -355,6 +497,16 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
             >
               <Plus className="size-3.5" />
             </Button>
+            {cwd ? (
+              <ProjectCommandsMenu
+                cwd={cwd}
+                disabled={isCreating || projectLocked}
+                triggerClassName="h-9 w-7 shrink-0 px-0"
+                onRun={(commandId) => {
+                  void handleRunCommand(commandId);
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
 
@@ -381,17 +533,27 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                 Project Terminals
               </span>
             </div>
-            {hasCwd ? (
-              <Button
-                variant="flat"
-                className="h-full w-9 shrink-0 px-0"
-                onClick={() => {
-                  void handleCreateTerminal();
-                }}
-                disabled={isCreating || projectLocked}
-              >
-                <Plus className="size-3.5" />
-              </Button>
+            {cwd ? (
+              <>
+                <Button
+                  variant="flat"
+                  className="h-full w-7 shrink-0 px-0"
+                  onClick={() => {
+                    void handleCreateTerminal();
+                  }}
+                  disabled={isCreating || projectLocked}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+                <ProjectCommandsMenu
+                  cwd={cwd}
+                  disabled={isCreating || projectLocked}
+                  triggerClassName="h-full w-6 shrink-0 px-0"
+                  onRun={(commandId) => {
+                    void handleRunCommand(commandId);
+                  }}
+                />
+              </>
             ) : null}
           </div>
 
@@ -421,7 +583,8 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                     <button
                       type="button"
                       className={cn(
-                        "flex w-full items-center gap-1.5 px-1.5 py-1 pr-7 text-left text-sm transition pointer-coarse:py-2",
+                        "flex w-full items-center gap-1.5 px-1.5 py-1 text-left text-sm transition pointer-coarse:py-2",
+                        terminal.commandId ? "pr-14" : "pr-7",
                         isActive
                           ? "bg-white/12 text-white"
                           : "text-zinc-400 hover:bg-white/8 hover:text-zinc-200",
@@ -436,6 +599,19 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                       />
                       <span className="truncate text-xs">{terminal.title}</span>
                     </button>
+                    {terminal.commandId ? (
+                      <Button
+                        variant="flat"
+                        className="absolute inset-y-0 right-7 h-full w-7 px-0 opacity-0 group-hover/terminal:opacity-100 pointer-coarse:opacity-100"
+                        disabled={projectLocked || isClosing}
+                        aria-label={`Run ${terminal.title} again`}
+                        onClick={() => {
+                          void handleRerunCommand(terminalId);
+                        }}
+                      >
+                        <RotateCw className="size-3" />
+                      </Button>
+                    ) : null}
                     <Button
                       variant="flat"
                       className="absolute inset-y-0 right-0 h-full w-7 px-0 opacity-0 group-hover/terminal:opacity-100 pointer-coarse:opacity-100"

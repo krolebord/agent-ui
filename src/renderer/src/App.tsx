@@ -6,6 +6,7 @@ import { DiffReviewCommitDialog } from "@renderer/components/diff-review-commit-
 import { ErrorDialog } from "@renderer/components/error-dialog";
 import { InboxSidebar } from "@renderer/components/inbox-sidebar";
 import { NewSessionDialog } from "@renderer/components/new-session-dialog";
+import { ProjectCommandsDialog } from "@renderer/components/project-commands-dialog";
 import { ProjectDefaultsDialog } from "@renderer/components/project-defaults-dialog";
 import { ProjectDeletionToastListener } from "@renderer/components/project-deletion-toast-listener";
 import { ProjectWorktreeDialog } from "@renderer/components/project-worktree-dialog";
@@ -124,6 +125,7 @@ function App() {
       <ErrorDialog />
       <NewSessionDialog />
       <ProjectDefaultsDialog />
+      <ProjectCommandsDialog />
       <ProjectWorktreeDialog />
       <WorktreeDeleteDialog />
       <ProjectDeletionToastListener />

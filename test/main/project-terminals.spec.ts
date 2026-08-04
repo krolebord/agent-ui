@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ProjectTerminalsManager,
   type ProjectTerminalsState,
@@ -171,6 +174,129 @@ describe("ProjectTerminalsManager", () => {
     expect(state["/tmp/project"]).toBeUndefined();
     expect(manager.liveTerminals.size).toBe(0);
     expect(terminalSessionSpies.stop).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ProjectTerminalsManager command presets", () => {
+  let projectDir: string;
+
+  /** OSC 133 precmd marker: what the shell integration emits at each prompt. */
+  const PROMPT_MARKER = "\u001b]133;A\u0007";
+
+  const writeCommands = async (commands: string) => {
+    await mkdir(path.join(projectDir, ".agent-ui"), { recursive: true });
+    await writeFile(
+      path.join(projectDir, ".agent-ui", "settings.jsonc"),
+      `{ "commands": ${commands} }`,
+      "utf-8",
+    );
+  };
+
+  /** Emits a prompt marker and waits out the paint delay before the flush. */
+  const emitPrompt = async (callbackIndex = 0) => {
+    terminalSessionSpies.callbacks[callbackIndex]?.onData({
+      chunk: PROMPT_MARKER,
+      bufferedOutput: PROMPT_MARKER,
+    });
+    await vi.waitFor(() => {
+      expect(terminalSessionSpies.write).toHaveBeenCalled();
+    });
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    terminalSessionSpies.callbacks = [];
+    projectDir = path.join(
+      tmpdir(),
+      `project-commands-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    await mkdir(projectDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it("opens a titled terminal and types the command once the shell prompts", async () => {
+    await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
+    const { state, projectTerminalsState } = createProjectTerminalsState();
+    const manager = new ProjectTerminalsManager(projectTerminalsState);
+
+    const { terminalId } = await manager.runCommand({
+      cwd: projectDir,
+      commandId: "dev-server",
+    });
+
+    const terminal = state[projectDir]?.terminals[terminalId];
+    expect(terminal?.title).toBe("Dev server");
+    expect(terminal?.commandId).toBe("dev-server");
+    // Nothing is typed until the shell says it is ready for input.
+    expect(terminalSessionSpies.write).not.toHaveBeenCalled();
+
+    await emitPrompt();
+
+    expect(terminalSessionSpies.write).toHaveBeenCalledWith("just dev\n");
+  });
+
+  it("focuses the existing terminal for a singleton preset", async () => {
+    await writeCommands(
+      `[{ "name": "Dev server", "run": "just dev", "singleton": true }]`,
+    );
+    const { state, projectTerminalsState } = createProjectTerminalsState();
+    const manager = new ProjectTerminalsManager(projectTerminalsState);
+
+    const first = await manager.runCommand({
+      cwd: projectDir,
+      commandId: "dev-server",
+    });
+    await emitPrompt();
+    const second = await manager.runCommand({
+      cwd: projectDir,
+      commandId: "dev-server",
+    });
+
+    expect(second.terminalId).toBe(first.terminalId);
+    expect(state[projectDir]?.order).toHaveLength(1);
+    expect(terminalSessionSpies.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a second terminal when the preset is not a singleton", async () => {
+    await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
+    const { state, projectTerminalsState } = createProjectTerminalsState();
+    const manager = new ProjectTerminalsManager(projectTerminalsState);
+
+    await manager.runCommand({ cwd: projectDir, commandId: "dev-server" });
+    await manager.runCommand({ cwd: projectDir, commandId: "dev-server" });
+
+    expect(state[projectDir]?.order).toHaveLength(2);
+  });
+
+  it("rejects a preset the file no longer defines", async () => {
+    await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
+    const { projectTerminalsState } = createProjectTerminalsState();
+    const manager = new ProjectTerminalsManager(projectTerminalsState);
+
+    await expect(
+      manager.runCommand({ cwd: projectDir, commandId: "deploy" }),
+    ).rejects.toThrow(/no longer defined/);
+  });
+
+  it("re-runs the preset behind an existing terminal", async () => {
+    await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
+    const { projectTerminalsState } = createProjectTerminalsState();
+    const manager = new ProjectTerminalsManager(projectTerminalsState);
+
+    const { terminalId } = await manager.runCommand({
+      cwd: projectDir,
+      commandId: "dev-server",
+    });
+    await emitPrompt();
+    terminalSessionSpies.write.mockClear();
+
+    await manager.rerunCommand({ cwd: projectDir, terminalId });
+    await emitPrompt();
+
+    expect(terminalSessionSpies.write).toHaveBeenCalledWith("just dev\n");
   });
 });
 

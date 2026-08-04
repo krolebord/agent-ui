@@ -2,6 +2,12 @@ export type ShellActivityState = "idle" | "running";
 
 interface ShellIntegrationMonitorOptions {
   onActivityChange: (state: ShellActivityState) => void;
+  /**
+   * Fires on every precmd (A) marker, including the very first prompt. Callers
+   * queueing input for a freshly spawned shell use this to type only once the
+   * shell is actually reading, rather than racing its startup files.
+   */
+  onPrompt?: () => void;
 }
 
 const ESC = "\x1b";
@@ -35,9 +41,11 @@ export class ShellIntegrationMonitor {
   private state: ShellActivityState = "idle";
   private pending = "";
   private readonly onActivityChange: (state: ShellActivityState) => void;
+  private readonly onPrompt?: () => void;
 
   constructor(options: ShellIntegrationMonitorOptions) {
     this.onActivityChange = options.onActivityChange;
+    this.onPrompt = options.onPrompt;
   }
 
   getState(): ShellActivityState {
@@ -139,6 +147,7 @@ export class ShellIntegrationMonitor {
       newState = "running";
     } else if (marker === "A") {
       newState = "idle";
+      this.onPrompt?.();
     }
     // B and D are stripped but don't change state
 
