@@ -8,6 +8,7 @@ import {
   DATABASE_FILENAME,
   DatabaseService,
 } from "../../src/main/database/database-service";
+import { AppMigrationProvider } from "../../src/main/database/migrations";
 
 describe("DatabaseService", () => {
   const tempDirs: string[] = [];
@@ -44,6 +45,7 @@ describe("DatabaseService", () => {
         "app_metadata",
         "kysely_migration",
         "kysely_migration_lock",
+        "session_buffers",
       ]),
     );
 
@@ -97,7 +99,11 @@ describe("DatabaseService", () => {
       value: "persisted",
       updated_at: 1,
     });
-    expect(appliedMigrations.rows[0]?.count).toBe(1);
+    // Compare against the provider so adding a migration does not fail this.
+    const expectedMigrations = Object.keys(
+      await new AppMigrationProvider().getMigrations(),
+    ).length;
+    expect(appliedMigrations.rows[0]?.count).toBe(expectedMigrations);
 
     await second.close();
     await expect(second.close()).resolves.toBeUndefined();

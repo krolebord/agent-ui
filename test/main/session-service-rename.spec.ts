@@ -54,7 +54,6 @@ describe("SessionsServiceNew.renameSession", () => {
         model: "opus",
         initialPrompt: undefined,
       },
-      bufferedOutput: "",
     };
 
     service.renameSession("session-1", "  New Name  ");

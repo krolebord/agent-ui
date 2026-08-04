@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createInMemorySessionBufferStore } from "../../src/main/database/session-buffer-store";
 import {
   type CursorAgentSessionData,
   CursorAgentSessionsManager,
@@ -123,7 +124,6 @@ function seedCursorSession(
       initialPrompt: undefined,
     },
     cursorChatId: undefined,
-    bufferedOutput: "",
     ...overrides,
   };
 }
@@ -342,16 +342,18 @@ describe("CursorAgentSessionsManager", () => {
     expect(state["session-settled"].lastActivityAt).toBe(settledAt);
   });
 
-  it("stores offlineBuffer when a cursor terminal is stopped", async () => {
+  it("stores the offline buffer when a cursor terminal is stopped", async () => {
     const sessionsState = createState();
     seedCursorSession(
       sessionsState.state as Record<string, CursorAgentSessionData>,
       "session-4",
     );
 
+    const sessionBuffers = createInMemorySessionBufferStore();
     const manager = new CursorAgentSessionsManager({
       state: sessionsState,
       sessionLogFileManager: null,
+      sessionBuffers,
     });
 
     await manager.startLiveSession({
@@ -368,11 +370,9 @@ describe("CursorAgentSessionsManager", () => {
 
     await manager.stopLiveSession("session-4");
 
-    expect(
-      (sessionsState.state as Record<string, CursorAgentSessionData>)[
-        "session-4"
-      ]?.offlineBuffer,
-    ).toContain("offline cursor output");
+    await expect(sessionBuffers.get("session-4")).resolves.toContain(
+      "offline cursor output",
+    );
   });
 
   it("triggers title generation on beforeSubmitPrompt for unnamed sessions", async () => {

@@ -4,6 +4,13 @@ export interface AppMetadataTable {
   updated_at: number;
 }
 
+/** Terminal scrollback for stopped sessions. */
+export interface SessionBuffersTable {
+  session_id: string;
+  offline_buffer: string;
+  updated_at: number;
+}
+
 /**
  * Kysely's compile-time view of the application database.
  *
@@ -11,4 +18,5 @@ export interface AppMetadataTable {
  */
 export interface AgentUiDatabase {
   app_metadata: AppMetadataTable;
+  session_buffers: SessionBuffersTable;
 }

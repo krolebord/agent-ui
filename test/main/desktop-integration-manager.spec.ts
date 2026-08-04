@@ -46,7 +46,6 @@ function makeLocalTerminalSession(
     startupConfig: {
       cwd: "/tmp",
     },
-    bufferedOutput: "",
   };
 }
 

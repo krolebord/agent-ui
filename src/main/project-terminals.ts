@@ -23,7 +23,6 @@ export const projectTerminalInstanceSchema = z.object({
   lastActivityAt: z.number().default(Date.now()),
   status: sessionStatusSchema.catch("stopped"),
   errorMessage: z.string().optional(),
-  bufferedOutput: z.string().optional(),
 });
 export type ProjectTerminalInstanceData = z.infer<
   typeof projectTerminalInstanceSchema

@@ -15,14 +15,12 @@ export function LiveTerminalSurface({
   active = true,
   readOnly = false,
   trackGlobalSize = true,
-  initialBuffer,
   attachKey = "default",
 }: {
   terminalId: string;
   active?: boolean;
   readOnly?: boolean;
   trackGlobalSize?: boolean;
-  initialBuffer?: string;
   attachKey?: string;
 }) {
   const terminalRef = useRef<TerminalPaneHandle | null>(null);
@@ -31,9 +29,6 @@ export function LiveTerminalSurface({
   useEffect(() => {
     attachKey;
     terminalRef.current?.clear();
-    if (initialBuffer) {
-      terminalRef.current?.write(initialBuffer);
-    }
 
     const cancel = consumeEventIterator(
       orpc.terminals.subscribeToTerminal.call({ terminalId }),
@@ -60,7 +55,7 @@ export function LiveTerminalSurface({
     );
 
     return () => void cancel();
-  }, [attachKey, initialBuffer, terminalId]);
+  }, [attachKey, terminalId]);
 
   useEffect(() => {
     if (!active) {

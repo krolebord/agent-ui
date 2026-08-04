@@ -49,7 +49,6 @@ function baseSession(
       model: "opus",
       initialPrompt: undefined,
     },
-    bufferedOutput: "",
     ...overrides,
   };
 }

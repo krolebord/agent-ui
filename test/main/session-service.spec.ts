@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClaudeAccountAuth } from "../../src/main/claude-cli";
+import { createInMemorySessionBufferStore } from "../../src/main/database/session-buffer-store";
 import {
   type ClaudeLocalTerminalSessionData,
   SessionsServiceNew,
@@ -112,6 +113,7 @@ function createService(options?: {
     cleanup: vi.fn(),
   };
 
+  const sessionBuffers = createInMemorySessionBufferStore();
   const service = new SessionsServiceNew({
     pluginDir: null,
     pluginWarning: null,
@@ -119,9 +121,10 @@ function createService(options?: {
     stateFileManager: stateFileManager as unknown as SessionStateFileManager,
     state: sessionsState,
     getAccountAuth: options?.getAccountAuth,
+    sessionBuffers,
   });
 
-  return { service, state, titleGeneration, stateFileManager };
+  return { service, state, titleGeneration, stateFileManager, sessionBuffers };
 }
 
 type StartNewSessionInput = Parameters<
@@ -445,7 +448,7 @@ describe("SessionsServiceNew", () => {
     });
 
     it("cleans up the created state file path", async () => {
-      const { service, state, stateFileManager, titleGeneration } =
+      const { service, stateFileManager, titleGeneration, sessionBuffers } =
         createService();
 
       const sessionId = await service.startNewSession(makeStartInput());
@@ -464,7 +467,9 @@ describe("SessionsServiceNew", () => {
       expect(activityMonitorSpies.stopMonitoring).toHaveBeenCalledTimes(1);
       expect(terminalSessionSpies.stop).toHaveBeenCalledTimes(1);
       expect(titleGeneration.forget).toHaveBeenCalledWith(sessionId);
-      expect(state[sessionId]?.offlineBuffer).toContain("persist me");
+      await expect(sessionBuffers.get(sessionId)).resolves.toContain(
+        "persist me",
+      );
     });
   });
 

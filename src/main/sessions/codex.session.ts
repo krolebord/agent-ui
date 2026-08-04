@@ -17,6 +17,10 @@ import {
 } from "../codex-app-server-tracker";
 import { buildCodexArgs } from "../codex-cli";
 import { getCodexUsage } from "../codex-usage";
+import {
+  createInMemorySessionBufferStore,
+  type SessionBufferStore,
+} from "../database/session-buffer-store";
 import type { McpRequestContext } from "../mcp/session-token";
 import { procedure } from "../orpc";
 import { TerminalManager } from "../terminal-manager";
@@ -250,6 +254,7 @@ interface CodexSessionsManagerOptions {
   terminalManager?: TerminalManager;
   titleGeneration?: TitleGenerationService;
   getMcpServerUrl?: (context: McpRequestContext) => string | null;
+  sessionBuffers?: SessionBufferStore;
 }
 
 function getCodexSessionStatus(
@@ -425,6 +430,7 @@ export class CodexSessionsManager {
   private readonly getMcpServerUrl:
     | ((context: McpRequestContext) => string | null)
     | null;
+  private readonly sessionBuffers: SessionBufferStore;
   private readonly subagentPruneTimers = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -436,6 +442,7 @@ export class CodexSessionsManager {
       this.terminalManager = new TerminalManager();
       this.titleGeneration = null;
       this.getMcpServerUrl = null;
+      this.sessionBuffers = createInMemorySessionBufferStore();
       for (const [sessionId, session] of Object.entries(
         this.sessionsState.state,
       )) {
@@ -452,6 +459,8 @@ export class CodexSessionsManager {
     this.terminalManager = options.terminalManager ?? new TerminalManager();
     this.titleGeneration = options.titleGeneration ?? null;
     this.getMcpServerUrl = options.getMcpServerUrl ?? null;
+    this.sessionBuffers =
+      options.sessionBuffers ?? createInMemorySessionBufferStore();
     for (const [sessionId, session] of Object.entries(
       this.sessionsState.state,
     )) {
@@ -643,18 +652,20 @@ export class CodexSessionsManager {
     }
   }
 
-  private persistOfflineBuffer(sessionId: string, offlineBuffer?: string) {
+  private async persistOfflineBuffer(
+    sessionId: string,
+    offlineBuffer?: string,
+  ) {
     if (!offlineBuffer) {
       return;
     }
 
-    this.sessionsState.updateState((state) => {
-      const session = state[sessionId];
-      if (!session || session.type !== "codex-local-terminal") {
-        return;
-      }
-      session.offlineBuffer = offlineBuffer;
-    });
+    const session = this.sessionsState.state[sessionId];
+    if (!session || session.type !== "codex-local-terminal") {
+      return;
+    }
+
+    await this.sessionBuffers.set(sessionId, offlineBuffer);
   }
 
   async startLiveSession({
@@ -893,7 +904,6 @@ export class CodexSessionsManager {
           const errorMessage = payload.errorMessage ?? runtimeErrorMessage;
           session.status = errorMessage ? "error" : "stopped";
           session.errorMessage = errorMessage;
-          session.offlineBuffer = payload.snapshot;
           // Unexpected exits wake parked sessions; intentional stops do not.
           if (!payload.stoppedByUser) {
             session.lastActivityAt = Date.now();
@@ -989,7 +999,7 @@ export class CodexSessionsManager {
 
     liveSession.beginDispose();
     this.markSubagentsStopped(sessionId);
-    this.persistOfflineBuffer(
+    await this.persistOfflineBuffer(
       sessionId,
       offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),
     );
@@ -1013,6 +1023,7 @@ export class CodexSessionsManager {
     await this.stopLiveSession(sessionId);
     this.clearSubagentPruneTimer(sessionId);
     await this.terminalManager.unregisterTerminal(sessionId);
+    await this.sessionBuffers.delete(sessionId);
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
     });
