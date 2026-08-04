@@ -39,6 +39,5 @@ export const commonSessionSchema = z.object({
   // Woke marker; visiting the session clears them.
   snoozedUntil: z.number().optional(),
   snoozedAt: z.number().optional(),
-  offlineBuffer: z.string().optional(),
-  bufferedOutput: z.string().optional(),
+  // Terminal scrollback lives in the `session_buffers` SQLite table.
 });

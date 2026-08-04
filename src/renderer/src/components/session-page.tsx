@@ -225,7 +225,6 @@ function TerminalPage({
           <div className="min-h-0 flex-1 overflow-hidden">
             <LiveTerminalSurface
               terminalId={session.sessionId}
-              initialBuffer={session.offlineBuffer}
               readOnly={readOnly}
               attachKey={`${session.sessionId}:${terminalAttachmentState}`}
             />

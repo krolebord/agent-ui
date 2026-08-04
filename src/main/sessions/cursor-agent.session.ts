@@ -10,6 +10,10 @@ import {
   type CursorAgentPermissionMode,
 } from "../cursor-cli";
 import { getCursorUsage } from "../cursor-usage";
+import {
+  createInMemorySessionBufferStore,
+  type SessionBufferStore,
+} from "../database/session-buffer-store";
 import log from "../logger";
 import { procedure } from "../orpc";
 import { TerminalManager } from "../terminal-manager";
@@ -199,6 +203,7 @@ interface CursorAgentSessionsManagerOptions {
   titleGeneration?: TitleGenerationService;
   sessionLogFileManager?: CursorSessionLogFileStore | null;
   cursorHooksWarning?: string | null;
+  sessionBuffers?: SessionBufferStore;
 }
 
 interface CursorSessionLogFileStore {
@@ -230,6 +235,7 @@ export class CursorAgentSessionsManager {
   private readonly titleGeneration: TitleGenerationService | null;
   private readonly sessionLogFileManager: CursorSessionLogFileStore | null;
   private readonly cursorHooksWarning: string | null;
+  private readonly sessionBuffers: SessionBufferStore;
 
   constructor(
     options: CursorAgentSessionsManagerOptions | SessionServiceState,
@@ -240,6 +246,7 @@ export class CursorAgentSessionsManager {
       this.titleGeneration = null;
       this.sessionLogFileManager = null;
       this.cursorHooksWarning = null;
+      this.sessionBuffers = createInMemorySessionBufferStore();
       for (const [sessionId, session] of Object.entries(
         this.sessionsState.state,
       )) {
@@ -255,6 +262,8 @@ export class CursorAgentSessionsManager {
     this.titleGeneration = options.titleGeneration ?? null;
     this.sessionLogFileManager = options.sessionLogFileManager ?? null;
     this.cursorHooksWarning = options.cursorHooksWarning ?? null;
+    this.sessionBuffers =
+      options.sessionBuffers ?? createInMemorySessionBufferStore();
     for (const [sessionId, session] of Object.entries(
       this.sessionsState.state,
     )) {
@@ -344,18 +353,20 @@ export class CursorAgentSessionsManager {
     });
   }
 
-  private persistOfflineBuffer(sessionId: string, offlineBuffer?: string) {
+  private async persistOfflineBuffer(
+    sessionId: string,
+    offlineBuffer?: string,
+  ) {
     if (!offlineBuffer) {
       return;
     }
 
-    this.sessionsState.updateState((state) => {
-      const session = state[sessionId];
-      if (!session || session.type !== "cursor-agent") {
-        return;
-      }
-      session.offlineBuffer = offlineBuffer;
-    });
+    const session = this.sessionsState.state[sessionId];
+    if (!session || session.type !== "cursor-agent") {
+      return;
+    }
+
+    await this.sessionBuffers.set(sessionId, offlineBuffer);
   }
 
   async startLiveSession({
@@ -537,7 +548,6 @@ export class CursorAgentSessionsManager {
         state.updateState((state) => {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
-          state[sessionId].offlineBuffer = payload.snapshot;
           // Unexpected exits wake parked sessions; intentional stops do not.
           if (!payload.stoppedByUser) {
             state[sessionId].lastActivityAt = Date.now();
@@ -578,7 +588,7 @@ export class CursorAgentSessionsManager {
       return;
     }
     liveSession.beginDispose();
-    this.persistOfflineBuffer(
+    await this.persistOfflineBuffer(
       sessionId,
       offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),
     );
@@ -597,6 +607,7 @@ export class CursorAgentSessionsManager {
   async deleteSession(sessionId: string) {
     await this.stopLiveSession(sessionId);
     await this.terminalManager.unregisterTerminal(sessionId);
+    await this.sessionBuffers.delete(sessionId);
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
     });

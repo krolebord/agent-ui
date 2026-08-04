@@ -2,6 +2,10 @@ import { call } from "@orpc/server";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { createDisposable } from "@shared/utils";
 import { z } from "zod";
+import {
+  createInMemorySessionBufferStore,
+  type SessionBufferStore,
+} from "../database/session-buffer-store";
 import log from "../logger";
 import { procedure } from "../orpc";
 import { TerminalManager } from "../terminal-manager";
@@ -162,6 +166,7 @@ export class LocalTerminalSessionsManager {
   constructor(
     private readonly sessionsState: SessionServiceState,
     private readonly terminalManager: TerminalManager = new TerminalManager(),
+    private readonly sessionBuffers: SessionBufferStore = createInMemorySessionBufferStore(),
   ) {
     for (const [sessionId, session] of Object.entries(
       this.sessionsState.state,
@@ -172,18 +177,20 @@ export class LocalTerminalSessionsManager {
     }
   }
 
-  private persistOfflineBuffer(sessionId: string, offlineBuffer?: string) {
+  private async persistOfflineBuffer(
+    sessionId: string,
+    offlineBuffer?: string,
+  ) {
     if (!offlineBuffer) {
       return;
     }
 
-    this.sessionsState.updateState((state) => {
-      const session = state[sessionId];
-      if (!session || session.type !== "local-terminal") {
-        return;
-      }
-      session.offlineBuffer = offlineBuffer;
-    });
+    const session = this.sessionsState.state[sessionId];
+    if (!session || session.type !== "local-terminal") {
+      return;
+    }
+
+    await this.sessionBuffers.set(sessionId, offlineBuffer);
   }
 
   startLiveSession({
@@ -227,7 +234,6 @@ export class LocalTerminalSessionsManager {
         state.updateState((state) => {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
-          state[sessionId].offlineBuffer = payload.snapshot;
           // Unexpected exits wake parked sessions; intentional stops do not.
           if (!payload.stoppedByUser) {
             state[sessionId].lastActivityAt = Date.now();
@@ -254,7 +260,7 @@ export class LocalTerminalSessionsManager {
     if (!liveSession) {
       return;
     }
-    this.persistOfflineBuffer(
+    await this.persistOfflineBuffer(
       sessionId,
       offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),
     );
@@ -273,6 +279,7 @@ export class LocalTerminalSessionsManager {
   async deleteSession(sessionId: string) {
     await this.stopLiveSession(sessionId);
     await this.terminalManager.unregisterTerminal(sessionId);
+    await this.sessionBuffers.delete(sessionId);
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
     });

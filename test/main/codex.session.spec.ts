@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodexAppServerSubagentUpdate } from "../../src/main/codex-app-server-tracker";
+import { createInMemorySessionBufferStore } from "../../src/main/database/session-buffer-store";
 import {
   type CodexLocalTerminalSessionData,
   CodexSessionsManager,
@@ -153,12 +154,12 @@ function createManager(opts?: {
   title?: string;
 }) {
   const { state, sessionsState } = createSessionsState();
-  const manager = opts?.titleGeneration
-    ? new CodexSessionsManager({
-        state: sessionsState,
-        titleGeneration: opts.titleGeneration,
-      })
-    : new CodexSessionsManager(sessionsState);
+  const sessionBuffers = createInMemorySessionBufferStore();
+  const manager = new CodexSessionsManager({
+    state: sessionsState,
+    titleGeneration: opts?.titleGeneration,
+    sessionBuffers,
+  });
   const sessionId = "session-codex-1";
   const startupConfig: CodexLocalTerminalSessionData["startupConfig"] = {
     cwd: "/tmp",
@@ -179,10 +180,9 @@ function createManager(opts?: {
     title: opts?.title ?? "Codex Session",
     codexSessionId: undefined,
     startupConfig,
-    bufferedOutput: "",
   };
 
-  return { manager, sessionId, state };
+  return { manager, sessionId, state, sessionBuffers };
 }
 
 describe("CodexSessionsManager", () => {
@@ -633,7 +633,6 @@ describe("CodexSessionsManager", () => {
         status: "stopped",
         title: "Codex Session",
         startupConfig,
-        bufferedOutput: "",
       };
       await manager.startLiveSession({
         sessionId,
@@ -679,10 +678,10 @@ describe("CodexSessionsManager", () => {
     await manager.stopLiveSession(sessionId);
   });
 
-  it("stores offlineBuffer when a codex terminal is stopped", async () => {
+  it("stores the offline buffer when a codex terminal is stopped", async () => {
     vi.useRealTimers();
     try {
-      const { manager, sessionId, state } = createManager({
+      const { manager, sessionId, sessionBuffers } = createManager({
         initialPrompt: undefined,
       });
 
@@ -702,7 +701,9 @@ describe("CodexSessionsManager", () => {
 
       await manager.stopLiveSession(sessionId);
 
-      expect(state[sessionId]?.offlineBuffer).toContain("offline codex output");
+      await expect(sessionBuffers.get(sessionId)).resolves.toContain(
+        "offline codex output",
+      );
     } finally {
       vi.useFakeTimers();
     }
@@ -729,7 +730,6 @@ describe("CodexSessionsManager", () => {
         initialPrompt: "summarize status",
         configOverrides: 'model_provider = "openai"',
       },
-      bufferedOutput: "existing output",
     };
 
     const result = await manager.forkSession({
@@ -817,7 +817,6 @@ describe("CodexSessionsManager", () => {
         initialPrompt: undefined,
         configOverrides: undefined,
       },
-      bufferedOutput: "",
     };
 
     await expect(

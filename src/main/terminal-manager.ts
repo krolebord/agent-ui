@@ -86,11 +86,15 @@ export const terminalsRouter = {
           signal,
         );
 
-      if (isLive) {
-        yield { type: "clear" } as TerminalEvent;
-        if (snapshot) {
-          yield { type: "data", data: snapshot } as TerminalEvent;
-        }
+      // Live terminals replay from the running PTY, stopped ones from the
+      // scrollback stored when they exited.
+      const replay = isLive
+        ? snapshot
+        : await context.sessionBuffers.get(input.terminalId);
+
+      yield { type: "clear" } as TerminalEvent;
+      if (replay) {
+        yield { type: "data", data: replay } as TerminalEvent;
       }
 
       for await (const event of stream) {

@@ -20,6 +20,10 @@ import {
   fetchUsageWithToken,
   getUsage as getClaudeUsage,
 } from "./claude-usage";
+import {
+  createInMemorySessionBufferStore,
+  type SessionBufferStore,
+} from "./database/session-buffer-store";
 import log from "./logger";
 import type { McpRequestContext } from "./mcp/session-token";
 import { procedure } from "./orpc";
@@ -51,6 +55,7 @@ interface SessionServiceOptions {
   state: SessionServiceState;
   getMcpServerUrl?: (context: McpRequestContext) => string | null;
   getAccountAuth?: (accountId: string) => Promise<ClaudeAccountAuth | null>;
+  sessionBuffers?: SessionBufferStore;
 }
 
 export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
@@ -304,6 +309,7 @@ export class SessionsServiceNew {
     | ((accountId: string) => Promise<ClaudeAccountAuth | null>)
     | null;
   readonly terminalManager: TerminalManager;
+  private readonly sessionBuffers: SessionBufferStore;
 
   constructor(options: SessionServiceOptions) {
     this.pluginDir = options.pluginDir;
@@ -314,6 +320,8 @@ export class SessionsServiceNew {
     this.stateFileManager = options.stateFileManager;
     this.sessionsState = options.state;
     this.terminalManager = options.terminalManager ?? new TerminalManager();
+    this.sessionBuffers =
+      options.sessionBuffers ?? createInMemorySessionBufferStore();
 
     for (const [sessionId, session] of Object.entries(
       this.sessionsState.state,
@@ -733,7 +741,6 @@ export class SessionsServiceNew {
             ? "error"
             : "stopped";
           state[opts.sessionId].errorMessage = payload.errorMessage;
-          state[opts.sessionId].offlineBuffer = payload.snapshot;
           // Unexpected exits wake parked sessions. User-initiated stops
           // (including settle) must not, or the row flashes out of Settled.
           if (!payload.stoppedByUser) {
@@ -785,18 +792,20 @@ export class SessionsServiceNew {
     });
   }
 
-  private persistOfflineBuffer(sessionId: string, offlineBuffer?: string) {
+  private async persistOfflineBuffer(
+    sessionId: string,
+    offlineBuffer?: string,
+  ) {
     if (!offlineBuffer) {
       return;
     }
 
-    this.sessionsState.updateState((state) => {
-      const session = state[sessionId];
-      if (!session || session.type !== "claude-local-terminal") {
-        return;
-      }
-      session.offlineBuffer = offlineBuffer;
-    });
+    const session = this.sessionsState.state[sessionId];
+    if (!session || session.type !== "claude-local-terminal") {
+      return;
+    }
+
+    await this.sessionBuffers.set(sessionId, offlineBuffer);
   }
 
   async stopLiveSession(sessionId: string, offlineBuffer?: string) {
@@ -805,7 +814,7 @@ export class SessionsServiceNew {
       return;
     }
     liveSession.beginDispose();
-    this.persistOfflineBuffer(
+    await this.persistOfflineBuffer(
       sessionId,
       offlineBuffer || (await this.terminalManager.getSnapshot(sessionId)),
     );
@@ -824,6 +833,7 @@ export class SessionsServiceNew {
   async deleteSession(sessionId: string) {
     await this.stopLiveSession(sessionId);
     await this.terminalManager.unregisterTerminal(sessionId);
+    await this.sessionBuffers.delete(sessionId);
 
     this.sessionsState.updateState((state) => {
       delete state[sessionId];

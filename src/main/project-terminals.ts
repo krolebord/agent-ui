@@ -29,7 +29,6 @@ export const projectTerminalInstanceSchema = z.object({
   lastActivityAt: z.number().default(Date.now()),
   status: sessionStatusSchema.catch("stopped"),
   errorMessage: z.string().optional(),
-  bufferedOutput: z.string().optional(),
   /** Set when the tab was opened from a `.agent-ui` command preset. */
   commandId: z.string().optional().catch(undefined),
   /**

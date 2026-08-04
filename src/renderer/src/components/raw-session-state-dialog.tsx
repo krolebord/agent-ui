@@ -17,18 +17,7 @@ const MAX_RENDERED_RAW_JSON_CHARS = 200_000;
 
 interface RawSessionStateTarget {
   sessionId: string;
-  snapshot: Omit<Session, "bufferedOutput" | "offlineBuffer">;
-}
-
-function stripSessionBufferedOutput(
-  session: Session,
-): Omit<Session, "bufferedOutput" | "offlineBuffer"> {
-  const {
-    bufferedOutput: _bufferedOutput,
-    offlineBuffer: _offlineBuffer,
-    ...sessionWithoutBufferedOutput
-  } = session;
-  return sessionWithoutBufferedOutput;
+  snapshot: Session;
 }
 
 export const useRawSessionStateDialogStore = create(
@@ -37,7 +26,7 @@ export const useRawSessionStateDialogStore = create(
       set({
         target: {
           sessionId: session.sessionId,
-          snapshot: stripSessionBufferedOutput(session),
+          snapshot: session,
         },
       }),
     close: () => set({ target: null }),
@@ -100,8 +89,8 @@ export function RawSessionStateDialog() {
         <DialogHeader>
           <DialogTitle>Session state (raw JSON)</DialogTitle>
           <DialogDescription>
-            Current in-memory session state for debugging and inspection
-            (`bufferedOutput` and `offlineBuffer` excluded).
+            Current in-memory session state for debugging and inspection.
+            Terminal scrollback is stored separately and not shown here.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">

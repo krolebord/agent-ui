@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createInMemorySessionBufferStore } from "../../src/main/database/session-buffer-store";
 import {
   type LocalTerminalSessionData,
   LocalTerminalSessionsManager,
 } from "../../src/main/sessions/local-terminal.session";
 import type { SessionServiceState } from "../../src/main/sessions/state";
+import { TerminalManager } from "../../src/main/terminal-manager";
 
 const terminalSessionSpies = vi.hoisted(() => {
   return {
@@ -67,7 +69,6 @@ describe("LocalTerminalSessionsManager", () => {
         startupConfig: {
           cwd: "/tmp",
         },
-        bufferedOutput: "",
       };
       manager.startLiveSession({
         sessionId,
@@ -81,9 +82,14 @@ describe("LocalTerminalSessionsManager", () => {
     expect(manager.liveSessions.size).toBe(0);
   });
 
-  it("stores offlineBuffer when a local terminal is stopped", async () => {
+  it("stores the offline buffer when a local terminal is stopped", async () => {
     const { state, sessionsState } = createSessionsState();
-    const manager = new LocalTerminalSessionsManager(sessionsState);
+    const sessionBuffers = createInMemorySessionBufferStore();
+    const manager = new LocalTerminalSessionsManager(
+      sessionsState,
+      new TerminalManager(),
+      sessionBuffers,
+    );
 
     state["session-local-1"] = {
       sessionId: "session-local-1",
@@ -95,7 +101,6 @@ describe("LocalTerminalSessionsManager", () => {
       startupConfig: {
         cwd: "/tmp",
       },
-      bufferedOutput: "",
     };
 
     manager.startLiveSession({
@@ -110,7 +115,7 @@ describe("LocalTerminalSessionsManager", () => {
 
     await manager.stopLiveSession("session-local-1");
 
-    expect(state["session-local-1"]?.offlineBuffer).toContain(
+    await expect(sessionBuffers.get("session-local-1")).resolves.toContain(
       "offline local output",
     );
   });
@@ -129,7 +134,6 @@ describe("LocalTerminalSessionsManager", () => {
       startupConfig: {
         cwd: "/tmp",
       },
-      bufferedOutput: "",
     };
 
     manager.renameSession("session-local-1", "  Renamed Session  ");

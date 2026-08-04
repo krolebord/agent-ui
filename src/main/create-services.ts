@@ -23,6 +23,8 @@ import { ensureManagedClaudeStatePlugin } from "./claude-state-plugin";
 import type { CursorAgentMode, CursorAgentPermissionMode } from "./cursor-cli";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
+import { DatabaseService } from "./database/database-service";
+import { SqliteSessionBufferStore } from "./database/session-buffer-store";
 import { defineHandoffsState, HandoffsService } from "./handoffs-service";
 import log from "./logger";
 import { defineMachineStatsState, MachineStatsMonitor } from "./machine-stats";
@@ -184,6 +186,10 @@ export async function createServices(options: CreateServicesOptions) {
     userDataPath,
   );
 
+  // Created before the session managers, which write buffers through it.
+  const databaseService = await DatabaseService.create(userDataPath);
+  const sessionBuffers = new SqliteSessionBufferStore(databaseService.db);
+
   const persistenceService = new PersistenceOrchestrator({
     schemaVersion: STORAGE_SCHEMA_VERSION,
     store: createPersistenceStore(userDataPath),
@@ -281,6 +287,15 @@ export async function createServices(options: CreateServicesOptions) {
   );
   removeLegacyLocalTerminalSessions(sessionsState);
 
+  // Awaited so it cannot outlive startup and mistake a buffer from a freshly
+  // started session for an orphan.
+  const droppedBuffers = await sessionBuffers.deleteOrphans(
+    Object.keys(sessionsState.state),
+  );
+  if (droppedBuffers > 0) {
+    log.info(`Dropped ${droppedBuffers} orphaned session buffers`);
+  }
+
   const sessionsService = new SessionsServiceNew({
     pluginDir: managedPluginDir,
     pluginWarning,
@@ -290,6 +305,7 @@ export async function createServices(options: CreateServicesOptions) {
     state: sessionsState,
     getMcpServerUrl,
     getAccountAuth,
+    sessionBuffers,
   });
   const terminalManager = sessionsService.terminalManager;
 
@@ -302,6 +318,7 @@ export async function createServices(options: CreateServicesOptions) {
   const localTerminalSessionsManager = new LocalTerminalSessionsManager(
     sessionsState,
     terminalManager,
+    sessionBuffers,
   );
   const projectTerminalsManager = new ProjectTerminalsManager(
     projectTerminalsState,
@@ -316,6 +333,7 @@ export async function createServices(options: CreateServicesOptions) {
     terminalManager,
     titleGeneration: titleGenerationService,
     getMcpServerUrl,
+    sessionBuffers,
   });
   const cursorAgentSessionsManager = new CursorAgentSessionsManager({
     state: sessionsState,
@@ -323,6 +341,7 @@ export async function createServices(options: CreateServicesOptions) {
     titleGeneration: titleGenerationService,
     sessionLogFileManager: cursorSessionLogFileManager,
     cursorHooksWarning,
+    sessionBuffers,
   });
   const worktreeSetupSessionsManager = new WorktreeSetupSessionsManager(
     sessionsState,
@@ -452,6 +471,13 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(() => stateService.dispose());
   shutdownDisposable.addDisposable(() => persistenceService.dispose());
 
+  const shutdown = async () => {
+    await shutdownDisposable.dispose();
+    // Keep the database alive until every service has finished its shutdown
+    // work. Database-backed services added later can safely flush first.
+    await databaseService.close();
+  };
+
   return {
     appSettingsState,
     artifactsService,
@@ -466,7 +492,9 @@ export async function createServices(options: CreateServicesOptions) {
     terminalManager,
     projectTerminalsManager,
     stateService,
-    shutdown: shutdownDisposable.dispose,
+    databaseService,
+    sessionBuffers,
+    shutdown,
     managedPluginDir,
     pluginWarning,
     handoffsService,
