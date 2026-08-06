@@ -206,6 +206,7 @@ export function ProjectCommandsDialog() {
   const [drafts, setDrafts] = useState<CommandDraft[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const loadedCommands = commandsQuery.data?.commands;
+  const scriptCount = commandsQuery.data?.scripts.length ?? 0;
 
   useEffect(() => {
     if (!loadedCommands) {
@@ -332,6 +333,16 @@ export function ProjectCommandsDialog() {
           <Plus className="size-4" />
           Add command
         </Button>
+
+        {scriptCount > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            The commands menu also lists {scriptCount}{" "}
+            {scriptCount === 1 ? "script" : "scripts"} found in{" "}
+            <code>package.json</code>. They are not editable here — set{" "}
+            <code>"discoverCommands": false</code> in the settings file to hide
+            them.
+          </p>
+        ) : null}
 
         {validationError || saveMutation.error || commandsQuery.error ? (
           <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">

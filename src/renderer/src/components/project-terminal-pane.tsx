@@ -76,8 +76,9 @@ function getTerminalStatusMeta(status: string) {
 }
 
 /**
- * Lists the project's command presets. The list is fetched when the menu opens
- * rather than cached: `.agent-ui/settings.jsonc` is edited outside the app.
+ * Lists the project's command presets, then the scripts discovered in its
+ * `package.json`. The list is fetched when the menu opens rather than cached:
+ * both sources are edited outside the app.
  */
 function ProjectCommandsMenu({
   cwd,
@@ -102,6 +103,7 @@ function ProjectCommandsMenu({
     gcTime: 0,
   });
   const commands = commandsQuery.data?.commands ?? [];
+  const scripts = commandsQuery.data?.scripts ?? [];
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -119,7 +121,7 @@ function ProjectCommandsMenu({
         <DropdownMenuLabel>Commands</DropdownMenuLabel>
         {commandsQuery.isPending ? (
           <DropdownMenuItem disabled>Loading…</DropdownMenuItem>
-        ) : commands.length === 0 ? (
+        ) : commands.length === 0 && scripts.length === 0 ? (
           <DropdownMenuItem disabled>
             None in .agent-ui/settings.jsonc
           </DropdownMenuItem>
@@ -136,6 +138,25 @@ function ProjectCommandsMenu({
             </DropdownMenuItem>
           ))
         )}
+        {scripts.length > 0 ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              package.json
+            </DropdownMenuLabel>
+            {scripts.map((script) => (
+              <DropdownMenuItem
+                key={script.id}
+                onSelect={() => {
+                  onRun(script.id);
+                }}
+              >
+                <Play className="size-3.5" />
+                <span className="truncate">{script.name}</span>
+              </DropdownMenuItem>
+            ))}
+          </>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onSelect={() => {

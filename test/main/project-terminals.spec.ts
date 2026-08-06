@@ -293,6 +293,72 @@ describe("ProjectTerminalsManager command presets", () => {
     ).rejects.toThrow(/no longer defined/);
   });
 
+  it("runs a discovered package.json script", async () => {
+    await writeFile(
+      path.join(projectDir, "package.json"),
+      JSON.stringify({ scripts: { dev: "vite" } }),
+      "utf-8",
+    );
+    await writeFile(
+      path.join(projectDir, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+      "utf-8",
+    );
+    const { state, projectTerminalsState } = createProjectTerminalsState();
+    const manager = createManager(projectTerminalsState);
+
+    const { terminalId } = await manager.runCommand({
+      cwd: projectDir,
+      commandId: "script:dev",
+    });
+    await emitPrompt();
+
+    expect(state[projectDir]?.terminals[terminalId]?.title).toBe("dev");
+    expect(terminalSessionSpies.write).toHaveBeenCalledWith("pnpm run dev\n");
+  });
+
+  it("prefers a preset over the script it shadows", async () => {
+    await writeCommands(
+      `[{ "id": "script:dev", "name": "Dev server", "run": "just dev" }]`,
+    );
+    await writeFile(
+      path.join(projectDir, "package.json"),
+      JSON.stringify({ scripts: { dev: "vite" } }),
+      "utf-8",
+    );
+    await writeFile(
+      path.join(projectDir, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+      "utf-8",
+    );
+    const { projectTerminalsState } = createProjectTerminalsState();
+    const manager = createManager(projectTerminalsState);
+
+    await manager.runCommand({ cwd: projectDir, commandId: "script:dev" });
+    await emitPrompt();
+
+    expect(terminalSessionSpies.write).toHaveBeenCalledWith("just dev\n");
+  });
+
+  it("rejects a script package.json no longer defines", async () => {
+    await writeFile(
+      path.join(projectDir, "package.json"),
+      JSON.stringify({ scripts: { dev: "vite" } }),
+      "utf-8",
+    );
+    await writeFile(
+      path.join(projectDir, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n",
+      "utf-8",
+    );
+    const { projectTerminalsState } = createProjectTerminalsState();
+    const manager = createManager(projectTerminalsState);
+
+    await expect(
+      manager.runCommand({ cwd: projectDir, commandId: "script:build" }),
+    ).rejects.toThrow(/Script "build" is no longer defined in package\.json/);
+  });
+
   it("interrupts a running preset and waits for its next prompt before rerunning", async () => {
     await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
     const { projectTerminalsState } = createProjectTerminalsState();

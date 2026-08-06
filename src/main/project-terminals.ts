@@ -1,9 +1,13 @@
 import path from "node:path";
-import type { ResolvedProjectCommand } from "@shared/project-commands";
+import {
+  parseScriptCommandId,
+  type RunnableProjectCommand,
+} from "@shared/project-commands";
 import type { TerminalEvent } from "@shared/terminal-types";
 import { z } from "zod";
 import { defineServiceState } from "../shared/service-state";
 import { procedure } from "./orpc";
+import { readProjectScripts } from "./package-scripts";
 import { defineStatePersistence } from "./persistence-orchestrator";
 import { assertProjectPathInteractionAllowed } from "./project-service";
 import {
@@ -28,7 +32,10 @@ export const projectTerminalInstanceSchema = z.object({
   lastActivityAt: z.number().default(Date.now()),
   status: sessionStatusSchema.catch("stopped"),
   errorMessage: z.string().optional(),
-  /** Set when the tab was opened from a `.agent-ui` command preset. */
+  /**
+   * Set when the tab was opened from a command: a `.agent-ui` preset, or a
+   * discovered `package.json` script under a `script:` id.
+   */
   commandId: z.string().optional().catch(undefined),
   /**
    * Absolute directory the PTY was spawned in. Only differs from the workspace
@@ -434,9 +441,10 @@ export class ProjectTerminalsManager {
   }
 
   /**
-   * Opens (or focuses) a terminal running a `.agent-ui` command preset. The
-   * preset is resolved from disk here rather than trusted from the renderer, so
-   * a stale dropdown can never launch a command the file no longer defines.
+   * Opens (or focuses) a terminal running a command preset or a discovered
+   * script. Either way it is resolved from disk here rather than trusted from
+   * the renderer, so a stale dropdown can never launch something the project no
+   * longer defines.
    */
   async runCommand({
     cwd,
@@ -670,12 +678,17 @@ export class ProjectTerminalsManager {
 
   /**
    * Reads the preset from the worktree's own settings file, falling back to the
-   * main checkout for worktrees that predate the file being added.
+   * main checkout for worktrees that predate the file being added. Discovered
+   * `package.json` scripts are consulted only after the file, so a preset that
+   * spells out a `script:` id shadows the script it names.
+   *
+   * There is no root fallback for scripts: they describe the checkout they were
+   * found in, and a worktree always carries its own manifest.
    */
   private async resolveCommand(
     cwd: string,
     commandId: string,
-  ): Promise<ResolvedProjectCommand> {
+  ): Promise<RunnableProjectCommand> {
     let commands = await readProjectCommands(cwd);
     const projectRoot = this.resolveProjectRoot(cwd);
     if (commands.length === 0 && projectRoot && projectRoot !== cwd) {
@@ -683,15 +696,28 @@ export class ProjectTerminalsManager {
     }
 
     const command = commands.find((entry) => entry.id === commandId);
-    if (!command) {
+    if (command) {
+      return command;
+    }
+
+    const scriptName = parseScriptCommandId(commandId);
+    if (scriptName) {
+      const scripts = await readProjectScripts(cwd);
+      const script = scripts.find((entry) => entry.id === commandId);
+      if (script) {
+        return script;
+      }
       throw new Error(
-        `Command "${commandId}" is no longer defined in ${PROJECT_SETTINGS_RELATIVE_PATH}.`,
+        `Script "${scriptName}" is no longer defined in package.json.`,
       );
     }
-    return command;
+
+    throw new Error(
+      `Command "${commandId}" is no longer defined in ${PROJECT_SETTINGS_RELATIVE_PATH}.`,
+    );
   }
 
-  private buildCommandEnv(cwd: string, command: ResolvedProjectCommand) {
+  private buildCommandEnv(cwd: string, command: RunnableProjectCommand) {
     return {
       ...this.shellIntegrationEnv,
       PROJECT_ROOT: this.resolveProjectRoot(cwd) ?? cwd,

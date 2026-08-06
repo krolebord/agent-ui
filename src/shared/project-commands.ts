@@ -25,13 +25,42 @@ export type ProjectCommand = z.infer<typeof projectCommandSchema>;
 /** Keeps a malformed file from producing an unbounded list. */
 export const PROJECT_COMMANDS_LIMIT = 50;
 
-export interface ResolvedProjectCommand extends ProjectCommand {
+/**
+ * Everything a terminal needs to launch a command, whatever declared it. File
+ * presets and discovered `package.json` scripts both satisfy this.
+ */
+export interface RunnableProjectCommand extends ProjectCommand {
   /** Always set: the explicit id when present, otherwise derived from the name. */
   id: string;
+}
+
+export interface ResolvedProjectCommand extends RunnableProjectCommand {
   /** Set only when the file spells out an id, so writes don't materialize derived ones. */
   explicitId?: string;
   /** Position in the on-disk array, which is what targeted JSONC edits address. */
   sourceIndex: number;
+}
+
+/**
+ * Discovered scripts share the command id namespace with file presets, so they
+ * carry a prefix no derived preset id can produce — `slugifyCommandName` strips
+ * the colon. A preset that spells out a colliding id wins: resolution consults
+ * the file first.
+ */
+export const SCRIPT_COMMAND_ID_PREFIX = "script:";
+
+/** Caps the discovered list so a repository with 80 scripts can't drown the menu. */
+export const PROJECT_SCRIPTS_LIMIT = 25;
+
+export function scriptCommandId(scriptName: string): string {
+  return `${SCRIPT_COMMAND_ID_PREFIX}${scriptName}`;
+}
+
+export function parseScriptCommandId(commandId: string): string | null {
+  if (!commandId.startsWith(SCRIPT_COMMAND_ID_PREFIX)) {
+    return null;
+  }
+  return commandId.slice(SCRIPT_COMMAND_ID_PREFIX.length) || null;
 }
 
 export const projectCommandWriteSchema = projectCommandSchema.extend({

@@ -30,6 +30,11 @@ export const projectSettingsFileSchema = z.object({
    * writes it, so a repository can check it in and keep it.
    */
   iconPath: z.string().trim().min(1).optional().catch(undefined),
+  /**
+   * Set to `false` to keep `package.json` scripts out of the commands menu.
+   * On by default, and read-only for us like `iconPath`.
+   */
+  discoverCommands: z.boolean().optional().catch(undefined),
 });
 
 export type ProjectSettingsFile = z.infer<typeof projectSettingsFileSchema>;

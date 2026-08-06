@@ -16,6 +16,7 @@ import { generateCommitMessage } from "./commit-message-generation";
 import type { Services } from "./create-services";
 import log from "./logger";
 import { procedure } from "./orpc";
+import { readProjectScripts } from "./package-scripts";
 import { defineStatePersistence } from "./persistence-orchestrator";
 import {
   getProjectFaviconDataUrl,
@@ -662,8 +663,12 @@ export const projectsRouter = {
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input }) => {
       const path = normalizeProjectPath(input.path);
-      if (!path) return { commands: [] };
-      return { commands: await readProjectCommands(path) };
+      if (!path) return { commands: [], scripts: [] };
+      const [commands, scripts] = await Promise.all([
+        readProjectCommands(path),
+        readProjectScripts(path),
+      ]);
+      return { commands, scripts };
     }),
   setCommands: procedure
     .input(
