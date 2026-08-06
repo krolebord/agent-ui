@@ -8,11 +8,11 @@ const addMock = vi.hoisted(() => vi.fn());
 const commitMock = vi.hoisted(() => vi.fn());
 const pushMock = vi.hoisted(() => vi.fn());
 const copyFileMock = vi.hoisted(() => vi.fn());
-const mkdtempMock = vi.hoisted(() => vi.fn());
 const readdirMock = vi.hoisted(() => vi.fn());
 const rmMock = vi.hoisted(() => vi.fn());
 const writeFileMock = vi.hoisted(() => vi.fn());
 const writeProjectSettingsFileMock = vi.hoisted(() => vi.fn());
+const randomUUIDMock = vi.hoisted(() => vi.fn());
 
 vi.mock("simple-git", () => ({
   default: simpleGitFactoryMock,
@@ -20,11 +20,21 @@ vi.mock("simple-git", () => ({
 
 vi.mock("node:fs/promises", () => ({
   copyFile: copyFileMock,
-  mkdtemp: mkdtempMock,
   readdir: readdirMock,
   rm: rmMock,
   writeFile: writeFileMock,
 }));
+
+vi.mock("node:crypto", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:crypto")>()),
+  randomUUID: randomUUIDMock,
+}));
+
+const TEST_UUID = "00000000-0000-4000-8000-000000000000";
+
+function scratchIndexPath(projectPath: string): string {
+  return `${projectPath}/.git/agent-ui-scratch-index-${TEST_UUID}`;
+}
 
 vi.mock("../../src/main/project-settings-file", () => ({
   writeProjectSettingsFile: writeProjectSettingsFileMock,
@@ -52,12 +62,31 @@ function createDeferred<T>() {
   };
 }
 
+/**
+ * Every git instance now carries a full copy of `process.env`, which would
+ * drown call assertions. Tests only care about the variables the service sets
+ * deliberately, so the mock forwards those; ambient inheritance and the locale
+ * are asserted separately from `spawnedGitEnvs`.
+ */
+const GIT_ENV_OVERRIDE_KEYS = ["GIT_INDEX_FILE", "GIT_TERMINAL_PROMPT"];
+
+function pickGitEnvOverrides(
+  env: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => GIT_ENV_OVERRIDE_KEYS.includes(key)),
+  );
+}
+
 describe("ProjectGitService", () => {
+  let spawnedGitEnvs: Record<string, string>[] = [];
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    spawnedGitEnvs = [];
     simpleGitFactoryMock.mockImplementation((projectPath: string) => {
-      const envVars: Record<string, string> = {};
+      let envVars: Record<string, string> = {};
       const git = {
         checkIsRepo: () => checkIsRepoMock(projectPath),
         branchLocal: () => branchLocalMock(projectPath),
@@ -70,14 +99,23 @@ describe("ProjectGitService", () => {
         push: (options?: string[]) => pushMock(projectPath, options),
         raw: (args: string[]) => {
           const envSnapshot = { ...envVars };
-          if (Object.keys(envSnapshot).length === 0) {
+          spawnedGitEnvs.push(envSnapshot);
+
+          const overrides = pickGitEnvOverrides(envSnapshot);
+          if (Object.keys(overrides).length === 0) {
             return rawMock(projectPath, args);
           }
 
-          return rawMock(projectPath, args, envSnapshot);
+          return rawMock(projectPath, args, overrides);
         },
-        env: (key: string, value: string) => {
-          envVars[key] = value;
+        // Mirrors simple-git: an object argument *replaces* the environment,
+        // a name/value pair merges into it.
+        env: (keyOrEnv: string | Record<string, string>, value?: string) => {
+          if (typeof keyOrEnv === "object") {
+            envVars = { ...keyOrEnv };
+          } else if (value !== undefined) {
+            envVars[keyOrEnv] = value;
+          }
           return git;
         },
       };
@@ -97,7 +135,7 @@ describe("ProjectGitService", () => {
       return "";
     });
     copyFileMock.mockResolvedValue(undefined);
-    mkdtempMock.mockResolvedValue("/tmp/claude-ui-git-index-123");
+    randomUUIDMock.mockReturnValue(TEST_UUID);
     readdirMock.mockRejectedValue(
       Object.assign(new Error("missing"), { code: "ENOENT" }),
     );
@@ -430,7 +468,7 @@ describe("ProjectGitService", () => {
           args[0] === "diff" &&
           args[1] === "--cached" &&
           args[2] === "--numstat" &&
-          env?.GIT_INDEX_FILE === "/tmp/claude-ui-git-index-123/index"
+          env?.GIT_INDEX_FILE === scratchIndexPath(projectPath)
         ) {
           return "1\t0\tnew-file.txt\n1\t0\tsrc/new-module.ts\n";
         }
@@ -451,16 +489,119 @@ describe("ProjectGitService", () => {
     ]);
     expect(copyFileMock).toHaveBeenCalledWith(
       "/repo-one/.git/index",
-      "/tmp/claude-ui-git-index-123/index",
+      scratchIndexPath("/repo-one"),
     );
-    expect(rawMock).toHaveBeenCalledWith("/repo-one", ["add", "-A"], {
-      GIT_INDEX_FILE: "/tmp/claude-ui-git-index-123/index",
-    });
+    expect(rawMock).toHaveBeenCalledWith(
+      "/repo-one",
+      ["add", "-A"],
+      expect.objectContaining({
+        GIT_INDEX_FILE: scratchIndexPath("/repo-one"),
+      }),
+    );
     expect(rawMock).not.toHaveBeenCalledWith("/repo-one", ["add", "-A"], {});
-    expect(rmMock).toHaveBeenCalledWith("/tmp/claude-ui-git-index-123", {
-      recursive: true,
+    expect(rmMock).toHaveBeenCalledWith(scratchIndexPath("/repo-one"), {
       force: true,
     });
+    expect(rmMock).toHaveBeenCalledWith(
+      `${scratchIndexPath("/repo-one")}.lock`,
+      {
+        force: true,
+      },
+    );
+  });
+
+  it("runs git commands in the C locale over the ambient environment", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+
+    const service = new ProjectGitService(defineProjectState());
+    await service.getUncommittedDiff("/repo-one");
+
+    expect(spawnedGitEnvs.length).toBeGreaterThan(0);
+    for (const env of spawnedGitEnvs) {
+      expect(env.LC_ALL).toBe("C");
+      // simple-git replaces rather than extends the environment, so a missing
+      // PATH here means git would run without the user's config or binaries.
+      expect(env.PATH).toBe(process.env.PATH);
+    }
+  });
+
+  it("gives every scratch index a unique name inside the git dir", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    randomUUIDMock
+      .mockReturnValueOnce("uuid-one")
+      .mockReturnValueOnce("uuid-two");
+
+    const service = new ProjectGitService(defineProjectState());
+    await service.getUncommittedDiff("/repo-one");
+    await service.getUncommittedDiff("/repo-one");
+
+    expect(
+      copyFileMock.mock.calls.map(([, destination]) => destination),
+    ).toEqual([
+      "/repo-one/.git/agent-ui-scratch-index-uuid-one",
+      "/repo-one/.git/agent-ui-scratch-index-uuid-two",
+    ]);
+  });
+
+  it("removes the scratch index even when the operation fails", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "rev-parse" && args[1] === "--git-path") {
+        return ".git/index\n";
+      }
+      if (args[0] === "rev-parse" && args[1] === "--verify") {
+        return "0123456789abcdef\n";
+      }
+      if (args[0] === "add") {
+        throw new Error("staging exploded");
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(defineProjectState());
+
+    await expect(service.getUncommittedDiff("/repo-one")).resolves.toBeNull();
+    expect(rmMock).toHaveBeenCalledWith(scratchIndexPath("/repo-one"), {
+      force: true,
+    });
+    expect(rmMock).toHaveBeenCalledWith(
+      `${scratchIndexPath("/repo-one")}.lock`,
+      { force: true },
+    );
+  });
+
+  it("does not fail the operation when scratch index cleanup fails", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    rmMock.mockRejectedValue(new Error("EBUSY"));
+    rawMock.mockImplementation(
+      async (
+        projectPath: string,
+        args: string[],
+        env?: Record<string, string>,
+      ) => {
+        if (args[0] === "rev-parse" && args[1] === "--git-path") {
+          return ".git/index\n";
+        }
+        if (args[0] === "rev-parse" && args[1] === "--verify") {
+          return "0123456789abcdef\n";
+        }
+        if (
+          args[0] === "diff" &&
+          args[1] === "--cached" &&
+          env?.GIT_INDEX_FILE === scratchIndexPath(projectPath)
+        ) {
+          return "diff --git a/file.txt b/file.txt\n";
+        }
+        return "";
+      },
+    );
+
+    const service = new ProjectGitService(defineProjectState());
+
+    await expect(service.getUncommittedDiff("/repo-one")).resolves.toBe(
+      "diff --git a/file.txt b/file.txt",
+    );
   });
 
   it("stages paths before committing selected changes", async () => {
@@ -684,7 +825,7 @@ describe("ProjectGitService", () => {
         if (
           args[0] === "diff" &&
           args[1] === "--cached" &&
-          env?.GIT_INDEX_FILE === "/tmp/claude-ui-git-index-123/index"
+          env?.GIT_INDEX_FILE === scratchIndexPath(projectPath)
         ) {
           return "diff --git a/file.txt b/file.txt\n";
         }
@@ -696,9 +837,13 @@ describe("ProjectGitService", () => {
     const diff = await service.getUncommittedDiff("/repo-one");
 
     expect(diff).toBe("diff --git a/file.txt b/file.txt");
-    expect(rawMock).toHaveBeenCalledWith("/repo-one", ["add", "-A"], {
-      GIT_INDEX_FILE: "/tmp/claude-ui-git-index-123/index",
-    });
+    expect(rawMock).toHaveBeenCalledWith(
+      "/repo-one",
+      ["add", "-A"],
+      expect.objectContaining({
+        GIT_INDEX_FILE: scratchIndexPath("/repo-one"),
+      }),
+    );
     expect(rawMock).not.toHaveBeenCalledWith("/repo-one", ["add", "-A"], {});
   });
 
@@ -722,7 +867,7 @@ describe("ProjectGitService", () => {
         if (
           args[0] === "diff" &&
           args[1] === "--cached" &&
-          env?.GIT_INDEX_FILE === "/tmp/claude-ui-git-index-123/index"
+          env?.GIT_INDEX_FILE === scratchIndexPath(projectPath)
         ) {
           return "diff --git a/file.txt b/file.txt\n";
         }
@@ -801,7 +946,7 @@ describe("ProjectGitService", () => {
           args[1] === "--cached" &&
           args[2] === "--numstat" &&
           args[4] === "4b825dc642cb6eb9a060e54bf8d69288fbee4904" &&
-          env?.GIT_INDEX_FILE === "/tmp/claude-ui-git-index-123/index"
+          env?.GIT_INDEX_FILE === scratchIndexPath(projectPath)
         ) {
           return "3\t1\tsrc/index.ts\n";
         }

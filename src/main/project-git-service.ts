@@ -1,5 +1,5 @@
-import { copyFile, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { randomUUID } from "node:crypto";
+import { copyFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   ClaudeProject,
@@ -21,7 +21,29 @@ import { withThrottledAsyncRunner } from "./throttle-runner";
 
 const EMPTY_GIT_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const GIT_PROJECT_REFRESH_THROTTLE_MS = 3_000;
+const SCRATCH_INDEX_PREFIX = "agent-ui-scratch-index-";
 const gitIndexPathCache = new Map<string, string>();
+
+/**
+ * Every git invocation runs under `LC_ALL=C` so output and error messages stay
+ * in the C locale: several call sites match on English git text
+ * (`formatGitPushError`, `isDirtyWorktreeRemovalError`, and simple-git's own
+ * "not a git repository" detection), which a translated git would break.
+ *
+ * simple-git's `.env()` *replaces* the child environment rather than extending
+ * it, so `process.env` has to be spread in explicitly — otherwise git runs
+ * without PATH or HOME and silently stops reading the user's global config.
+ */
+function createGit(
+  projectPath: string,
+  extraEnv?: Record<string, string>,
+): ReturnType<typeof simpleGit> {
+  return simpleGit(projectPath).env({
+    ...process.env,
+    LC_ALL: "C",
+    ...extraEnv,
+  });
+}
 
 const GIT_LOG_FIELD_SEPARATOR = "\x1f";
 const GIT_LOG_RECORD_SEPARATOR = "\x1e";
@@ -353,21 +375,35 @@ async function withTemporaryIndex<T>(
   operation: (tempGit: ReturnType<typeof simpleGit>) => Promise<T>,
 ): Promise<T> {
   const now = performance.now();
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "claude-ui-git-index-"));
-  const tempIndexPath = path.join(tempDir, "index");
+  const scratchIndexPath = await createScratchIndexCopy(git, projectPath);
 
   try {
-    await copyGitIndexToTemporaryIndex(git, projectPath, tempIndexPath);
-
-    const tempGit = simpleGit(projectPath).env("GIT_INDEX_FILE", tempIndexPath);
+    const tempGit = createGit(projectPath, {
+      GIT_INDEX_FILE: scratchIndexPath,
+    });
     const result = await operation(tempGit);
     return result;
   } finally {
-    await rm(tempDir, { recursive: true, force: true });
+    removeScratchIndex(scratchIndexPath);
 
     const duration = performance.now() - now;
     log.info("withTemporaryIndex duration", { duration });
   }
+}
+
+/**
+ * Fire-and-forget: the caller does not need the file gone before it returns,
+ * and the UUID name means a leftover can never collide with a later run.
+ */
+function removeScratchIndex(scratchIndexPath: string): void {
+  void Promise.all([
+    rm(scratchIndexPath, { force: true }),
+    // git writes `<index>.lock` while staging and normally removes it itself;
+    // clean up after a crashed `add` so nothing is left behind in the git dir.
+    rm(`${scratchIndexPath}.lock`, { force: true }),
+  ]).catch((error) => {
+    log.warn("Failed to remove scratch git index", { scratchIndexPath, error });
+  });
 }
 
 async function resolveGitIndexPath(
@@ -396,16 +432,27 @@ async function resolveGitIndexPath(
   return resolvedGitIndexPath;
 }
 
-async function copyGitIndexToTemporaryIndex(
+/**
+ * Copies the repository index to a uniquely named scratch file inside the same
+ * git dir, and returns its path. Keeping the scratch index next to the real one
+ * (rather than in the OS temp dir) means staging into it cannot be broken by a
+ * full or quota-limited `/tmp`, and it is guaranteed to be on the same
+ * filesystem as the repository.
+ */
+async function createScratchIndexCopy(
   git: ReturnType<typeof simpleGit>,
   projectPath: string,
-  tempIndexPath: string,
-): Promise<void> {
-  let resolvedGitIndexPath = await resolveGitIndexPath(git, projectPath);
+): Promise<string> {
+  const scratchFileName = `${SCRATCH_INDEX_PREFIX}${randomUUID()}`;
+  const buildScratchIndexPath = (gitIndexPath: string) =>
+    path.join(path.dirname(gitIndexPath), scratchFileName);
+
+  const cachedGitIndexPath = await resolveGitIndexPath(git, projectPath);
+  const cachedScratchIndexPath = buildScratchIndexPath(cachedGitIndexPath);
 
   try {
-    await copyFile(resolvedGitIndexPath, tempIndexPath);
-    return;
+    await copyFile(cachedGitIndexPath, cachedScratchIndexPath);
+    return cachedScratchIndexPath;
   } catch (error) {
     const fsError = error as NodeJS.ErrnoException;
     if (fsError.code !== "ENOENT") {
@@ -413,21 +460,26 @@ async function copyGitIndexToTemporaryIndex(
     }
   }
 
+  // ENOENT means either a stale cached git dir or a repository whose index has
+  // not been written yet; re-resolve before deciding which it was.
   gitIndexPathCache.delete(projectPath);
-  resolvedGitIndexPath = await resolveGitIndexPath(git, projectPath, {
+  const resolvedGitIndexPath = await resolveGitIndexPath(git, projectPath, {
     bypassCache: true,
   });
+  const scratchIndexPath = buildScratchIndexPath(resolvedGitIndexPath);
 
   try {
-    await copyFile(resolvedGitIndexPath, tempIndexPath);
+    await copyFile(resolvedGitIndexPath, scratchIndexPath);
   } catch (error) {
     const fsError = error as NodeJS.ErrnoException;
     if (fsError.code !== "ENOENT") {
       throw error;
     }
 
-    await writeFile(tempIndexPath, "");
+    await writeFile(scratchIndexPath, "");
   }
+
+  return scratchIndexPath;
 }
 
 async function readProjectGitData(
@@ -437,7 +489,7 @@ async function readProjectGitData(
   },
 ): Promise<ProjectGitData> {
   const includeLocalBranches = options?.includeLocalBranches ?? false;
-  const git = simpleGit(projectPath);
+  const git = createGit(projectPath);
   const isRepo = await git.checkIsRepo();
   if (!isRepo) {
     return {
@@ -593,7 +645,7 @@ export type PerformDeleteWorktreeFolderResult = {
 async function isWorktreeWorkingTreeClean(
   worktreePath: string,
 ): Promise<boolean> {
-  const worktreeGit = simpleGit(worktreePath);
+  const worktreeGit = createGit(worktreePath);
   const porcelain = await worktreeGit.raw(["status", "--porcelain"]);
   return porcelain.trim().length === 0;
 }
@@ -689,7 +741,7 @@ export class ProjectGitService {
     paths?: string[],
   ): Promise<string | null> {
     try {
-      const git = simpleGit(projectPath);
+      const git = createGit(projectPath);
       const isRepo = await git.checkIsRepo();
       if (!isRepo) return null;
       const diffBaseRef = await resolveDiffBaseRef(git);
@@ -733,7 +785,7 @@ export class ProjectGitService {
       description?: string;
     },
   ): Promise<void> {
-    const git = simpleGit(projectPath);
+    const git = createGit(projectPath);
     const isRepo = await git.checkIsRepo();
     if (!isRepo) {
       throw new Error("Project is not a Git repository.");
@@ -779,7 +831,7 @@ export class ProjectGitService {
   ): Promise<GitHistoryPage> {
     const emptyPage: GitHistoryPage = { commits: [], nextCursor: null };
 
-    const git = simpleGit(projectPath);
+    const git = createGit(projectPath);
     const isRepo = await git.checkIsRepo();
     if (!isRepo) {
       return emptyPage;
@@ -833,10 +885,7 @@ export class ProjectGitService {
    * hanging the main process.
    */
   async pushToRemote(projectPath: string): Promise<void> {
-    const git = simpleGit(projectPath).env({
-      ...process.env,
-      GIT_TERMINAL_PROMPT: "0",
-    });
+    const git = createGit(projectPath, { GIT_TERMINAL_PROMPT: "0" });
     const isRepo = await git.checkIsRepo();
     if (!isRepo) {
       throw new Error("Project is not a Git repository.");
@@ -883,7 +932,7 @@ export class ProjectGitService {
     projectPath: string,
     commitHash: string,
   ): Promise<string | null> {
-    const git = simpleGit(projectPath);
+    const git = createGit(projectPath);
     const isRepo = await git.checkIsRepo();
     if (!isRepo) {
       throw new Error("Project is not a Git repository.");
@@ -910,7 +959,7 @@ export class ProjectGitService {
     projectPath: string,
     paths: string[],
   ): Promise<string | null> {
-    const git = simpleGit(projectPath);
+    const git = createGit(projectPath);
     const isRepo = await git.checkIsRepo();
     if (!isRepo) {
       throw new Error("Project is not a Git repository.");
@@ -946,7 +995,7 @@ export class ProjectGitService {
       description?: string;
     },
   ): Promise<void> {
-    const git = simpleGit(projectPath);
+    const git = createGit(projectPath);
     const isRepo = await git.checkIsRepo();
     if (!isRepo) {
       throw new Error("Project is not a Git repository.");
@@ -977,7 +1026,7 @@ export class ProjectGitService {
    * restored from HEAD. This is irreversible.
    */
   async discardChanges(projectPath: string, paths: string[]): Promise<void> {
-    const git = simpleGit(projectPath);
+    const git = createGit(projectPath);
     const isRepo = await git.checkIsRepo();
     if (!isRepo) {
       throw new Error("Project is not a Git repository.");
@@ -1248,7 +1297,7 @@ export class ProjectGitService {
       return {};
     }
 
-    const sourceGit = simpleGit(project.worktreeOriginPath);
+    const sourceGit = createGit(project.worktreeOriginPath);
     const removeWorktreeArgs = ["worktree", "remove"];
     if (input.forceDeleteFolder) {
       removeWorktreeArgs.push("--force");
