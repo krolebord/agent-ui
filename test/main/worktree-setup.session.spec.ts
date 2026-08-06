@@ -97,7 +97,7 @@ describe("WorktreeSetupSessionsManager", () => {
     );
 
     const session = sessionsState.state[sessionId];
-    if (!session || session.type !== "worktree-setup") {
+    if (session?.type !== "worktree-setup") {
       throw new Error("expected worktree-setup session");
     }
 
@@ -133,7 +133,7 @@ describe("WorktreeSetupSessionsManager", () => {
     );
 
     const session = sessionsState.state[sessionId];
-    if (!session || session.type !== "worktree-setup") {
+    if (session?.type !== "worktree-setup") {
       throw new Error("expected worktree-setup session");
     }
 
@@ -172,7 +172,7 @@ describe("WorktreeSetupSessionsManager", () => {
     );
 
     const session = sessionsState.state[sessionId];
-    if (!session || session.type !== "worktree-setup") {
+    if (session?.type !== "worktree-setup") {
       throw new Error("expected worktree-setup session");
     }
 

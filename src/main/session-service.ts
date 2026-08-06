@@ -801,7 +801,7 @@ export class SessionsServiceNew {
     }
 
     const session = this.sessionsState.state[sessionId];
-    if (!session || session.type !== "claude-local-terminal") {
+    if (session?.type !== "claude-local-terminal") {
       return;
     }
 
@@ -848,7 +848,7 @@ export class SessionsServiceNew {
 
     this.sessionsState.updateState((state) => {
       const session = state[sessionId];
-      if (!session || session.type !== "claude-local-terminal") {
+      if (session?.type !== "claude-local-terminal") {
         return;
       }
       session.title = nextTitle;

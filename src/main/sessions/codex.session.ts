@@ -150,7 +150,7 @@ export const codexSessionsRouter = {
       const state = context.sessions.state;
 
       const session = state.state[sessionId];
-      if (!session || session.type !== "codex-local-terminal") {
+      if (session?.type !== "codex-local-terminal") {
         return;
       }
 
@@ -527,7 +527,7 @@ export class CodexSessionsManager {
     let pruned = false;
     this.sessionsState.updateState((state) => {
       const session = state[sessionId];
-      if (!session || session.type !== "codex-local-terminal") {
+      if (session?.type !== "codex-local-terminal") {
         return;
       }
 
@@ -545,7 +545,7 @@ export class CodexSessionsManager {
     }
 
     const session = this.sessionsState.state[sessionId];
-    if (!session || session.type !== "codex-local-terminal") {
+    if (session?.type !== "codex-local-terminal") {
       return;
     }
 
@@ -581,7 +581,7 @@ export class CodexSessionsManager {
     let changed = false;
     this.sessionsState.updateState((state) => {
       const session = state[sessionId];
-      if (!session || session.type !== "codex-local-terminal") {
+      if (session?.type !== "codex-local-terminal") {
         return;
       }
 
@@ -620,7 +620,7 @@ export class CodexSessionsManager {
       setTitle: (title) => {
         state.updateState((draft) => {
           const session = draft[sessionId];
-          if (!session || session.type !== "codex-local-terminal") {
+          if (session?.type !== "codex-local-terminal") {
             return;
           }
           session.title = title;
@@ -639,8 +639,7 @@ export class CodexSessionsManager {
 
     const session = this.sessionsState.state[sessionId];
     if (
-      !session ||
-      session.type !== "codex-local-terminal" ||
+      session?.type !== "codex-local-terminal" ||
       session.title !== DEFAULT_CODEX_SESSION_TITLE
     ) {
       return;
@@ -661,7 +660,7 @@ export class CodexSessionsManager {
     }
 
     const session = this.sessionsState.state[sessionId];
-    if (!session || session.type !== "codex-local-terminal") {
+    if (session?.type !== "codex-local-terminal") {
       return;
     }
 
@@ -749,7 +748,7 @@ export class CodexSessionsManager {
       }
       state.updateState((state) => {
         const session = state[sessionId];
-        if (!session || session.type !== "codex-local-terminal") {
+        if (session?.type !== "codex-local-terminal") {
           return;
         }
 
@@ -817,7 +816,7 @@ export class CodexSessionsManager {
         onThreadId: (threadId) => {
           state.updateState((state) => {
             const session = state[sessionId];
-            if (!session || session.type !== "codex-local-terminal") {
+            if (session?.type !== "codex-local-terminal") {
               return;
             }
             session.codexSessionId = threadId;
@@ -1038,7 +1037,7 @@ export class CodexSessionsManager {
 
     this.sessionsState.updateState((state) => {
       const session = state[sessionId];
-      if (!session || session.type !== "codex-local-terminal") {
+      if (session?.type !== "codex-local-terminal") {
         return;
       }
       session.title = nextTitle;

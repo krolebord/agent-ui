@@ -803,7 +803,7 @@ function CodexLocalTerminalSessionSidebarItem({
   const lifecycle = useSessionLifecycleActions(session);
   const extraMenuActions = useTypeSpecificSessionMenuActions(session);
 
-  if (!session || session.type !== "codex-local-terminal") {
+  if (session?.type !== "codex-local-terminal") {
     return null;
   }
 
@@ -975,7 +975,7 @@ function WorktreeSetupSessionSidebarItem({ sessionId }: { sessionId: string }) {
   const session = useAppState((x) => x.sessions[sessionId]);
   const lifecycle = useSessionLifecycleActions(session);
 
-  if (!session || session.type !== "worktree-setup") {
+  if (session?.type !== "worktree-setup") {
     return null;
   }
 

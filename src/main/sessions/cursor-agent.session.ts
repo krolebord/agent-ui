@@ -103,7 +103,7 @@ export const cursorAgentSessionsRouter = {
       const state = context.sessions.state;
 
       const session = state.state[sessionId];
-      if (!session || session.type !== "cursor-agent") {
+      if (session?.type !== "cursor-agent") {
         return;
       }
 
@@ -344,7 +344,7 @@ export class CursorAgentSessionsManager {
       setTitle: (title) => {
         state.updateState((draft) => {
           const session = draft[sessionId];
-          if (!session || session.type !== "cursor-agent") {
+          if (session?.type !== "cursor-agent") {
             return;
           }
           session.title = title;
@@ -362,7 +362,7 @@ export class CursorAgentSessionsManager {
     }
 
     const session = this.sessionsState.state[sessionId];
-    if (!session || session.type !== "cursor-agent") {
+    if (session?.type !== "cursor-agent") {
       return;
     }
 
@@ -469,7 +469,7 @@ export class CursorAgentSessionsManager {
 
         state.updateState((state) => {
           const session = state[sessionId];
-          if (!session || session.type !== "cursor-agent") {
+          if (session?.type !== "cursor-agent") {
             return;
           }
           if (session.cursorChatId) {
@@ -622,7 +622,7 @@ export class CursorAgentSessionsManager {
 
     this.sessionsState.updateState((state) => {
       const session = state[sessionId];
-      if (!session || session.type !== "cursor-agent") {
+      if (session?.type !== "cursor-agent") {
         return;
       }
       session.title = nextTitle;

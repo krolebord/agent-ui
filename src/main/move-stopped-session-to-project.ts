@@ -42,7 +42,7 @@ export function moveStoppedSessionToProject(
 
   context.sessions.state.updateState((draft) => {
     const next = draft[sessionId];
-    if (!next || next.status !== "stopped" || next.type === "worktree-setup") {
+    if (next?.status !== "stopped" || next.type === "worktree-setup") {
       return;
     }
     switch (next.type) {

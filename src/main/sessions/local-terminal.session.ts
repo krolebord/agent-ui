@@ -186,7 +186,7 @@ export class LocalTerminalSessionsManager {
     }
 
     const session = this.sessionsState.state[sessionId];
-    if (!session || session.type !== "local-terminal") {
+    if (session?.type !== "local-terminal") {
       return;
     }
 
@@ -293,7 +293,7 @@ export class LocalTerminalSessionsManager {
 
     this.sessionsState.updateState((state) => {
       const session = state[sessionId];
-      if (!session || session.type !== "local-terminal") {
+      if (session?.type !== "local-terminal") {
         return;
       }
       session.title = nextTitle;

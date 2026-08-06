@@ -185,7 +185,7 @@ export class WorktreeSetupSessionsManager {
 
     this.sessionsState.updateState((sessions) => {
       const session = sessions[sessionId];
-      if (!session || session.type !== "worktree-setup") {
+      if (session?.type !== "worktree-setup") {
         return;
       }
       session.title = nextTitle;
@@ -216,7 +216,7 @@ export class WorktreeSetupSessionsManager {
     ) => {
       this.sessionsState.updateState((sessions) => {
         const session = sessions[sessionId];
-        if (!session || session.type !== "worktree-setup") {
+        if (session?.type !== "worktree-setup") {
           return;
         }
         Object.assign(session.steps[stepIndex], patch);
@@ -227,7 +227,7 @@ export class WorktreeSetupSessionsManager {
     const setSessionDone = (finalStatus: SessionStatus) => {
       this.sessionsState.updateState((sessions) => {
         const session = sessions[sessionId];
-        if (!session || session.type !== "worktree-setup") {
+        if (session?.type !== "worktree-setup") {
           return;
         }
         session.status = finalStatus;
@@ -238,7 +238,7 @@ export class WorktreeSetupSessionsManager {
 
     try {
       const session = this.sessionsState.state[sessionId];
-      if (!session || session.type !== "worktree-setup") {
+      if (session?.type !== "worktree-setup") {
         return;
       }
 
