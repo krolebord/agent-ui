@@ -23,6 +23,7 @@ import {
   AlertCircle,
   ChevronDown,
   CircleDot,
+  LoaderCircle,
   Play,
   Plus,
   RotateCw,
@@ -40,21 +41,36 @@ function getTerminalStatusMeta(status: string) {
       return {
         icon: CircleDot,
         className: "text-emerald-400",
+        label: "Running",
+        animate: false,
+      };
+    case "stopping":
+      return {
+        icon: LoaderCircle,
+        className: "text-amber-400",
+        label: "Stopping",
+        animate: true,
       };
     case "error":
       return {
         icon: AlertCircle,
         className: "text-rose-400",
+        label: "Error",
+        animate: false,
       };
     case "stopped":
       return {
         icon: CircleDot,
         className: "text-zinc-600",
+        label: "Stopped",
+        animate: false,
       };
     default:
       return {
         icon: CircleDot,
         className: "text-zinc-400",
+        label: status === "starting" ? "Starting" : "Idle",
+        animate: false,
       };
   }
 }
@@ -442,11 +458,13 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                 return null;
               }
 
-              const statusMeta = getTerminalStatusMeta(terminal.status);
-              const StatusIcon = statusMeta.icon;
               const isActive = terminalId === activeTerminalId;
               const isClosing = closingTerminalId === terminalId;
               const isSelecting = selectingTerminalId === terminalId;
+              const statusMeta = getTerminalStatusMeta(
+                isClosing ? "stopping" : terminal.status,
+              );
+              const StatusIcon = statusMeta.icon;
 
               return (
                 <div
@@ -467,7 +485,13 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                     disabled={projectLocked || isClosing || isSelecting}
                   >
                     <StatusIcon
-                      className={cn("size-3 shrink-0", statusMeta.className)}
+                      role="img"
+                      aria-label={statusMeta.label}
+                      className={cn(
+                        "size-3 shrink-0",
+                        statusMeta.className,
+                        statusMeta.animate && "motion-safe:animate-spin",
+                      )}
                     />
                     <span className="max-w-32 truncate text-xs">
                       {terminal.title}
@@ -572,11 +596,13 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                   return null;
                 }
 
-                const statusMeta = getTerminalStatusMeta(terminal.status);
-                const StatusIcon = statusMeta.icon;
                 const isActive = terminalId === activeTerminalId;
                 const isClosing = closingTerminalId === terminalId;
                 const isSelecting = selectingTerminalId === terminalId;
+                const statusMeta = getTerminalStatusMeta(
+                  isClosing ? "stopping" : terminal.status,
+                );
+                const StatusIcon = statusMeta.icon;
 
                 return (
                   <li key={terminalId} className="group/terminal relative">
@@ -595,7 +621,13 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
                       disabled={projectLocked || isClosing || isSelecting}
                     >
                       <StatusIcon
-                        className={cn("size-3 shrink-0", statusMeta.className)}
+                        role="img"
+                        aria-label={statusMeta.label}
+                        className={cn(
+                          "size-3 shrink-0",
+                          statusMeta.className,
+                          statusMeta.animate && "motion-safe:animate-spin",
+                        )}
                       />
                       <span className="truncate text-xs">{terminal.title}</span>
                     </button>
