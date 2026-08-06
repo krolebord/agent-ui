@@ -15,10 +15,17 @@ export interface PersistenceErrorEvent {
   issues?: ZodIssue[];
 }
 
+/**
+ * `TPersisted` defaults to `TState` so registrations that store their state
+ * verbatim stay checked against it. It is otherwise unconstrained: a persisted
+ * shape may drop fields from *within* a record's values, which no subset of
+ * `TState`'s own keys can describe. Pairing it with `toPersisted`/`fromPersisted`
+ * is what keeps the two shapes reconciled.
+ */
 export interface PersistenceRegistration<
   K extends string = string,
   TState extends object = object,
-  TPersisted extends Partial<TState> = TState,
+  TPersisted = TState,
 > {
   serviceState: ServiceState<K, TState>;
   schema: ZodType<TPersisted>;
@@ -59,7 +66,7 @@ function reportPersistenceError(
 export function defineStatePersistence<
   K extends string,
   TState extends object,
-  TPersisted extends Partial<TState> = TState,
+  TPersisted = TState,
 >(options: PersistenceRegistration<K, TState, TPersisted>) {
   return options;
 }

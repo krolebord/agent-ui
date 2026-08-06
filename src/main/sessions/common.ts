@@ -23,9 +23,8 @@ export const commonSessionSchema = z.object({
   title: z.string().catch("Claude Session"),
   createdAt: z.number().default(Date.now()),
   lastActivityAt: z.number().default(Date.now()),
-  status: sessionStatusSchema
-    .transform(() => "stopped" as SessionStatus)
-    .catch("stopped"),
+  // Runtime-owned, not persisted: see `runtimeSessionFields` in ./state.
+  status: sessionStatusSchema,
   warningMessage: z.string().optional(),
   errorMessage: z.string().optional(),
   // Inbox sidebar lifecycle. Absent means "active"; see
