@@ -4,6 +4,7 @@ import type {
   ClaudeProject,
   GitUpstreamDiffStats,
 } from "@shared/claude-types";
+import { isSessionSettled } from "@shared/session-lifecycle";
 
 export interface ProjectSessionGroup {
   path: string;
@@ -180,9 +181,11 @@ export function buildProjectPickerOptions(input: {
 export function buildProjectSessionGroups(
   state: BuildProjectSessionGroupsInput,
 ): ProjectSessionGroup[] {
-  const allSessions = Object.values(state.sessionsById).sort(
-    compareSessionsByCreatedAtDesc,
-  );
+  // Settled sessions belong on the inbox shelf, not the project tree. Skip them
+  // here so the normal sidebar and Mod+Arrow session cycling stay uncluttered.
+  const allSessions = Object.values(state.sessionsById)
+    .filter((session) => !isSessionSettled(session))
+    .sort(compareSessionsByCreatedAtDesc);
 
   const sessionsByPath = new Map<string, Session[]>();
   for (const session of allSessions) {

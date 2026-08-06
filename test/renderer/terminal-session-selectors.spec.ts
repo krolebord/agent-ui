@@ -107,6 +107,36 @@ describe("buildProjectSessionGroups", () => {
       hidden: true,
     });
   });
+
+  it("hides settled sessions from the project tree", () => {
+    const groups = buildProjectSessionGroups({
+      projects: [{ path: "/workspace/app", collapsed: false }],
+      sessionsById: {
+        active: {
+          sessionId: "active",
+          type: "claude-local-terminal",
+          status: "idle",
+          createdAt: 2_000,
+          lastActivityAt: 2_000,
+          startupConfig: { cwd: "/workspace/app" },
+        },
+        settled: {
+          sessionId: "settled",
+          type: "claude-local-terminal",
+          status: "stopped",
+          createdAt: 3_000,
+          lastActivityAt: 1_000,
+          settledAt: 2_000,
+          settledOverride: "settled",
+          startupConfig: { cwd: "/workspace/app" },
+        },
+      } as never,
+    });
+
+    expect(groups[0]?.sessions.map((session) => session.sessionId)).toEqual([
+      "active",
+    ]);
+  });
 });
 
 describe("getProjectDisplayName", () => {

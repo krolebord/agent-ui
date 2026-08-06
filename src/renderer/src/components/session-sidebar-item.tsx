@@ -29,11 +29,18 @@ import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import {
+  buildProjectSessionGroups,
   getProjectDisplayName,
   getSessionLastActivityLabel,
+  getVisibleSessionIds,
 } from "@renderer/services/terminal-session-selectors";
+import {
+  canSettleSession,
+  resolveNextActiveSessionId,
+} from "@shared/session-lifecycle";
 import { useMutation } from "@tanstack/react-query";
 import {
+  Check,
   CircleDot,
   Copy,
   EyeOff,
@@ -52,7 +59,7 @@ import {
   TrashIcon,
   TriangleAlert,
 } from "lucide-react";
-import { forwardRef } from "react";
+import { forwardRef, useCallback } from "react";
 import { toast } from "sonner";
 import { useRawSessionStateDialogStore } from "./raw-session-state-dialog";
 import { useRenameSessionDialogStore } from "./rename-session-dialog";
@@ -683,7 +690,48 @@ export function BaseSessionSidebarItem({
   leading?: React.ReactNode;
 }) {
   const session = useAppState((x) => x.sessions[sessionId]);
+  const projects = useAppState((x) => x.projects);
+  const sessions = useAppState((x) => x.sessions);
+  const activeSessionId = useActiveSessionStore((x) => x.activeSessionId);
+  const settleMutation = useMutation(orpc.sessions.settle.mutationOptions());
+  const settleable = session !== undefined && canSettleSession(session);
+
+  // Settling the open row must advance focus the same way the inbox does —
+  // otherwise the project tree hides the session and leaves you staring at it.
+  const handleSettle = useCallback(() => {
+    const nextSessionId =
+      sessionId === activeSessionId
+        ? resolveNextActiveSessionId({
+            activeSessionIds: getVisibleSessionIds(
+              buildProjectSessionGroups({
+                projects,
+                sessionsById: sessions,
+              }),
+            ),
+            settledSessionId: sessionId,
+          })
+        : null;
+
+    settleMutation.mutate({ sessionId });
+
+    if (nextSessionId !== null) {
+      switchSession(nextSessionId);
+    }
+  }, [activeSessionId, projects, sessionId, sessions, settleMutation]);
+
   const menuActions: SessionMenuAction[] = [
+    ...(settleable
+      ? ([
+          {
+            type: "item",
+            key: "settle-session",
+            label: "Settle session",
+            icon: Check,
+            onSelect: handleSettle,
+            disabled: settleMutation.isPending,
+          },
+        ] satisfies SessionMenuAction[])
+      : []),
     ...(extraMenuActions ?? []),
     ...useCommonSessionMenuActions(session),
     { type: "separator", key: "before-delete-session" },
@@ -720,14 +768,15 @@ export function BaseSessionSidebarItem({
               {renderDropdownMenuActions(menuActions)}
             </DropdownMenuContent>
           </DropdownMenu>
-          <SidebarIconButton
-            icon={TrashIcon}
-            label="Delete session"
-            variant="destructive"
-            disabled={deleteDisabled}
-            onClick={onDelete}
-            className="pointer-coarse:hidden"
-          />
+          {settleable ? (
+            <SidebarIconButton
+              icon={Check}
+              label="Settle session"
+              disabled={settleMutation.isPending}
+              onClick={handleSettle}
+              className="pointer-coarse:hidden"
+            />
+          ) : null}
         </SessionSidebarItemTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent>
