@@ -1,7 +1,6 @@
 import path from "node:path";
 import type { ResolvedProjectCommand } from "@shared/project-commands";
 import type { TerminalEvent } from "@shared/terminal-types";
-import { createDisposable } from "@shared/utils";
 import { z } from "zod";
 import { defineServiceState } from "../shared/service-state";
 import { procedure } from "./orpc";
@@ -132,6 +131,7 @@ export const defineProjectTerminalsPersistence = (
   });
 
 interface LiveProjectTerminal {
+  token: object;
   cwd: string;
   terminalId: string;
   terminal: ManagedTerminalRuntime;
@@ -140,7 +140,16 @@ interface LiveProjectTerminal {
   pendingInput: string | null;
   pendingInputTimer: ReturnType<typeof setTimeout> | null;
   promptSeen: boolean;
-  dispose: () => Promise<void>;
+  promptWaiters: Set<(seen: boolean) => void>;
+  stopPromise: Promise<void> | null;
+}
+
+interface StartLiveTerminalOptions {
+  cwd: string;
+  terminalId: string;
+  cols?: number;
+  rows?: number;
+  env?: Record<string, string>;
 }
 
 /**
@@ -156,6 +165,7 @@ const PROMPT_WAIT_TIMEOUT_MS = 1500;
  * hold back briefly and let the prompt land first.
  */
 const PROMPT_PAINT_DELAY_MS = 120;
+const RERUN_INTERRUPT_TIMEOUT_MS = 3000;
 
 /**
  * Resolves a preset's project-relative `cwd`, refusing anything that escapes
@@ -204,7 +214,7 @@ export const projectTerminalsRouter = {
     )
     .handler(async ({ input, context }) => {
       assertProjectPathInteractionAllowed(input.cwd, context);
-      context.projectTerminalsManager.ensureWorkspace(input);
+      await context.projectTerminalsManager.ensureWorkspace(input);
     }),
   createTerminal: procedure
     .input(
@@ -216,7 +226,7 @@ export const projectTerminalsRouter = {
     )
     .handler(async ({ input, context }) => {
       assertProjectPathInteractionAllowed(input.cwd, context);
-      return context.projectTerminalsManager.createTerminal(input);
+      return await context.projectTerminalsManager.createTerminal(input);
     }),
   runCommand: procedure
     .input(
@@ -253,7 +263,7 @@ export const projectTerminalsRouter = {
     )
     .handler(async ({ input, context }) => {
       assertProjectPathInteractionAllowed(input.cwd, context);
-      context.projectTerminalsManager.selectTerminal(input);
+      await context.projectTerminalsManager.selectTerminal(input);
     }),
   closeTerminal: procedure
     .input(
@@ -319,6 +329,7 @@ export const projectTerminalsRouter = {
 
 export class ProjectTerminalsManager {
   readonly liveTerminals = new Map<string, LiveProjectTerminal>();
+  private readonly pendingStarts = new Map<string, Promise<void>>();
 
   constructor(
     private readonly state: ProjectTerminalsState,
@@ -341,7 +352,7 @@ export class ProjectTerminalsManager {
     }
   }
 
-  ensureWorkspace({
+  async ensureWorkspace({
     cwd,
     cols,
     rows,
@@ -352,7 +363,7 @@ export class ProjectTerminalsManager {
   }) {
     const existing = this.state.state[cwd];
     if (!existing) {
-      this.createTerminal({ cwd, cols, rows });
+      await this.createTerminal({ cwd, cols, rows });
       return;
     }
 
@@ -360,7 +371,7 @@ export class ProjectTerminalsManager {
       return;
     }
 
-    this.startLiveTerminal({
+    await this.startLiveTerminal({
       cwd,
       terminalId: existing.selectedTerminalId,
       cols,
@@ -368,7 +379,7 @@ export class ProjectTerminalsManager {
     });
   }
 
-  createTerminal({
+  async createTerminal({
     cwd,
     cols,
     rows,
@@ -417,7 +428,7 @@ export class ProjectTerminalsManager {
       state[cwd] = workspace;
     });
 
-    this.startLiveTerminal({ cwd, terminalId, cols, rows, env });
+    await this.startLiveTerminal({ cwd, terminalId, cols, rows, env });
 
     return { terminalId };
   }
@@ -461,7 +472,7 @@ export class ProjectTerminalsManager {
         terminal.launchCwd = launchCwd !== cwd ? launchCwd : undefined;
         draftWorkspace.selectedTerminalId = existingTerminalId;
       });
-      this.startLiveTerminal({
+      await this.startLiveTerminal({
         cwd,
         terminalId: existingTerminalId,
         cols,
@@ -480,7 +491,7 @@ export class ProjectTerminalsManager {
       return { terminalId: existingTerminalId, started: true };
     }
 
-    const { terminalId } = this.createTerminal({
+    const { terminalId } = await this.createTerminal({
       cwd,
       cols,
       rows,
@@ -528,18 +539,36 @@ export class ProjectTerminalsManager {
       draftWorkspace.selectedTerminalId = terminalId;
     });
 
-    this.startLiveTerminal({ cwd, terminalId, cols, rows, env });
+    await this.startLiveTerminal({ cwd, terminalId, cols, rows, env });
 
-    const live = this.liveTerminals.get(terminalId);
+    let live = this.liveTerminals.get(terminalId);
     if (live?.shellMonitor.getState() === "running") {
       this.terminalManager.writeToTerminal(terminalId, "\x03");
+      const promptReturned = await this.waitForNextPrompt(
+        live,
+        RERUN_INTERRUPT_TIMEOUT_MS,
+      );
+      if (!promptReturned) {
+        await this.stopLiveTerminal(terminalId);
+        await this.startLiveTerminal({ cwd, terminalId, cols, rows, env });
+        live = this.liveTerminals.get(terminalId);
+      }
     }
 
+    if (!live) {
+      throw new Error("Failed to restart terminal for command rerun.");
+    }
     this.queueCommandInput(terminalId, command.run);
     return { terminalId };
   }
 
-  selectTerminal({ cwd, terminalId }: { cwd: string; terminalId: string }) {
+  async selectTerminal({
+    cwd,
+    terminalId,
+  }: {
+    cwd: string;
+    terminalId: string;
+  }) {
     const workspace = this.state.state[cwd];
     if (!workspace?.terminals[terminalId]) {
       return;
@@ -553,7 +582,7 @@ export class ProjectTerminalsManager {
       draftWorkspace.selectedTerminalId = terminalId;
     });
 
-    this.startLiveTerminal({ cwd, terminalId });
+    await this.startLiveTerminal({ cwd, terminalId });
   }
 
   async closeTerminal({
@@ -724,21 +753,39 @@ export class ProjectTerminalsManager {
     this.terminalManager.writeToTerminal(terminalId, data);
   }
 
-  private startLiveTerminal({
+  private async startLiveTerminal(
+    options: StartLiveTerminalOptions,
+  ): Promise<void> {
+    const pendingStart = this.pendingStarts.get(options.terminalId);
+    if (pendingStart) {
+      await pendingStart;
+      return;
+    }
+
+    const startPromise = this.startLiveTerminalOnce(options);
+    this.pendingStarts.set(options.terminalId, startPromise);
+    try {
+      await startPromise;
+    } finally {
+      if (this.pendingStarts.get(options.terminalId) === startPromise) {
+        this.pendingStarts.delete(options.terminalId);
+      }
+    }
+  }
+
+  private async startLiveTerminalOnce({
     cwd,
     terminalId,
     cols,
     rows,
     env,
-  }: {
-    cwd: string;
-    terminalId: string;
-    cols?: number;
-    rows?: number;
-    env?: Record<string, string>;
-  }) {
-    if (this.liveTerminals.has(terminalId)) {
-      return;
+  }: StartLiveTerminalOptions): Promise<void> {
+    const existingLiveTerminal = this.liveTerminals.get(terminalId);
+    if (existingLiveTerminal) {
+      if (existingLiveTerminal.terminal.status !== "stopping") {
+        return;
+      }
+      await this.stopLiveTerminal(terminalId);
     }
 
     const workspace = this.state.state[cwd];
@@ -747,27 +794,33 @@ export class ProjectTerminalsManager {
       return;
     }
 
-    const disposable = createDisposable({
-      onError: () => {},
-    });
+    const token = {};
+    let lifecycleActive = true;
 
     const shellMonitor = new ShellIntegrationMonitor({
       onActivityChange: (activity) => {
+        if (!lifecycleActive) return;
         const live = this.liveTerminals.get(terminalId);
-        if (!live || live.terminal.status !== "running") return;
+        if (!live || live.token !== token || live.terminal.status !== "running")
+          return;
         this.updateTerminalState(cwd, terminalId, (terminal) => {
           terminal.status = activity === "running" ? "running" : "idle";
         });
       },
       onPrompt: () => {
+        if (!lifecycleActive) return;
         const live = this.liveTerminals.get(terminalId);
-        if (!live) return;
+        if (!live || live.token !== token) return;
         live.promptSeen = true;
+        for (const resolve of live.promptWaiters) {
+          resolve(true);
+        }
+        live.promptWaiters.clear();
         this.scheduleFlush(terminalId, PROMPT_PAINT_DELAY_MS);
       },
     });
 
-    const terminal = this.terminalManager.startTerminal({
+    const terminal = await this.terminalManager.startTerminal({
       terminalId,
       access: {
         interactionCwd: cwd,
@@ -781,11 +834,13 @@ export class ProjectTerminalsManager {
       },
       transformOutputChunk: (chunk) => shellMonitor.processChunk(chunk),
       onData: () => {
+        if (!lifecycleActive) return;
         this.updateTerminalState(cwd, terminalId, (terminal) => {
           terminal.lastActivityAt = Date.now();
         });
       },
       onStatusChange: (status) => {
+        if (!lifecycleActive) return;
         this.updateTerminalState(cwd, terminalId, (terminal) => {
           if (status === "running") {
             terminal.status =
@@ -799,7 +854,11 @@ export class ProjectTerminalsManager {
         });
       },
       onExit: (payload) => {
-        this.liveTerminals.delete(terminalId);
+        const live = this.liveTerminals.get(terminalId);
+        if (live?.token === token) {
+          this.cleanupLiveTerminal(live);
+        }
+        lifecycleActive = false;
         this.updateTerminalState(cwd, terminalId, (terminal) => {
           terminal.status = payload.errorMessage ? "error" : "stopped";
           terminal.errorMessage = payload.errorMessage;
@@ -807,9 +866,13 @@ export class ProjectTerminalsManager {
       },
     });
 
-    disposable.addDisposable(() => terminal.stop());
+    // A synchronous spawn failure can complete before startTerminal resolves.
+    if (this.terminalManager.getRuntime(terminalId) !== terminal) {
+      return;
+    }
 
-    this.liveTerminals.set(terminalId, {
+    const liveTerminal: LiveProjectTerminal = {
+      token,
       cwd,
       terminalId,
       terminal,
@@ -817,19 +880,10 @@ export class ProjectTerminalsManager {
       pendingInput: null,
       pendingInputTimer: null,
       promptSeen: false,
-      dispose: disposable.dispose,
-    });
-    disposable.addDisposable(() => {
-      const live = this.liveTerminals.get(terminalId);
-      if (live?.pendingInputTimer) {
-        clearTimeout(live.pendingInputTimer);
-      }
-      this.liveTerminals.delete(terminalId);
-    });
-
-    if (!this.terminalManager.getRuntime(terminalId)) {
-      void disposable.dispose();
-    }
+      promptWaiters: new Set(),
+      stopPromise: null,
+    };
+    this.liveTerminals.set(terminalId, liveTerminal);
   }
 
   private async stopLiveTerminal(terminalId: string) {
@@ -838,7 +892,51 @@ export class ProjectTerminalsManager {
       return;
     }
 
-    await liveTerminal.dispose();
+    if (liveTerminal.stopPromise) {
+      await liveTerminal.stopPromise;
+      return;
+    }
+
+    liveTerminal.stopPromise = (async () => {
+      await liveTerminal.terminal.stop();
+      this.cleanupLiveTerminal(liveTerminal);
+    })();
+    await liveTerminal.stopPromise;
+  }
+
+  private cleanupLiveTerminal(liveTerminal: LiveProjectTerminal) {
+    if (liveTerminal.pendingInputTimer) {
+      clearTimeout(liveTerminal.pendingInputTimer);
+      liveTerminal.pendingInputTimer = null;
+    }
+    for (const resolve of liveTerminal.promptWaiters) {
+      resolve(false);
+    }
+    liveTerminal.promptWaiters.clear();
+    if (this.liveTerminals.get(liveTerminal.terminalId) === liveTerminal) {
+      this.liveTerminals.delete(liveTerminal.terminalId);
+    }
+  }
+
+  private waitForNextPrompt(
+    liveTerminal: LiveProjectTerminal,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (seen: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
+        liveTerminal.promptWaiters.delete(finish);
+        resolve(seen);
+      };
+      const timeout = setTimeout(() => finish(false), timeoutMs);
+      timeout.unref?.();
+      liveTerminal.promptWaiters.add(finish);
+    });
   }
 
   private findTerminalState(terminalId: string) {

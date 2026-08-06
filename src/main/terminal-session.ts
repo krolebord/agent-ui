@@ -3,7 +3,6 @@ import {
   concatAndTruncate,
   createDeferredPromise,
   createDisposable,
-  type DeferredPromise,
 } from "@shared/utils";
 import { type IPty, spawn } from "node-pty";
 import log from "./logger";
@@ -30,7 +29,7 @@ export type TerminalExitPayload = {
 type TerminalSessionOpts = {
   onStatusChange: (status: TerminalSessionStatus) => void;
   onData: (payload: { chunk: string; bufferedOutput: string }) => void;
-  onExit: (payload: TerminalExitPayload) => void;
+  onExit: (payload: TerminalExitPayload) => Promise<void> | void;
 };
 
 type TerminalStartOpts = {
@@ -104,8 +103,11 @@ function resolveLaunchCommand(launch: TerminalStartOpts): LaunchCommand {
   };
 }
 
-const GRACEFUL_STOP_TIMEOUT_MS = 1000;
-const FORCE_KILL_TIMEOUT_MS = 5000;
+export const TERMINAL_STOP_TIMEOUTS = {
+  sighup: 1500,
+  sigterm: 1500,
+  sigkill: 2000,
+} as const;
 const OUTPUT_BUFFER_MAX_TOTAL_SIZE = 512 * 1024;
 
 export function createTerminalSession(events: TerminalSessionOpts) {
@@ -117,11 +119,11 @@ export function createTerminalSession(events: TerminalSessionOpts) {
 
   let sessionStatus: TerminalSessionStatus = "stopped";
   let stopping = false;
+  let stopPromise: Promise<void> | null = null;
+  let finalizationPromise: Promise<void> | null = null;
 
   let pty: IPty | null = null;
-
-  const exitPromises = new Set<DeferredPromise<boolean>>();
-  disposable.addDisposable(() => exitPromises.clear());
+  const exitCompletion = createDeferredPromise<void>();
 
   let bufferedOutput = "";
 
@@ -130,7 +132,7 @@ export function createTerminalSession(events: TerminalSessionOpts) {
     events.onStatusChange(status);
   };
 
-  const dispose = async ({
+  const finalizeExit = ({
     status,
     exitCode,
     signal,
@@ -140,22 +142,33 @@ export function createTerminalSession(events: TerminalSessionOpts) {
     exitCode: number | null;
     signal?: number;
     errorMessage?: string;
-  }) => {
-    if (disposable.isDisposed) {
-      return;
+  }): Promise<void> => {
+    if (finalizationPromise) {
+      return finalizationPromise;
     }
 
-    // Capture before dispose: `stopping` is set only by `stop()`, so it is the
-    // signal that distinguishes an intentional teardown from a crash.
     const stoppedByUser = stopping;
-    await disposable.dispose();
-    changeSessionStatus(status);
-    events.onExit({
-      exitCode,
-      signal,
-      errorMessage,
-      stoppedByUser,
-    });
+    finalizationPromise = (async () => {
+      // Stop accepting input as soon as the authoritative PTY exit arrives.
+      pty = null;
+      await disposable.dispose();
+      changeSessionStatus(status);
+      try {
+        await events.onExit({
+          exitCode,
+          signal,
+          errorMessage,
+          stoppedByUser,
+        });
+      } catch (error) {
+        log.error("Error handling terminal exit", error);
+      } finally {
+        // `stop()` resolves only after downstream snapshot/map cleanup finishes.
+        exitCompletion.resolve(undefined);
+      }
+    })();
+
+    return finalizationPromise;
   };
 
   const start = (opts: TerminalStartOpts) => {
@@ -220,14 +233,14 @@ export function createTerminalSession(events: TerminalSessionOpts) {
           log.error(
             `PTY exit: ${launchCommand.file} not found (exit code 127)`,
           );
-          dispose({
+          void finalizeExit({
             status: "error",
             exitCode: null,
             signal: undefined,
             errorMessage: message,
           });
         } else {
-          dispose({
+          void finalizeExit({
             status: "stopped",
             exitCode,
             signal: signal ?? undefined,
@@ -238,7 +251,7 @@ export function createTerminalSession(events: TerminalSessionOpts) {
     } catch (error) {
       const message = getStartErrorMessage(error, launchCommand.file);
 
-      dispose({
+      void finalizeExit({
         status: "error",
         exitCode: null,
         signal: undefined,
@@ -248,36 +261,71 @@ export function createTerminalSession(events: TerminalSessionOpts) {
     }
   };
 
-  const waitForExit = async (timeoutMs: number): Promise<boolean> => {
-    const promise = createDeferredPromise<boolean>({ timeout: timeoutMs });
-    exitPromises.add(promise);
-    disposable.addDisposable(() => promise.resolve(true));
-    return await promise.promise.catch(() => false);
+  const waitForExit = (timeoutMs: number): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => resolve(false), timeoutMs);
+      timeout.unref?.();
+      void exitCompletion.promise.then(
+        () => {
+          clearTimeout(timeout);
+          resolve(true);
+        },
+        () => {
+          clearTimeout(timeout);
+          resolve(true);
+        },
+      );
+    });
   };
 
-  const stop = async () => {
-    if (disposable.isDisposed || !pty || stopping) {
-      return;
+  const stop = (): Promise<void> => {
+    if (stopPromise) {
+      return stopPromise;
     }
+    if (finalizationPromise) {
+      return finalizationPromise;
+    }
+    if (!pty) {
+      return Promise.resolve();
+    }
+
     stopping = true;
     changeSessionStatus("stopping");
+    const activePty = pty;
 
-    pty.kill("SIGTERM");
-    if (await waitForExit(GRACEFUL_STOP_TIMEOUT_MS)) {
-      return;
-    }
+    stopPromise = (async () => {
+      const stages: ReadonlyArray<{
+        signal: NodeJS.Signals;
+        timeoutMs: number;
+      }> = [
+        { signal: "SIGHUP", timeoutMs: TERMINAL_STOP_TIMEOUTS.sighup },
+        { signal: "SIGTERM", timeoutMs: TERMINAL_STOP_TIMEOUTS.sigterm },
+        { signal: "SIGKILL", timeoutMs: TERMINAL_STOP_TIMEOUTS.sigkill },
+      ];
 
-    pty.kill("SIGKILL");
-    if (await waitForExit(FORCE_KILL_TIMEOUT_MS)) {
-      return;
-    }
+      for (const stage of stages) {
+        try {
+          activePty.kill(stage.signal);
+        } catch (error) {
+          log.warn("Failed to signal terminal PTY", {
+            signal: stage.signal,
+            error,
+          });
+        }
+        if (await waitForExit(stage.timeoutMs)) {
+          return;
+        }
+      }
 
-    dispose({
-      status: "error",
-      exitCode: null,
-      signal: undefined,
-      errorMessage: "Failed to stop terminal session.",
-    });
+      await finalizeExit({
+        status: "error",
+        exitCode: null,
+        signal: undefined,
+        errorMessage: "Failed to stop terminal session.",
+      });
+    })();
+
+    return stopPromise;
   };
 
   const write = (data: string): void => {

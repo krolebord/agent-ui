@@ -1,6 +1,6 @@
 import { EventPublisher } from "@orpc/server";
 import type { TerminalEvent } from "@shared/terminal-types";
-import { createDisposable } from "@shared/utils";
+import { createDeferredPromise } from "@shared/utils";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import headlessXterm from "@xterm/headless";
 import { z } from "zod";
@@ -54,8 +54,11 @@ export interface ManagedTerminalRuntime {
 interface LiveManagedTerminal {
   terminalId: string;
   access: TerminalAccess;
+  state: "live" | "stopping";
   runtime: ManagedTerminalRuntime;
-  dispose: () => Promise<void>;
+  terminal: ReturnType<typeof createTerminalSession>;
+  completion: ReturnType<typeof createDeferredPromise<void>>;
+  stopPromise: Promise<void> | null;
 }
 
 function getSafeTerminalSize(cols?: number, rows?: number) {
@@ -194,7 +197,7 @@ export class TerminalManager {
     );
   }
 
-  startTerminal({
+  async startTerminal({
     terminalId,
     launch,
     access,
@@ -203,17 +206,25 @@ export class TerminalManager {
     onData,
     onStatusChange,
     onExit,
-  }: StartManagedTerminalOptions): ManagedTerminalRuntime {
-    const existing = this.liveTerminals.get(terminalId);
-    if (existing) {
+  }: StartManagedTerminalOptions): Promise<ManagedTerminalRuntime> {
+    while (true) {
+      const existing = this.liveTerminals.get(terminalId);
+      if (!existing) {
+        break;
+      }
       if (access) {
         existing.access = terminalAccessSchema.parse(access);
         this.terminalAccess.set(terminalId, existing.access);
       }
-      if (launch.cols != null && launch.rows != null) {
-        existing.runtime.resize(launch.cols, launch.rows);
+      if (existing.state === "live") {
+        if (launch.cols != null && launch.rows != null) {
+          existing.runtime.resize(launch.cols, launch.rows);
+        }
+        return existing.runtime;
       }
-      return existing.runtime;
+
+      // A same-ID restart is serialized behind the authoritative exit cleanup.
+      await (existing.stopPromise ?? existing.completion.promise);
     }
 
     const normalizedAccess = terminalAccessSchema.parse(access ?? {});
@@ -232,10 +243,7 @@ export class TerminalManager {
     let sessionStatus: TerminalSessionStatus = "stopped";
     let pendingHeadlessWrite = Promise.resolve();
 
-    const disposable = createDisposable({
-      onError: () => {},
-    });
-
+    let liveTerminal: LiveManagedTerminal;
     const terminal = createTerminalSession({
       onData: ({ chunk }) => {
         const renderedChunk = transformOutputChunk?.(chunk) ?? chunk;
@@ -261,17 +269,23 @@ export class TerminalManager {
         sessionStatus = status;
         onStatusChange?.(status);
       },
-      onExit: (payload) => {
-        void pendingHeadlessWrite.finally(() => {
+      onExit: async (payload) => {
+        liveTerminal.state = "stopping";
+        try {
+          await pendingHeadlessWrite.catch(() => undefined);
           const snapshot = serializeAddon.serialize({
             scrollback: SNAPSHOT_SCROLLBACK,
           });
-          this.liveTerminals.delete(terminalId);
           onExit?.({
             ...payload,
             snapshot,
           });
-        });
+        } finally {
+          if (this.liveTerminals.get(terminalId) === liveTerminal) {
+            this.liveTerminals.delete(terminalId);
+          }
+          liveTerminal.completion.resolve(undefined);
+        }
       },
     });
 
@@ -292,7 +306,7 @@ export class TerminalManager {
         terminal.clear();
       },
       stop: async () => {
-        await disposable.dispose();
+        await this.stopManagedTerminal(liveTerminal);
       },
       getSnapshot: async () => {
         await pendingHeadlessWrite;
@@ -305,16 +319,14 @@ export class TerminalManager {
       },
     };
 
-    disposable.addDisposable(() => terminal.stop());
-    disposable.addDisposable(() => {
-      this.liveTerminals.delete(terminalId);
-    });
-
-    const liveTerminal: LiveManagedTerminal = {
+    liveTerminal = {
       terminalId,
       access: normalizedAccess,
+      state: "live",
       runtime,
-      dispose: disposable.dispose,
+      terminal,
+      completion: createDeferredPromise<void>(),
+      stopPromise: null,
     };
     this.liveTerminals.set(terminalId, liveTerminal);
 
@@ -332,7 +344,29 @@ export class TerminalManager {
     if (!liveTerminal) {
       return;
     }
-    await liveTerminal.dispose();
+    await this.stopManagedTerminal(liveTerminal);
+  }
+
+  private stopManagedTerminal(
+    liveTerminal: LiveManagedTerminal,
+  ): Promise<void> {
+    if (liveTerminal.stopPromise) {
+      return liveTerminal.stopPromise;
+    }
+    if (liveTerminal.state === "stopping") {
+      return liveTerminal.completion.promise;
+    }
+
+    liveTerminal.state = "stopping";
+    liveTerminal.stopPromise = liveTerminal.terminal.stop().finally(() => {
+      // TerminalSession normally removes the entry through its awaited onExit
+      // callback. Keep this fallback for a runtime that completes without one.
+      if (this.liveTerminals.get(liveTerminal.terminalId) === liveTerminal) {
+        this.liveTerminals.delete(liveTerminal.terminalId);
+      }
+      liveTerminal.completion.resolve(undefined);
+    });
+    return liveTerminal.stopPromise;
   }
 
   writeToTerminal(terminalId: string, data: string) {

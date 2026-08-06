@@ -5,6 +5,25 @@ import { MCP_PATH } from "./mcp/server";
 import { McpSessionTokens } from "./mcp/session-token";
 import { startWebAppServer } from "./web-app-server";
 
+export const APP_SHUTDOWN_TIMEOUT_MS = 8000;
+
+export async function waitForShutdownWithTimeout(
+  shutdownWork: Promise<void>,
+  timeoutMs = APP_SHUTDOWN_TIMEOUT_MS,
+): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const completed = await Promise.race([
+    shutdownWork.then(() => true),
+    new Promise<boolean>((resolve) => {
+      timeout = setTimeout(() => resolve(false), timeoutMs);
+    }),
+  ]);
+  if (timeout) {
+    clearTimeout(timeout);
+  }
+  return completed;
+}
+
 export interface AppRuntime {
   services: Services;
   url: string;
@@ -28,14 +47,21 @@ export async function startAppRuntime(
   const shutdown = () => {
     shutdownPromise ??= (async () => {
       disposeController.abort();
-      const results = await Promise.allSettled([
-        webAppServer?.close(),
-        services?.shutdown(),
-      ]);
-      for (const result of results) {
-        if (result.status === "rejected") {
-          log.error("Failed during app shutdown", { error: result.reason });
+      const shutdownWork = (async () => {
+        const results = await Promise.allSettled([
+          webAppServer?.close(),
+          services?.shutdown(),
+        ]);
+        for (const result of results) {
+          if (result.status === "rejected") {
+            log.error("Failed during app shutdown", { error: result.reason });
+          }
         }
+      })();
+      if (!(await waitForShutdownWithTimeout(shutdownWork))) {
+        log.warn("App shutdown timed out", {
+          timeoutMs: APP_SHUTDOWN_TIMEOUT_MS,
+        });
       }
     })();
     return shutdownPromise;

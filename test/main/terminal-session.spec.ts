@@ -39,6 +39,7 @@ describe("createTerminalSession shell launch", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     process.env.SHELL = originalShell;
   });
 
@@ -86,6 +87,7 @@ describe("createTerminalSession exit reason", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     process.env.SHELL = originalShell;
   });
 
@@ -104,17 +106,44 @@ describe("createTerminalSession exit reason", () => {
     expect(ptyOnExit).toBeTypeOf("function");
 
     const stopPromise = session.stop();
+    expect(session.stop()).toBe(stopPromise);
+    expect(ptyMocks.kill).toHaveBeenCalledTimes(1);
+    expect(ptyMocks.kill).toHaveBeenCalledWith("SIGHUP");
     ptyOnExit?.({ exitCode: 0 });
     await stopPromise;
-    // onExit is emitted after dispose finishes; stop() can resolve earlier
-    // when waitForExit is released by that same dispose.
-    await vi.waitFor(() => {
-      expect(onExit).toHaveBeenCalled();
-    });
 
     expect(onExit).toHaveBeenCalledWith(
       expect.objectContaining({
         exitCode: 0,
+        stoppedByUser: true,
+      }),
+    );
+  });
+
+  it("escalates HUP to TERM and KILL when the PTY never exits", async () => {
+    vi.useFakeTimers();
+    const onExit = vi.fn();
+    const session = createTerminalSession({
+      onData: vi.fn(),
+      onExit,
+      onStatusChange: vi.fn(),
+    });
+    session.start({ runWithShell: true, cwd: "/tmp/project" });
+
+    const stopPromise = session.stop();
+    expect(ptyMocks.kill).toHaveBeenLastCalledWith("SIGHUP");
+
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(ptyMocks.kill).toHaveBeenLastCalledWith("SIGTERM");
+
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(ptyMocks.kill).toHaveBeenLastCalledWith("SIGKILL");
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await stopPromise;
+    expect(onExit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorMessage: "Failed to stop terminal session.",
         stoppedByUser: true,
       }),
     );

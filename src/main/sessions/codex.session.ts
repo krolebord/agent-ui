@@ -863,7 +863,7 @@ export class CodexSessionsManager {
       initialPrompt: isPlanMode ? undefined : initialPrompt,
     });
 
-    this.terminalManager.startTerminal({
+    await this.terminalManager.startTerminal({
       terminalId: sessionId,
       launch: {
         file: "codex",

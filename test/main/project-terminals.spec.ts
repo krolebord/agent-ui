@@ -75,11 +75,11 @@ describe("ProjectTerminalsManager", () => {
     terminalSessionSpies.bufferedOutput = "";
   });
 
-  it("creates the first project terminal on ensure", () => {
+  it("creates the first project terminal on ensure", async () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.ensureWorkspace({ cwd: "/tmp/project" });
 
     const workspace = state["/tmp/project"];
     expect(workspace).toBeDefined();
@@ -90,14 +90,14 @@ describe("ProjectTerminalsManager", () => {
     expect(manager.liveTerminals.size).toBe(1);
   });
 
-  it("supports multiple concurrent terminals in the same cwd", () => {
+  it("supports multiple concurrent terminals in the same cwd", async () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.ensureWorkspace({ cwd: "/tmp/project" });
     const firstTerminalId = state["/tmp/project"]?.selectedTerminalId as string;
 
-    const { terminalId: secondTerminalId } = manager.createTerminal({
+    const { terminalId: secondTerminalId } = await manager.createTerminal({
       cwd: "/tmp/project",
     });
 
@@ -114,9 +114,9 @@ describe("ProjectTerminalsManager", () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.ensureWorkspace({ cwd: "/tmp/project" });
     const firstTerminalId = state["/tmp/project"]?.selectedTerminalId as string;
-    const { terminalId: secondTerminalId } = manager.createTerminal({
+    const { terminalId: secondTerminalId } = await manager.createTerminal({
       cwd: "/tmp/project",
     });
 
@@ -142,7 +142,7 @@ describe("ProjectTerminalsManager", () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.ensureWorkspace({ cwd: "/tmp/project" });
     const firstTerminalId = state["/tmp/project"]?.selectedTerminalId as string;
 
     terminalSessionSpies.callbacks[0]?.onExit({
@@ -153,7 +153,7 @@ describe("ProjectTerminalsManager", () => {
       expect(manager.liveTerminals.has(firstTerminalId)).toBe(false);
     });
 
-    manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.ensureWorkspace({ cwd: "/tmp/project" });
 
     expect(terminalSessionSpies.start).toHaveBeenCalledTimes(2);
     expect(manager.liveTerminals.has(firstTerminalId)).toBe(true);
@@ -163,8 +163,8 @@ describe("ProjectTerminalsManager", () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    manager.ensureWorkspace({ cwd: "/tmp/project" });
-    manager.createTerminal({ cwd: "/tmp/project" });
+    await manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.createTerminal({ cwd: "/tmp/project" });
 
     expect(state["/tmp/project"]?.order).toHaveLength(2);
     expect(manager.liveTerminals.size).toBe(2);
@@ -179,9 +179,12 @@ describe("ProjectTerminalsManager", () => {
 
 describe("ProjectTerminalsManager command presets", () => {
   let projectDir: string;
+  let managers: ProjectTerminalsManager[];
 
   /** OSC 133 precmd marker: what the shell integration emits at each prompt. */
   const PROMPT_MARKER = "\u001b]133;A\u0007";
+  /** OSC 133 preexec marker: emitted immediately before a command runs. */
+  const RUNNING_MARKER = "\u001b]133;C\u0007";
 
   const writeCommands = async (commands: string) => {
     await mkdir(path.join(projectDir, ".agent-ui"), { recursive: true });
@@ -206,6 +209,7 @@ describe("ProjectTerminalsManager command presets", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     terminalSessionSpies.callbacks = [];
+    managers = [];
     projectDir = path.join(
       tmpdir(),
       `project-commands-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -214,13 +218,21 @@ describe("ProjectTerminalsManager command presets", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
+    await Promise.all(managers.map(async (manager) => await manager.dispose()));
     await rm(projectDir, { recursive: true, force: true });
   });
+
+  const createManager = (state: ProjectTerminalsState) => {
+    const manager = new ProjectTerminalsManager(state);
+    managers.push(manager);
+    return manager;
+  };
 
   it("opens a titled terminal and types the command once the shell prompts", async () => {
     await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
     const { state, projectTerminalsState } = createProjectTerminalsState();
-    const manager = new ProjectTerminalsManager(projectTerminalsState);
+    const manager = createManager(projectTerminalsState);
 
     const { terminalId } = await manager.runCommand({
       cwd: projectDir,
@@ -243,7 +255,7 @@ describe("ProjectTerminalsManager command presets", () => {
       `[{ "name": "Dev server", "run": "just dev", "singleton": true }]`,
     );
     const { state, projectTerminalsState } = createProjectTerminalsState();
-    const manager = new ProjectTerminalsManager(projectTerminalsState);
+    const manager = createManager(projectTerminalsState);
 
     const first = await manager.runCommand({
       cwd: projectDir,
@@ -263,7 +275,7 @@ describe("ProjectTerminalsManager command presets", () => {
   it("opens a second terminal when the preset is not a singleton", async () => {
     await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
     const { state, projectTerminalsState } = createProjectTerminalsState();
-    const manager = new ProjectTerminalsManager(projectTerminalsState);
+    const manager = createManager(projectTerminalsState);
 
     await manager.runCommand({ cwd: projectDir, commandId: "dev-server" });
     await manager.runCommand({ cwd: projectDir, commandId: "dev-server" });
@@ -274,29 +286,84 @@ describe("ProjectTerminalsManager command presets", () => {
   it("rejects a preset the file no longer defines", async () => {
     await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
     const { projectTerminalsState } = createProjectTerminalsState();
-    const manager = new ProjectTerminalsManager(projectTerminalsState);
+    const manager = createManager(projectTerminalsState);
 
     await expect(
       manager.runCommand({ cwd: projectDir, commandId: "deploy" }),
     ).rejects.toThrow(/no longer defined/);
   });
 
-  it("re-runs the preset behind an existing terminal", async () => {
+  it("interrupts a running preset and waits for its next prompt before rerunning", async () => {
     await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
     const { projectTerminalsState } = createProjectTerminalsState();
-    const manager = new ProjectTerminalsManager(projectTerminalsState);
+    const manager = createManager(projectTerminalsState);
 
     const { terminalId } = await manager.runCommand({
       cwd: projectDir,
       commandId: "dev-server",
     });
     await emitPrompt();
+    terminalSessionSpies.callbacks[0]?.onStatusChange("running");
+    terminalSessionSpies.callbacks[0]?.onData({
+      chunk: RUNNING_MARKER,
+      bufferedOutput: RUNNING_MARKER,
+    });
+    expect(manager.liveTerminals.get(terminalId)?.shellMonitor.getState()).toBe(
+      "running",
+    );
     terminalSessionSpies.write.mockClear();
 
-    await manager.rerunCommand({ cwd: projectDir, terminalId });
-    await emitPrompt();
+    const rerunPromise = manager.rerunCommand({ cwd: projectDir, terminalId });
+    await vi.waitFor(() => {
+      expect(terminalSessionSpies.write).toHaveBeenCalledWith("\x03");
+    });
+    expect(terminalSessionSpies.write).not.toHaveBeenCalledWith("just dev\n");
+
+    terminalSessionSpies.callbacks[0]?.onData({
+      chunk: PROMPT_MARKER,
+      bufferedOutput: PROMPT_MARKER,
+    });
+    await rerunPromise;
+    await vi.waitFor(() => {
+      expect(terminalSessionSpies.write).toHaveBeenCalledWith("just dev\n");
+    });
 
     expect(terminalSessionSpies.write).toHaveBeenCalledWith("just dev\n");
+  });
+
+  it("recreates the terminal when an interrupted preset never returns to a prompt", async () => {
+    await writeCommands(`[{ "name": "Dev server", "run": "just dev" }]`);
+    const { projectTerminalsState } = createProjectTerminalsState();
+    const manager = createManager(projectTerminalsState);
+
+    const { terminalId } = await manager.runCommand({
+      cwd: projectDir,
+      commandId: "dev-server",
+    });
+    await emitPrompt();
+    terminalSessionSpies.callbacks[0]?.onStatusChange("running");
+    terminalSessionSpies.callbacks[0]?.onData({
+      chunk: RUNNING_MARKER,
+      bufferedOutput: RUNNING_MARKER,
+    });
+    terminalSessionSpies.write.mockClear();
+
+    const rerunPromise = manager.rerunCommand({ cwd: projectDir, terminalId });
+    await vi.waitFor(() => {
+      expect(terminalSessionSpies.write).toHaveBeenCalledWith("\x03");
+    });
+
+    await rerunPromise;
+    expect(terminalSessionSpies.start).toHaveBeenCalledTimes(2);
+    expect(terminalSessionSpies.write).not.toHaveBeenCalledWith("just dev\n");
+
+    terminalSessionSpies.callbacks[1]?.onData({
+      chunk: PROMPT_MARKER,
+      bufferedOutput: PROMPT_MARKER,
+    });
+    await vi.waitFor(() => {
+      expect(terminalSessionSpies.write).toHaveBeenCalledWith("just dev\n");
+    });
   });
 });
 

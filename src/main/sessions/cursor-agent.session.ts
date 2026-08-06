@@ -120,7 +120,7 @@ export const cursorAgentSessionsRouter = {
         initialPrompt = initialPrompt.slice("/plan".length).trim() || undefined;
       }
 
-      context.sessions.cursorAgent.startLiveSession({
+      await context.sessions.cursorAgent.startLiveSession({
         sessionId,
         cwd: session.startupConfig.cwd,
         model: session.startupConfig.model,
@@ -507,7 +507,7 @@ export class CursorAgentSessionsManager {
       });
     }
 
-    const terminal = this.terminalManager.startTerminal({
+    const terminal = await this.terminalManager.startTerminal({
       terminalId: sessionId,
       launch: {
         file: "cursor-agent",

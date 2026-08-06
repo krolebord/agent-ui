@@ -88,7 +88,7 @@ export const localTerminalRouter = {
         return;
       }
 
-      context.sessions.localTerminal.startLiveSession({
+      await context.sessions.localTerminal.startLiveSession({
         sessionId,
         cwd: session.startupConfig.cwd,
         cols: input.cols,
@@ -193,7 +193,7 @@ export class LocalTerminalSessionsManager {
     await this.sessionBuffers.set(sessionId, offlineBuffer);
   }
 
-  startLiveSession({
+  async startLiveSession({
     sessionId,
     cwd,
     cols,
@@ -216,7 +216,7 @@ export class LocalTerminalSessionsManager {
       },
     });
 
-    const terminal = this.terminalManager.startTerminal({
+    const terminal = await this.terminalManager.startTerminal({
       terminalId: sessionId,
       launch: {
         runWithShell: true,

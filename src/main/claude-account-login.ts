@@ -90,7 +90,7 @@ export class ClaudeAccountLoginService {
 
     const { terminalManager, accounts } = this.options;
     terminalManager.registerTerminal(terminalId);
-    terminalManager.startTerminal({
+    await terminalManager.startTerminal({
       terminalId,
       launch: {
         cwd: homedir(),

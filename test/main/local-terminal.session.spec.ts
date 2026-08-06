@@ -70,7 +70,7 @@ describe("LocalTerminalSessionsManager", () => {
           cwd: "/tmp",
         },
       };
-      manager.startLiveSession({
+      await manager.startLiveSession({
         sessionId,
         cwd: "/tmp",
       });
@@ -103,7 +103,7 @@ describe("LocalTerminalSessionsManager", () => {
       },
     };
 
-    manager.startLiveSession({
+    await manager.startLiveSession({
       sessionId: "session-local-1",
       cwd: "/tmp",
     });

@@ -697,7 +697,7 @@ export class SessionsServiceNew {
             }) ?? null),
     });
 
-    const runtime = this.terminalManager.startTerminal({
+    const runtime = await this.terminalManager.startTerminal({
       terminalId: opts.sessionId,
       launch: {
         cwd: opts.cwd,
