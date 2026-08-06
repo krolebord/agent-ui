@@ -561,7 +561,11 @@ describe("ProjectGitService", () => {
 
     const service = new ProjectGitService(defineProjectState());
 
-    await expect(service.getUncommittedDiff("/repo-one")).resolves.toBeNull();
+    // Rejecting rather than resolving to null matters: null reads as "clean
+    // worktree" and the diff pane would claim there are no changes.
+    await expect(service.getUncommittedDiff("/repo-one")).rejects.toThrow(
+      "staging exploded",
+    );
     expect(rmMock).toHaveBeenCalledWith(scratchIndexPath("/repo-one"), {
       force: true,
     });
@@ -569,6 +573,27 @@ describe("ProjectGitService", () => {
       `${scratchIndexPath("/repo-one")}.lock`,
       { force: true },
     );
+  });
+
+  it("surfaces a failure to copy the git index instead of reporting no changes", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    copyFileMock.mockRejectedValue(
+      Object.assign(new Error("Unknown system error -122"), { errno: -122 }),
+    );
+
+    const service = new ProjectGitService(defineProjectState());
+
+    await expect(service.getUncommittedDiff("/repo-one")).rejects.toThrow(
+      "Unknown system error -122",
+    );
+  });
+
+  it("still reports no diff for a directory that is not a git repository", async () => {
+    checkIsRepoMock.mockResolvedValue(false);
+
+    const service = new ProjectGitService(defineProjectState());
+
+    await expect(service.getUncommittedDiff("/not-a-repo")).resolves.toBeNull();
   });
 
   it("does not fail the operation when scratch index cleanup fails", async () => {

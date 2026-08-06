@@ -50,6 +50,7 @@ import {
   Pencil,
   RefreshCw,
   Trash2,
+  TriangleAlert,
 } from "lucide-react";
 import {
   createContext,
@@ -509,6 +510,51 @@ function fileTypeIcon(file: FileDiffMetadata) {
   if (file.type === "new") return FilePlus;
   if (file.type === "deleted") return FileMinus;
   return FileText;
+}
+
+function getDiffErrorMessage(error: unknown) {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : "Failed to read uncommitted changes.";
+}
+
+/**
+ * Shown in place of the pane when the diff could not be read at all. Rendering
+ * the usual "No uncommitted changes" here would claim the worktree is clean.
+ */
+function DiffLoadErrorState({
+  message,
+  isRetrying,
+  onRetry,
+}: {
+  message: string;
+  isRetrying: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+      <TriangleAlert className="size-5 text-amber-400" />
+      <p className="text-sm font-medium">Couldn't read changes</p>
+      <p className="max-w-md text-xs break-words text-muted-foreground">
+        {message}
+      </p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="mt-1 h-7 px-2 text-xs pointer-coarse:h-11"
+        disabled={isRetrying}
+        onClick={onRetry}
+      >
+        {isRetrying ? (
+          <LoaderCircle className="size-3 animate-spin" />
+        ) : (
+          <RefreshCw className="size-3" />
+        )}
+        Retry
+      </Button>
+    </div>
+  );
 }
 
 function getFileBasename(filePath: string) {
@@ -1259,6 +1305,8 @@ type DiffFilesSidebarProps = {
   someFilesConfirmed: boolean;
   commentCountsByFile: Record<string, number>;
   isRefreshing: boolean;
+  /** Set when a refresh failed but a previously loaded diff is still shown. */
+  refreshErrorMessage: string | null;
   hasReviewComments: boolean;
   reviewCopied: boolean;
   canCommit: boolean;
@@ -1284,6 +1332,7 @@ function DiffFilesSidebar({
   someFilesConfirmed,
   commentCountsByFile,
   isRefreshing,
+  refreshErrorMessage,
   hasReviewComments,
   reviewCopied,
   canCommit,
@@ -1380,6 +1429,19 @@ function DiffFilesSidebar({
                 </DropdownMenu>
               ) : null}
             </div>
+
+            {refreshErrorMessage ? (
+              <div
+                role="alert"
+                className="flex shrink-0 items-start gap-1.5 border-b border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-200"
+              >
+                <TriangleAlert className="mt-px size-3 shrink-0" />
+                <span className="min-w-0 break-words">
+                  Showing the last loaded diff — refresh failed:{" "}
+                  {refreshErrorMessage}
+                </span>
+              </div>
+            ) : null}
 
             <div
               className="min-h-0 flex-1 overflow-y-auto py-1"
@@ -1560,6 +1622,9 @@ function ProjectDiffPaneContent() {
     data: files,
     isLoading,
     isFetching,
+    isError,
+    error,
+    refetch,
   } = useQuery(
     orpc.projects.getUncommittedDiff.queryOptions({
       input: { path: projectPath },
@@ -1813,6 +1878,17 @@ function ProjectDiffPaneContent() {
     },
   );
 
+  // No cached diff to fall back on, so the failure is all there is to show.
+  if (isError && !files) {
+    return (
+      <DiffLoadErrorState
+        message={getDiffErrorMessage(error)}
+        isRetrying={isRefreshing}
+        onRetry={() => void refetch()}
+      />
+    );
+  }
+
   if (!files) return null;
 
   const sidebarProps = {
@@ -1823,6 +1899,7 @@ function ProjectDiffPaneContent() {
     someFilesConfirmed,
     commentCountsByFile,
     isRefreshing,
+    refreshErrorMessage: isError ? getDiffErrorMessage(error) : null,
     hasReviewComments,
     reviewCopied,
     canCommit,

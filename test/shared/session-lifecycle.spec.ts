@@ -198,7 +198,7 @@ describe("canSnoozeSession", () => {
     expect(canSnoozeSession({ status: "awaiting_approval" })).toBe(false);
   });
 
-  it("allows a working session — snooze never touches the process", () => {
+  it("allows a working session — snooze stops it, then parks until wake", () => {
     expect(canSnoozeSession({ status: "running" })).toBe(true);
     expect(canSnoozeSession({ status: "starting" })).toBe(true);
     expect(canSnoozeSession({ status: "stopping" })).toBe(true);
@@ -238,9 +238,9 @@ describe("isSessionSnoozed", () => {
     ).toBe(false);
   });
 
-  it("stays snoozed while the session keeps working", () => {
-    // The case snooze exists for: in motion is not a conclusion, and the
-    // activity bumps that come with it must not undo the snooze.
+  it("stays snoozed while the session is still working", () => {
+    // Teardown after snooze briefly leaves status as working (`stopping`);
+    // in motion is not a conclusion, so activity bumps must not undo the park.
     expect(
       isSessionSnoozed(
         snoozed({ sessionId: "a", status: "running", lastActivityAt: 4_000 }),

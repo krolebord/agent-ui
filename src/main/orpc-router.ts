@@ -135,31 +135,74 @@ const sessionsRouter = {
   snooze: procedure
     .input(z.object({ sessionId: z.string(), snoozedUntil: z.number() }))
     .handler(async ({ input, context }) => {
+      const session = context.sessions.state.state[input.sessionId];
+      // Same silent no-op as settle for a raced click, plus a guard on the
+      // wake time: a past or non-finite one would persist snooze fields on a
+      // session that never hides, leaving a permanent "Woke" marker.
+      if (!session || !canSnoozeSession(session)) {
+        return;
+      }
+      const now = Date.now();
+      if (!Number.isFinite(input.snoozedUntil) || input.snoozedUntil <= now) {
+        return;
+      }
+      const sessionType = session.type;
+
+      let didSnooze = false;
       context.sessions.state.updateState((state) => {
-        const session = state[input.sessionId];
-        // Same silent no-op as settle for a raced click, plus a guard on the
-        // wake time: a past or non-finite one would persist snooze fields on a
-        // session that never hides, leaving a permanent "Woke" marker.
-        if (!session || !canSnoozeSession(session)) {
+        const current = state[input.sessionId];
+        if (!current || !canSnoozeSession(current)) {
           return;
         }
-        const now = Date.now();
-        if (!Number.isFinite(input.snoozedUntil) || input.snoozedUntil <= now) {
+        if (
+          !Number.isFinite(input.snoozedUntil) ||
+          input.snoozedUntil <= Date.now()
+        ) {
           return;
         }
-        session.snoozedUntil = input.snoozedUntil;
-        session.snoozedAt = now;
+        current.snoozedUntil = input.snoozedUntil;
+        current.snoozedAt = Date.now();
         // Acknowledges the session exactly as settle does — otherwise the
         // unread flag would raise its hand and wake the row immediately.
-        if (session.status === "awaiting_user_response") {
-          session.status = "idle";
+        if (current.status === "awaiting_user_response") {
+          current.status = "idle";
         }
-        // Snooze and settle are alternatives, not layers. Unlike settle, no
-        // process is stopped: snooze only affects visibility, which is what
-        // makes snoozing a running session worth doing.
-        delete session.settledOverride;
-        delete session.settledAt;
+        // Snooze and settle are alternatives, not layers. Like settle, free the
+        // live process after parking so a snoozed row is not still burning
+        // tokens in the background.
+        delete current.settledOverride;
+        delete current.settledAt;
+        didSnooze = true;
       });
+
+      if (!didSnooze) {
+        return;
+      }
+
+      // Stop after the marker is written so the row is already parked.
+      // Intentional stops do not bump lastActivityAt, so teardown cannot wake
+      // the snooze early.
+      switch (sessionType) {
+        case "claude-local-terminal":
+          await context.sessionsService.stopLiveSession(input.sessionId);
+          break;
+        case "local-terminal":
+          await context.sessions.localTerminal.stopLiveSession(input.sessionId);
+          break;
+        case "codex-local-terminal":
+          await context.sessions.codex.stopLiveSession(input.sessionId);
+          break;
+        case "cursor-agent":
+          await context.sessions.cursorAgent.stopLiveSession(input.sessionId);
+          break;
+        case "worktree-setup":
+          context.sessions.worktreeSetup.cancelSetup(input.sessionId);
+          break;
+        default: {
+          const exhaustiveCheck: never = sessionType;
+          return exhaustiveCheck;
+        }
+      }
     }),
   unsnooze: procedure
     .input(z.object({ sessionId: z.string() }))

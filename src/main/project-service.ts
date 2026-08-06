@@ -388,12 +388,22 @@ export const projectsRouter = {
   getUncommittedDiff: procedure
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input, context }) => {
-      const diff = await context.projectGitService.getUncommittedDiff(
-        normalizeProjectPath(input.path),
-      );
-      if (!diff) return [] as FileDiffMetadata[];
-      const files = parsePatchFiles(diff).flatMap((p) => p.files);
-      return files;
+      try {
+        const diff = await context.projectGitService.getUncommittedDiff(
+          normalizeProjectPath(input.path),
+        );
+        if (!diff) return [] as FileDiffMetadata[];
+        const files = parsePatchFiles(diff).flatMap((p) => p.files);
+        return files;
+      } catch (error) {
+        // oRPC rewrites a plain Error's message to "Internal server error" on
+        // the way to the renderer; restating it keeps the real cause visible.
+        const message =
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Failed to read uncommitted changes.";
+        throw new ORPCError("INTERNAL_SERVER_ERROR", { message });
+      }
     }),
   getCommitHistory: procedure
     .input(

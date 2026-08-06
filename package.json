@@ -16,6 +16,7 @@
     "build": "tsc --noEmit && vite build",
     "build:headless": "pnpm typecheck && tsc -p tsconfig.headless.json --noEmit && vite build --config vite.renderer.config.ts && vite build --config vite.headless.config.ts",
     "start:headless": "node dist-headless/index.js",
+    "promote:headless": "bash scripts/promote-headless-release.sh",
     "analyze": "ANALYZE=true vite build",
     "app:dist": "pnpm build && electron-builder",
     "app:dist:mac": "pnpm build && electron-builder --mac",

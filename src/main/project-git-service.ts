@@ -736,6 +736,12 @@ export class ProjectGitService {
     return this.getChangesDiff(projectPath, uniquePaths);
   }
 
+  /**
+   * Throws on failure rather than returning null: a null result means "clean
+   * worktree" to callers, so swallowing an error here renders in the diff pane
+   * as "no uncommitted changes" — indistinguishable from the user's work having
+   * disappeared.
+   */
   private async getChangesDiff(
     projectPath: string,
     paths?: string[],
@@ -766,8 +772,9 @@ export class ProjectGitService {
       );
       const trimmed = diff.trim();
       return trimmed || null;
-    } catch {
-      return null;
+    } catch (error) {
+      log.error("Failed to read changes diff", { projectPath, paths, error });
+      throw error;
     }
   }
 

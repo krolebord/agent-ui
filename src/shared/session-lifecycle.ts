@@ -141,8 +141,9 @@ export function resolveSettledTimestamp(
 
 /**
  * Snooze is only blocked by a pending approval. Unlike settle, a *working*
- * session is snoozable on purpose: snooze never touches the process (settle
- * stops it), so "hide this while it finishes" is the case snooze exists for.
+ * session is snoozable on purpose: snooze stops the live process (same as
+ * settle) and parks the row until the wake time, so "not now, come back later"
+ * works even while the agent is still in motion.
  *
  * `input` is snoozable for the same reason it is settleable — it conflates
  * "asked you something" with "finished, unread" — and `sessions.snooze` clears
@@ -165,8 +166,9 @@ export function canSnoozeSession(
  *   no timestamp comparison, so it holds even if a write site forgets to bump
  *   `lastActivityAt`. Safe against self-triggering because snoozing clears
  *   `input`, and `approval` cannot be snoozed in the first place.
- * - `working`: in motion is not a conclusion. Never wakes — this is what makes
- *   snoozing a running session useful instead of instantly undone.
+ * - `working`: in motion is not a conclusion. Never wakes — covers the brief
+ *   `stopping` window after snooze tears down the live process, and any
+ *   activity bumps that would otherwise undo the park mid-teardown.
  * - `failed` / `ready`: a conclusion, but only if it happened *after* the
  *   snooze. A session parked while already broken or already finished stays
  *   parked; that was the user saying "I saw it, not now".

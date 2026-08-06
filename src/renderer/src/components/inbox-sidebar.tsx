@@ -538,12 +538,9 @@ function InboxRow({
               className={cn(
                 rowClassName,
                 // Coarse: taller row, and width reserved for the always-visible
-                // buttons so they never sit on the timestamp. Snoozed + stoppable
-                // rows need a third slot (wake, stop, menu).
-                "flex h-8 items-center gap-2 pointer-coarse:h-11",
-                isSnoozed && lifecycle.stop
-                  ? "pointer-coarse:pr-[6.75rem]"
-                  : "pointer-coarse:pr-[4.75rem]",
+                // buttons so they never sit on the timestamp (wake/un-settle +
+                // menu).
+                "flex h-8 items-center gap-2 pointer-coarse:h-11 pointer-coarse:pr-[4.75rem]",
               )}
             >
               {/* No project line to lean on here, so the icon is the only thing
@@ -609,16 +606,6 @@ function InboxRow({
               onClick={() => onUnsettle(session.sessionId)}
             />
           )}
-          {/* Snooze leaves the process running, so stop stays one click away —
-              same Square icon as the active-row control, parked next to Wake. */}
-          {isSnoozed && lifecycle.stop ? (
-            <RowIconButton
-              icon={SquareIcon}
-              label={lifecycle.stopLabel}
-              disabled={lifecycle.isStopPending}
-              onClick={lifecycle.stop}
-            />
-          ) : null}
           <RowMenuButton actions={menuActions} />
         </span>
       </li>
