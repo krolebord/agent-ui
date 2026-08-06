@@ -1,7 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
-import pkg from "./package.json";
+import pkg from "./package.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const externalDependencies = [
@@ -22,7 +22,7 @@ export default defineConfig({
     outDir: "dist-headless",
     emptyOutDir: true,
     sourcemap: true,
-    rollupOptions: {
+    rolldownOptions: {
       external: externalDependencies,
       output: {
         entryFileNames: "index.js",

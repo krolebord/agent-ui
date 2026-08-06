@@ -30,7 +30,6 @@ describe("generateCursorTitle", () => {
         "--trust",
         "--disable-indexing",
         "--disable-codebase-ref",
-        "--exclude-workspace-context",
         "--model",
         "composer-2-fast",
         "--mode",

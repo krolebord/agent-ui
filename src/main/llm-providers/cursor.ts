@@ -18,7 +18,6 @@ export function createCursorProvider(
         "--trust",
         "--disable-indexing",
         "--disable-codebase-ref",
-        "--exclude-workspace-context",
         "--model",
         model,
         "--mode",

@@ -6,7 +6,7 @@ import react from "@vitejs/plugin-react";
 import { visualizer } from "rollup-plugin-visualizer";
 import { defineConfig } from "vite";
 import electron from "vite-plugin-electron/simple";
-import pkg from "./package.json";
+import pkg from "./package.json" with { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,7 +59,7 @@ export default defineConfig(({ command }) => {
               sourcemap,
               minify: isBuild,
               outDir: "dist-electron/main",
-              rollupOptions: {
+              rolldownOptions: {
                 external: externalDependencies,
               },
             },
@@ -75,7 +75,7 @@ export default defineConfig(({ command }) => {
               sourcemap: sourcemap ? "inline" : undefined,
               minify: isBuild,
               outDir: "dist-electron/preload",
-              rollupOptions: {
+              rolldownOptions: {
                 external: externalDependencies,
               },
             },
