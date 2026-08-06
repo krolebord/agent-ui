@@ -135,6 +135,7 @@ function WorktreeSetupSessionPage({
           <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-4">
             {session.steps.map((step, index) => (
               <WorktreeSetupStepRow
+                // biome-ignore lint/suspicious/noArrayIndexKey: steps are fixed at session creation and only mutated in place, never reordered
                 key={`${index}-${step.command}`}
                 step={step}
               />

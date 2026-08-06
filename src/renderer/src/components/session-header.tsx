@@ -16,7 +16,6 @@ import {
   FileDiff,
   FolderOpen,
   GitFork,
-  Github,
   History,
   Paperclip,
   TerminalSquare,
@@ -43,6 +42,7 @@ import {
   ClaudeCodeIcon,
   CodexIcon,
   CursorAgentIcon,
+  GitHubIcon,
 } from "./session-type-icons";
 import { useAppState } from "./sync-state-provider";
 import { Button } from "./ui/button";
@@ -84,7 +84,7 @@ const openInAppItems: Array<{
 }> = [
   { app: "cursor", icon: CursorAgentIcon },
   { app: "finder", icon: FolderOpen },
-  { app: "github-desktop", icon: Github },
+  { app: "github-desktop", icon: GitHubIcon },
   { app: "terminal", icon: TerminalSquare },
 ];
 

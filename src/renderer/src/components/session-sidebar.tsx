@@ -215,7 +215,7 @@ export function SessionSidebar() {
   });
 
   const handleDragEnd = useCallback(
-    (event: Parameters<DragEndEvent>[0]) => {
+    (event: DragEndEvent) => {
       if (event.canceled || !event.operation.source) return;
       const { source } = event.operation;
 

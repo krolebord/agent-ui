@@ -40,15 +40,13 @@ describe("scheduleSpecToDraft", () => {
     });
   });
 
-  it.each([
-    "30 * * * *",
-    "0 9 * * *",
-    "15 18 * * 1-5",
-    "0 7 * * 3",
-  ])("round-trips cron %s through buildScheduleSpec", (cron) => {
-    const draft = scheduleSpecToDraft({ kind: "recurring", cron });
-    expect(buildScheduleSpec(draft)).toEqual({
-      schedule: { kind: "recurring", cron },
-    });
-  });
+  it.each(["30 * * * *", "0 9 * * *", "15 18 * * 1-5", "0 7 * * 3"])(
+    "round-trips cron %s through buildScheduleSpec",
+    (cron) => {
+      const draft = scheduleSpecToDraft({ kind: "recurring", cron });
+      expect(buildScheduleSpec(draft)).toEqual({
+        schedule: { kind: "recurring", cron },
+      });
+    },
+  );
 });

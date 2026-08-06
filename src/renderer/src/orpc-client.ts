@@ -52,7 +52,7 @@ function createORPCLink() {
   return new WebSocketRPCLink({
     websocket: websocket as unknown as Pick<
       WebSocket,
-      "addEventListener" | "readyState" | "send"
+      "addEventListener" | "readyState" | "removeEventListener" | "send"
     >,
   });
 }
