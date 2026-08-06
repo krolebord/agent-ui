@@ -75,11 +75,22 @@ describe("ProjectTerminalsManager", () => {
     terminalSessionSpies.bufferedOutput = "";
   });
 
-  it("creates the first project terminal on ensure", async () => {
+  it("does not create a terminal when a project workspace is ensured", async () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
     await manager.ensureWorkspace({ cwd: "/tmp/project" });
+
+    expect(state["/tmp/project"]).toBeUndefined();
+    expect(terminalSessionSpies.start).not.toHaveBeenCalled();
+    expect(manager.liveTerminals.size).toBe(0);
+  });
+
+  it("creates the first project terminal on request", async () => {
+    const { state, projectTerminalsState } = createProjectTerminalsState();
+    const manager = new ProjectTerminalsManager(projectTerminalsState);
+
+    await manager.createTerminal({ cwd: "/tmp/project" });
 
     const workspace = state["/tmp/project"];
     expect(workspace).toBeDefined();
@@ -94,7 +105,7 @@ describe("ProjectTerminalsManager", () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    await manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.createTerminal({ cwd: "/tmp/project" });
     const firstTerminalId = state["/tmp/project"]?.selectedTerminalId as string;
 
     const { terminalId: secondTerminalId } = await manager.createTerminal({
@@ -114,7 +125,7 @@ describe("ProjectTerminalsManager", () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    await manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.createTerminal({ cwd: "/tmp/project" });
     const firstTerminalId = state["/tmp/project"]?.selectedTerminalId as string;
     const { terminalId: secondTerminalId } = await manager.createTerminal({
       cwd: "/tmp/project",
@@ -136,13 +147,18 @@ describe("ProjectTerminalsManager", () => {
     expect(state["/tmp/project"]?.order).toEqual([]);
     expect(state["/tmp/project"]?.selectedTerminalId).toBeNull();
     expect(manager.liveTerminals.size).toBe(0);
+
+    await manager.ensureWorkspace({ cwd: "/tmp/project" });
+
+    expect(state["/tmp/project"]?.order).toEqual([]);
+    expect(manager.liveTerminals.size).toBe(0);
   });
 
   it("restarts the selected terminal when the workspace is ensured again", async () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    await manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.createTerminal({ cwd: "/tmp/project" });
     const firstTerminalId = state["/tmp/project"]?.selectedTerminalId as string;
 
     terminalSessionSpies.callbacks[0]?.onExit({
@@ -163,7 +179,7 @@ describe("ProjectTerminalsManager", () => {
     const { state, projectTerminalsState } = createProjectTerminalsState();
     const manager = new ProjectTerminalsManager(projectTerminalsState);
 
-    await manager.ensureWorkspace({ cwd: "/tmp/project" });
+    await manager.createTerminal({ cwd: "/tmp/project" });
     await manager.createTerminal({ cwd: "/tmp/project" });
 
     expect(state["/tmp/project"]?.order).toHaveLength(2);

@@ -1,5 +1,10 @@
 import { ORPCError } from "@orpc/server";
-import { type FileDiffMetadata, parsePatchFiles } from "@pierre/diffs";
+import {
+  type FileContents,
+  type FileDiffMetadata,
+  parseDiffFromFile,
+  parsePatchFiles,
+} from "@pierre/diffs";
 import z from "zod";
 import type { ClaudeProject } from "../shared/claude-types";
 import {
@@ -22,6 +27,13 @@ import {
   getProjectFaviconDataUrl,
   invalidateProjectFavicon,
 } from "./project-favicon";
+import {
+  EditableFileConflictError,
+  readEditableFileSnapshot,
+  readGitFileContents,
+  saveEditableFileSnapshot,
+  UnsupportedEditableFileError,
+} from "./project-file-edit";
 import {
   type ProjectSettingsFile,
   readProjectCommands,
@@ -153,6 +165,100 @@ const gitCommitHashSchema = z
   .string()
   .trim()
   .regex(/^[0-9a-f]{4,64}$/i, "Invalid commit hash");
+
+const editableFilePathSchema = z.string().trim().min(1);
+
+async function getUncommittedFiles(
+  projectPath: string,
+  context: Pick<Services, "projectGitService">,
+): Promise<FileDiffMetadata[]> {
+  const diff = await context.projectGitService.getUncommittedDiff(projectPath);
+  return diff ? parsePatchFiles(diff).flatMap((patch) => patch.files) : [];
+}
+
+function editableFileUnavailableReason(file: FileDiffMetadata): string | null {
+  if (file.type === "deleted") {
+    return "Deleted files are read-only in the diff pane.";
+  }
+  if (file.type === "rename-pure") {
+    return "Rename-only changes are read-only in the diff pane.";
+  }
+  if (file.mode === "120000" || file.prevMode === "120000") {
+    return "Symbolic links are read-only in the diff pane.";
+  }
+  return null;
+}
+
+function getFileDiffSourceSignature(file: FileDiffMetadata): string {
+  if (file.prevObjectId || file.newObjectId) {
+    return `${file.prevObjectId ?? "0000000"}..${file.newObjectId ?? "0000000"}`;
+  }
+  return file.hunks.map((hunk) => hunk.hunkSpecs ?? "").join("\n");
+}
+
+function assertProjectFileEditingAllowed(
+  projectPath: string,
+  context: Pick<Services, "projectsState">,
+): void {
+  assertProjectPathInteractionAllowed(projectPath, context);
+  if (
+    !context.projectsState.state.some((project) => project.path === projectPath)
+  ) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "Files can only be edited inside a tracked project.",
+    });
+  }
+}
+
+async function loadEditableDiffFile(
+  projectPath: string,
+  file: FileDiffMetadata,
+) {
+  const unavailableReason = editableFileUnavailableReason(file);
+  if (unavailableReason) {
+    return { status: "unavailable" as const, reason: unavailableReason };
+  }
+
+  try {
+    const snapshot = await readEditableFileSnapshot(projectPath, file.name);
+    const newFile: FileContents = {
+      name: file.name,
+      contents: snapshot.contents,
+      cacheKey: `working:${file.name}:${snapshot.revision}`,
+    };
+    const oldFile: FileContents | null =
+      file.type === "new"
+        ? null
+        : {
+            name: file.prevName ?? file.name,
+            contents: await readGitFileContents(projectPath, {
+              objectId: file.prevObjectId,
+              filePath: file.prevName ?? file.name,
+            }),
+            cacheKey: `git:${file.prevObjectId ?? file.prevName ?? file.name}`,
+          };
+    if (oldFile?.contents === newFile.contents) {
+      return {
+        status: "unavailable" as const,
+        reason:
+          "Files with only metadata changes are read-only in the diff pane.",
+      };
+    }
+
+    return {
+      status: "ready" as const,
+      sourceSignature: getFileDiffSourceSignature(file),
+      revision: snapshot.revision,
+      contents: snapshot.contents,
+      fileDiff: parseDiffFromFile(oldFile, newFile, undefined, true),
+    };
+  } catch (error) {
+    if (error instanceof UnsupportedEditableFileError) {
+      return { status: "unavailable" as const, reason: error.message };
+    }
+    throw error;
+  }
+}
 
 async function deleteProjectSessionsForPath(
   sessionsById: Record<string, Session>,
@@ -390,12 +496,10 @@ export const projectsRouter = {
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input, context }) => {
       try {
-        const diff = await context.projectGitService.getUncommittedDiff(
+        return await getUncommittedFiles(
           normalizeProjectPath(input.path),
+          context,
         );
-        if (!diff) return [] as FileDiffMetadata[];
-        const files = parsePatchFiles(diff).flatMap((p) => p.files);
-        return files;
       } catch (error) {
         // oRPC rewrites a plain Error's message to "Internal server error" on
         // the way to the renderer; restating it keeps the real cause visible.
@@ -403,6 +507,70 @@ export const projectsRouter = {
           error instanceof Error && error.message.trim()
             ? error.message
             : "Failed to read uncommitted changes.";
+        throw new ORPCError("INTERNAL_SERVER_ERROR", { message });
+      }
+    }),
+  getEditableDiffFile: procedure
+    .input(
+      z.object({
+        path: projectPathSchema,
+        filePath: editableFilePathSchema,
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const projectPath = normalizeProjectPath(input.path);
+      assertProjectFileEditingAllowed(projectPath, context);
+      const files = await getUncommittedFiles(projectPath, context);
+      const file = files.find((candidate) => candidate.name === input.filePath);
+      if (!file) {
+        return {
+          status: "unavailable" as const,
+          reason: "This file is no longer part of the working-tree diff.",
+        };
+      }
+      try {
+        return await loadEditableDiffFile(projectPath, file);
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Failed to prepare this file for editing.";
+        return { status: "unavailable" as const, reason: message };
+      }
+    }),
+  saveEditableDiffFile: procedure
+    .input(
+      z.object({
+        path: projectPathSchema,
+        filePath: editableFilePathSchema,
+        contents: z.string(),
+        expectedRevision: z.string().regex(/^[0-9a-f]{64}$/i),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const projectPath = normalizeProjectPath(input.path);
+      assertProjectFileEditingAllowed(projectPath, context);
+      try {
+        const result = await saveEditableFileSnapshot(projectPath, input);
+        const files = await getUncommittedFiles(projectPath, context);
+        return {
+          status: "saved" as const,
+          revision: result.revision,
+          fileDiff:
+            files.find((candidate) => candidate.name === input.filePath) ??
+            null,
+        };
+      } catch (error) {
+        if (error instanceof EditableFileConflictError) {
+          return { status: "conflict" as const };
+        }
+        if (error instanceof UnsupportedEditableFileError) {
+          throw new ORPCError("BAD_REQUEST", { message: error.message });
+        }
+        const message =
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Failed to save this file.";
         throw new ORPCError("INTERNAL_SERVER_ERROR", { message });
       }
     }),

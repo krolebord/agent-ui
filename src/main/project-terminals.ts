@@ -359,6 +359,11 @@ export class ProjectTerminalsManager {
     }
   }
 
+  /**
+   * Revives the previously selected terminal of a project. Terminals are only
+   * ever created explicitly by the user, so a project without a workspace (or
+   * one whose terminals were all closed) stays empty here.
+   */
   async ensureWorkspace({
     cwd,
     cols,
@@ -369,12 +374,7 @@ export class ProjectTerminalsManager {
     rows?: number;
   }) {
     const existing = this.state.state[cwd];
-    if (!existing) {
-      await this.createTerminal({ cwd, cols, rows });
-      return;
-    }
-
-    if (!existing.selectedTerminalId) {
+    if (!existing?.selectedTerminalId) {
       return;
     }
 

@@ -1,9 +1,13 @@
+import type { Editor, EditorOptions } from "@pierre/diffs/edit";
 import type {
   AnnotationSide,
   DiffLineAnnotation,
+  FileContents,
   FileDiffMetadata,
+  FileDiffProps,
+  LineAnnotation,
 } from "@pierre/diffs/react";
-import { FileDiff } from "@pierre/diffs/react";
+import { EditProvider, FileDiff } from "@pierre/diffs/react";
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
 import { COMPACT_FILE_DIFF_OPTIONS } from "@renderer/components/diff-pane-styles";
 import { useDiffReviewCommitDialogStore } from "@renderer/components/diff-review-commit-dialog";
@@ -49,11 +53,14 @@ import {
   MoreHorizontal,
   Pencil,
   RefreshCw,
+  RotateCcw,
+  Save,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -106,6 +113,18 @@ type DiffReviewAnnotationMetadata =
   | {
       type: "draft";
     };
+
+type EditableDiffDraft = {
+  sourceSignature: string;
+  fileDiff: FileDiffMetadata;
+  revision: string;
+  initialContents: string;
+  contents: string;
+  lineAnnotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[];
+  dirty: boolean;
+  conflict: boolean;
+  error: string | null;
+};
 
 function createCommentId() {
   return `comment-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -388,6 +407,59 @@ export const useDiffReviewStore = create(
           },
         }));
       },
+      applyEditedAnnotationPositions: (
+        projectPath: string,
+        filePath: string,
+        annotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[],
+        fileSignature: string | null,
+      ) => {
+        const positionsByCommentId = new Map(
+          annotations.flatMap((annotation) =>
+            annotation.metadata.type === "comment"
+              ? [[annotation.metadata.commentId, annotation] as const]
+              : [],
+          ),
+        );
+        const draftPosition = annotations.find(
+          (annotation) => annotation.metadata.type === "draft",
+        );
+        set((state) => {
+          const commentDraft = state.commentDraftByProject[projectPath];
+          return {
+            commentsByProject: {
+              ...state.commentsByProject,
+              [projectPath]: getCommentsForProject(
+                state.commentsByProject,
+                projectPath,
+              ).map((comment) => {
+                if (comment.filePath !== filePath) return comment;
+                const position = positionsByCommentId.get(comment.id);
+                if (!position || !fileSignature) {
+                  return { ...comment, stale: true };
+                }
+                return {
+                  ...comment,
+                  side: position.side,
+                  lineNumber: position.lineNumber,
+                  fileSignature,
+                  stale: false,
+                };
+              }),
+            },
+            commentDraftByProject: {
+              ...state.commentDraftByProject,
+              [projectPath]:
+                commentDraft?.filePath === filePath && draftPosition
+                  ? {
+                      ...commentDraft,
+                      side: draftPosition.side,
+                      lineNumber: draftPosition.lineNumber,
+                    }
+                  : commentDraft,
+            },
+          };
+        });
+      },
       discardReview: (projectPath: string) => {
         set((state) => ({
           commentsByProject: {
@@ -426,6 +498,8 @@ function createProjectDiffStore(projectPath: string) {
         selectedFilePath: null as string | null,
         confirmedFiles: [] as string[],
         sidebarSize: 220 as number | string,
+        editableDrafts: {} as Record<string, EditableDiffDraft>,
+        editorFocusedFilePath: null as string | null,
       },
       (set) => ({
         selectFile: (filePath: string) => {
@@ -463,6 +537,60 @@ function createProjectDiffStore(projectPath: string) {
         setSidebarSize: (size: number | string) => {
           set({ sidebarSize: size });
         },
+        initializeEditableDraft: (
+          filePath: string,
+          draft: EditableDiffDraft,
+        ) => {
+          set((state) => {
+            const current = state.editableDrafts[filePath];
+            if (
+              current?.dirty ||
+              current?.sourceSignature === draft.sourceSignature
+            ) {
+              return state;
+            }
+            return {
+              editableDrafts: {
+                ...state.editableDrafts,
+                [filePath]: draft,
+              },
+            };
+          });
+        },
+        updateEditableDraft: (
+          filePath: string,
+          patch: Partial<EditableDiffDraft>,
+        ) => {
+          set((state) => {
+            const current = state.editableDrafts[filePath];
+            if (!current) return state;
+            return {
+              editableDrafts: {
+                ...state.editableDrafts,
+                [filePath]: { ...current, ...patch },
+              },
+            };
+          });
+        },
+        removeEditableDraft: (filePath: string) => {
+          set((state) => {
+            if (!state.editableDrafts[filePath]) return state;
+            const nextDrafts = { ...state.editableDrafts };
+            delete nextDrafts[filePath];
+            return { editableDrafts: nextDrafts };
+          });
+        },
+        removeEditableDrafts: (filePaths?: string[]) => {
+          set((state) => {
+            if (!filePaths) return { editableDrafts: {} };
+            const nextDrafts = { ...state.editableDrafts };
+            for (const filePath of filePaths) delete nextDrafts[filePath];
+            return { editableDrafts: nextDrafts };
+          });
+        },
+        setEditorFocusedFilePath: (filePath: string | null) => {
+          set({ editorFocusedFilePath: filePath });
+        },
       }),
     ),
   );
@@ -487,10 +615,66 @@ function getProjectDiffStore(cwd: string): ProjectDiffStore {
 
 export function ProjectDiffPane({ cwd }: { cwd: string }) {
   const store = getProjectDiffStore(cwd);
+  const [createEditor, setCreateEditor] = useState<
+    | ((
+        options: EditorOptions<DiffReviewAnnotationMetadata>,
+      ) => Editor<DiffReviewAnnotationMetadata>)
+    | null
+  >(null);
+  const [editorLoadError, setEditorLoadError] = useState(false);
+  const editorLoaderMounted = useRef(false);
+
+  const loadEditor = useCallback(() => {
+    setEditorLoadError(false);
+    void import("@pierre/diffs/edit")
+      .then(({ Editor: DiffsEditor }) => {
+        if (!editorLoaderMounted.current) return;
+        const factory = (
+          options: EditorOptions<DiffReviewAnnotationMetadata>,
+        ) => new DiffsEditor(options);
+        setCreateEditor(() => factory);
+      })
+      .catch(() => {
+        if (editorLoaderMounted.current) setEditorLoadError(true);
+      });
+  }, []);
+
+  useEffect(() => {
+    editorLoaderMounted.current = true;
+    loadEditor();
+    return () => {
+      editorLoaderMounted.current = false;
+    };
+  }, [loadEditor]);
+
+  if (!createEditor) {
+    return (
+      <div className="flex h-full items-center justify-center bg-black/10">
+        {editorLoadError ? (
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <span>Failed to load the diff editor.</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-[11px]"
+              onClick={loadEditor}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : (
+          <LoaderCircle className="size-5 animate-spin text-zinc-500" />
+        )}
+      </div>
+    );
+  }
 
   return (
     <projectDiffPaneContext.Provider value={store}>
-      <ProjectDiffPaneContent />
+      <EditProvider createEditor={createEditor}>
+        <ProjectDiffPaneContent />
+      </EditProvider>
     </projectDiffPaneContext.Provider>
   );
 }
@@ -516,6 +700,36 @@ function getDiffErrorMessage(error: unknown) {
   return error instanceof Error && error.message.trim()
     ? error.message
     : "Failed to read uncommitted changes.";
+}
+
+function mergeEditableAnnotations(
+  edited: DiffLineAnnotation<DiffReviewAnnotationMetadata>[],
+  current: DiffLineAnnotation<DiffReviewAnnotationMetadata>[],
+) {
+  return current.map((annotation) => {
+    const match = edited.find((candidate) => {
+      if (candidate.metadata.type !== annotation.metadata.type) return false;
+      if (candidate.metadata.type === "draft") return true;
+      return (
+        annotation.metadata.type === "comment" &&
+        candidate.metadata.commentId === annotation.metadata.commentId
+      );
+    });
+    return match
+      ? { ...annotation, side: match.side, lineNumber: match.lineNumber }
+      : annotation;
+  });
+}
+
+function supportsDiffEditing(file: FileDiffMetadata | null): boolean {
+  return Boolean(
+    file &&
+      (file.type === "change" ||
+        file.type === "rename-changed" ||
+        file.type === "new") &&
+      file.mode !== "120000" &&
+      file.prevMode !== "120000",
+  );
 }
 
 /**
@@ -592,6 +806,9 @@ function useFileListItemDiscardActions(file: FileDiffMetadata) {
     (s) => s.confirmedFiles.length > 0,
   );
   const clearConfirmations = useProjectDiffStore((s) => s.clearConfirmations);
+  const removeEditableDrafts = useProjectDiffStore(
+    (s) => s.removeEditableDrafts,
+  );
   const queryClient = useQueryClient();
   const confirm = useConfirmDialogStore((s) => s.confirm);
   const discardMutation = useMutation(
@@ -612,6 +829,7 @@ function useFileListItemDiscardActions(file: FileDiffMetadata) {
       confirmLabel: "Discard",
       onConfirm: async () => {
         await discardMutation.mutateAsync({ path: projectPath, filePaths });
+        removeEditableDrafts([file.name]);
         await queryClient.invalidateQueries({
           queryKey: orpc.projects.getUncommittedDiff.queryKey({
             input: { path: projectPath },
@@ -640,6 +858,7 @@ function useFileListItemDiscardActions(file: FileDiffMetadata) {
       confirmLabel: "Discard",
       onConfirm: async () => {
         await discardMutation.mutateAsync({ path: projectPath, filePaths });
+        removeEditableDrafts(confirmedFiles);
         clearConfirmations();
         await queryClient.invalidateQueries({
           queryKey: orpc.projects.getUncommittedDiff.queryKey({
@@ -753,6 +972,7 @@ function FileListItem({
   const confirmed = useProjectDiffStore((s) =>
     s.confirmedFiles.includes(file.name),
   );
+  const editDraft = useProjectDiffStore((s) => s.editableDrafts[file.name]);
   const {
     requestDiscard,
     requestDiscardSelected,
@@ -841,6 +1061,21 @@ function FileListItem({
               <div className="truncate text-[10px] text-zinc-500">{dir}</div>
             ) : null}
           </div>
+          {editDraft?.dirty ? (
+            <span
+              className={cn(
+                "size-1.5 shrink-0 rounded-full bg-amber-400",
+                editDraft.conflict && "bg-rose-400",
+              )}
+              title={
+                editDraft.conflict
+                  ? "Unsaved edit conflicts with the file on disk"
+                  : "Unsaved edit"
+              }
+              role="img"
+              aria-label="Unsaved edit"
+            />
+          ) : null}
           <span className="shrink-0 font-mono text-[10px]">
             {additions > 0 && (
               <span className="text-emerald-400">+{additions}</span>
@@ -1225,11 +1460,20 @@ function AddCommentGutterButton({ onClick }: { onClick: () => void }) {
 type DiffViewerPanelProps = {
   isLoading: boolean;
   selectedFile: FileDiffMetadata | null;
-  diffOptions: Parameters<typeof FileDiff>[0]["options"];
+  renderedFile: FileDiffMetadata | null;
+  diffOptions: FileDiffProps<DiffReviewAnnotationMetadata>["options"];
+  editorOptions: EditorOptions<DiffReviewAnnotationMetadata>;
   lineAnnotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[];
   staleCommentsForSelectedFile: DiffReviewComment[];
+  editDraft: EditableDiffDraft | null;
+  editUnavailableReason: string | null;
+  isPreparingEditor: boolean;
+  isSavingEdit: boolean;
   projectPath: string;
   selectFile: (filePath: string) => void;
+  onSaveEdit: () => void;
+  onReloadEdit: () => void;
+  onCopyEdit: () => void;
   startCommentDraft: (
     projectPath: string,
     filePath: string,
@@ -1238,14 +1482,142 @@ type DiffViewerPanelProps = {
   ) => void;
 };
 
+type DiffEditHeaderControlsProps = {
+  editDraft: EditableDiffDraft | null;
+  editUnavailableReason: string | null;
+  isPreparingEditor: boolean;
+  isSavingEdit: boolean;
+  onSaveEdit: () => void;
+  onReloadEdit: () => void;
+  onCopyEdit: () => void;
+};
+
+function DiffEditHeaderControls({
+  editDraft,
+  editUnavailableReason,
+  isPreparingEditor,
+  isSavingEdit,
+  onSaveEdit,
+  onReloadEdit,
+  onCopyEdit,
+}: DiffEditHeaderControlsProps) {
+  if (editDraft?.conflict) {
+    return (
+      <div className="flex min-w-0 items-center gap-1 text-rose-300">
+        <TriangleAlert className="size-3 shrink-0" />
+        <span
+          className="max-w-28 truncate text-[10px]"
+          title="File changed on disk. Reload it or copy your unsaved version."
+        >
+          Changed on disk
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-5 rounded-sm text-rose-300 hover:bg-rose-400/15 hover:text-rose-200"
+          onClick={(event) => {
+            event.stopPropagation();
+            onCopyEdit();
+          }}
+          aria-label="Copy unsaved edits"
+          title="Copy unsaved edits"
+        >
+          <Copy className="size-3" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-5 rounded-sm text-rose-300 hover:bg-rose-400/15 hover:text-rose-200"
+          onClick={(event) => {
+            event.stopPropagation();
+            onReloadEdit();
+          }}
+          aria-label="Reload file from disk"
+          title="Reload file from disk"
+        >
+          <RotateCcw className="size-3" />
+        </Button>
+      </div>
+    );
+  }
+
+  const saveTitle = editUnavailableReason
+    ? editUnavailableReason
+    : editDraft?.error
+      ? `${editDraft.error} Retry save (Cmd/Ctrl+S)`
+      : editDraft?.dirty
+        ? "Save changes (Cmd/Ctrl+S)"
+        : "No unsaved changes";
+
+  return (
+    <div className="flex min-w-0 items-center gap-1">
+      {editDraft?.error ? (
+        <span
+          className="max-w-24 truncate text-[10px] text-rose-300"
+          title={editDraft.error}
+        >
+          Save failed
+        </span>
+      ) : editUnavailableReason ? (
+        <span
+          className="max-w-24 truncate text-[10px] text-zinc-500"
+          title={editUnavailableReason}
+        >
+          Read-only
+        </span>
+      ) : null}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={cn(
+          "size-5 rounded-sm",
+          editDraft?.dirty
+            ? "bg-amber-400/15 text-amber-300 hover:bg-amber-400/25 hover:text-amber-200"
+            : "text-zinc-500 hover:text-zinc-300",
+        )}
+        disabled={
+          !editDraft?.dirty ||
+          isSavingEdit ||
+          isPreparingEditor ||
+          Boolean(editUnavailableReason)
+        }
+        onClick={(event) => {
+          event.stopPropagation();
+          onSaveEdit();
+        }}
+        aria-label="Save changes"
+        title={saveTitle}
+      >
+        {isSavingEdit || isPreparingEditor ? (
+          <LoaderCircle className="size-3 animate-spin" />
+        ) : (
+          <Save className="size-3" />
+        )}
+      </Button>
+    </div>
+  );
+}
+
 function DiffViewerPanel({
   isLoading,
   selectedFile,
+  renderedFile,
   diffOptions,
+  editorOptions,
   lineAnnotations,
   staleCommentsForSelectedFile,
+  editDraft,
+  editUnavailableReason,
+  isPreparingEditor,
+  isSavingEdit,
   projectPath,
   selectFile,
+  onSaveEdit,
+  onReloadEdit,
+  onCopyEdit,
   startCommentDraft,
 }: DiffViewerPanelProps) {
   return (
@@ -1257,10 +1629,26 @@ function DiffViewerPanel({
       ) : selectedFile ? (
         <>
           <StaleCommentsSection comments={staleCommentsForSelectedFile} />
-          <FileDiff
-            fileDiff={selectedFile}
+          <FileDiff<DiffReviewAnnotationMetadata>
+            key={editDraft?.revision ?? getFileDiffSignature(selectedFile)}
+            fileDiff={renderedFile ?? selectedFile}
             options={diffOptions}
+            edit={Boolean(editDraft)}
+            editorOptions={editorOptions}
             lineAnnotations={lineAnnotations}
+            renderHeaderMetadata={() =>
+              supportsDiffEditing(selectedFile) ? (
+                <DiffEditHeaderControls
+                  editDraft={editDraft}
+                  editUnavailableReason={editUnavailableReason}
+                  isPreparingEditor={isPreparingEditor}
+                  isSavingEdit={isSavingEdit}
+                  onSaveEdit={onSaveEdit}
+                  onReloadEdit={onReloadEdit}
+                  onCopyEdit={onCopyEdit}
+                />
+              ) : null
+            }
             renderAnnotation={(annotation) => (
               <CommentAnnotation
                 annotation={
@@ -1310,6 +1698,7 @@ type DiffFilesSidebarProps = {
   hasReviewComments: boolean;
   reviewCopied: boolean;
   canCommit: boolean;
+  hasUnsavedEdits: boolean;
   showDiffViewModeToggle: boolean;
   showMobileMenu: boolean;
   requestDiscardAll: () => void;
@@ -1336,6 +1725,7 @@ function DiffFilesSidebar({
   hasReviewComments,
   reviewCopied,
   canCommit,
+  hasUnsavedEdits,
   showDiffViewModeToggle,
   showMobileMenu,
   requestDiscardAll,
@@ -1520,6 +1910,11 @@ function DiffFilesSidebar({
           className="h-7 w-full px-2 text-xs pointer-coarse:h-11 pointer-coarse:text-sm"
           disabled={!canCommit}
           onClick={onCommit}
+          title={
+            hasUnsavedEdits
+              ? "Save your diff edits before committing"
+              : undefined
+          }
         >
           <GitCommitHorizontal className="size-3" />
           Commit
@@ -1638,6 +2033,9 @@ function ProjectDiffPaneContent() {
   const discardAllMutation = useMutation(
     orpc.projects.discardChanges.mutationOptions(),
   );
+  const saveEditMutation = useMutation(
+    orpc.projects.saveEditableDiffFile.mutationOptions(),
+  );
   const isRefreshing = refreshProjectMutation.isPending || isFetching;
   const refreshProjectDiff = () => {
     refreshProjectMutation.mutate(
@@ -1668,6 +2066,28 @@ function ProjectDiffPaneContent() {
   const clearConfirmations = useProjectDiffStore(
     (state) => state.clearConfirmations,
   );
+  const editableDrafts = useProjectDiffStore((state) => state.editableDrafts);
+  const hasUnsavedEdits = Object.values(editableDrafts).some(
+    (draft) => draft.dirty,
+  );
+  const initializeEditableDraft = useProjectDiffStore(
+    (state) => state.initializeEditableDraft,
+  );
+  const updateEditableDraft = useProjectDiffStore(
+    (state) => state.updateEditableDraft,
+  );
+  const removeEditableDraft = useProjectDiffStore(
+    (state) => state.removeEditableDraft,
+  );
+  const removeEditableDrafts = useProjectDiffStore(
+    (state) => state.removeEditableDrafts,
+  );
+  const editorFocusedFilePath = useProjectDiffStore(
+    (state) => state.editorFocusedFilePath,
+  );
+  const setEditorFocusedFilePath = useProjectDiffStore(
+    (state) => state.setEditorFocusedFilePath,
+  );
   const comments = useDiffReviewStore((state) =>
     getCommentsForProject(state.commentsByProject, projectPath),
   );
@@ -1682,6 +2102,9 @@ function ProjectDiffPaneContent() {
   );
   const refreshStaleComments = useDiffReviewStore(
     (state) => state.refreshStaleComments,
+  );
+  const applyEditedAnnotationPositions = useDiffReviewStore(
+    (state) => state.applyEditedAnnotationPositions,
   );
   const discardReview = useDiffReviewStore((state) => state.discardReview);
   const { copied: reviewCopied, copy: copyReview } = useCopyToClipboard();
@@ -1702,6 +2125,18 @@ function ProjectDiffPaneContent() {
     };
   }, [files, selectedFilePath]);
 
+  const editableFileQuery = useQuery({
+    ...orpc.projects.getEditableDiffFile.queryOptions({
+      input: {
+        path: projectPath,
+        filePath: selectedFile?.name ?? "__no_selected_file__",
+      },
+    }),
+    enabled: supportsDiffEditing(selectedFile),
+    staleTime: 0,
+  });
+  const refetchEditableFile = editableFileQuery.refetch;
+
   const { allFilesConfirmed, someFilesConfirmed } = useMemo(() => {
     if (!files?.length) {
       return { allFilesConfirmed: false, someFilesConfirmed: false };
@@ -1719,7 +2154,7 @@ function ProjectDiffPaneContent() {
     () => (files ? gitPathsForConfirmedFiles(files, confirmedFiles) : []),
     [files, confirmedFiles],
   );
-  const canCommit = pathsToCommit.length > 0;
+  const canCommit = pathsToCommit.length > 0 && !hasUnsavedEdits;
   const hasReviewComments = comments.length > 0;
   const selectedFileCount = useMemo(
     () => files?.filter((f) => confirmedFiles.includes(f.name)).length ?? 0,
@@ -1762,6 +2197,187 @@ function ProjectDiffPaneContent() {
     );
   }, [comments, selectedFile]);
   const commentEditorOpen = Boolean(commentDraft || editingComment);
+  const selectedFileSourceSignature = selectedFile
+    ? getFileDiffSignature(selectedFile)
+    : null;
+  const editDraft = selectedFile
+    ? (editableDrafts[selectedFile.name] ?? null)
+    : null;
+  const editableFileResult = editableFileQuery.data;
+
+  useEffect(() => {
+    if (
+      selectedFileSourceSignature &&
+      editableFileResult?.status === "ready" &&
+      editableFileResult.sourceSignature !== selectedFileSourceSignature
+    ) {
+      void queryClient.invalidateQueries({
+        queryKey: orpc.projects.getUncommittedDiff.queryKey({
+          input: { path: projectPath },
+        }),
+      });
+      void refetchEditableFile();
+      return;
+    }
+    if (
+      !selectedFile ||
+      !selectedFileSourceSignature ||
+      editableFileResult?.status !== "ready" ||
+      editableFileResult.sourceSignature !== selectedFileSourceSignature
+    ) {
+      return;
+    }
+    initializeEditableDraft(selectedFile.name, {
+      sourceSignature: selectedFileSourceSignature,
+      fileDiff: editableFileResult.fileDiff,
+      revision: editableFileResult.revision,
+      initialContents: editableFileResult.contents,
+      contents: editableFileResult.contents,
+      lineAnnotations,
+      dirty: false,
+      conflict: false,
+      error: null,
+    });
+  }, [
+    editableFileResult,
+    initializeEditableDraft,
+    lineAnnotations,
+    projectPath,
+    queryClient,
+    refetchEditableFile,
+    selectedFile,
+    selectedFileSourceSignature,
+  ]);
+
+  const effectiveLineAnnotations = useMemo(
+    () =>
+      editDraft
+        ? mergeEditableAnnotations(editDraft.lineAnnotations, lineAnnotations)
+        : lineAnnotations,
+    [editDraft, lineAnnotations],
+  );
+
+  const handleEditorChange: NonNullable<
+    EditorOptions<DiffReviewAnnotationMetadata>["onChange"]
+  > = useCallback(
+    (
+      file: FileContents,
+      nextAnnotations?:
+        | DiffLineAnnotation<DiffReviewAnnotationMetadata>[]
+        | LineAnnotation<DiffReviewAnnotationMetadata>[],
+    ) => {
+      if (!selectedFile || !editDraft) return;
+      const nextDiffAnnotations = nextAnnotations?.filter(
+        (annotation) => "side" in annotation,
+      ) as DiffLineAnnotation<DiffReviewAnnotationMetadata>[] | undefined;
+      updateEditableDraft(selectedFile.name, {
+        contents: file.contents,
+        lineAnnotations: nextDiffAnnotations ?? effectiveLineAnnotations,
+        dirty: file.contents !== editDraft.initialContents,
+        error: null,
+      });
+    },
+    [editDraft, effectiveLineAnnotations, selectedFile, updateEditableDraft],
+  );
+
+  const editorOptions = useMemo(
+    () => ({
+      onChange: handleEditorChange,
+      onFocus: () => setEditorFocusedFilePath(selectedFile?.name ?? null),
+      onBlur: () => setEditorFocusedFilePath(null),
+    }),
+    [handleEditorChange, selectedFile?.name, setEditorFocusedFilePath],
+  );
+
+  const saveCurrentEdit = useCallback(() => {
+    if (!selectedFile || !editDraft?.dirty || saveEditMutation.isPending) {
+      return;
+    }
+    saveEditMutation.mutate(
+      {
+        path: projectPath,
+        filePath: selectedFile.name,
+        contents: editDraft.contents,
+        expectedRevision: editDraft.revision,
+      },
+      {
+        onSuccess: (result) => {
+          if (result.status === "conflict") {
+            updateEditableDraft(selectedFile.name, {
+              conflict: true,
+              error: null,
+            });
+            return;
+          }
+          applyEditedAnnotationPositions(
+            projectPath,
+            selectedFile.name,
+            effectiveLineAnnotations,
+            result.fileDiff ? getFileDiffSignature(result.fileDiff) : null,
+          );
+          removeEditableDraft(selectedFile.name);
+          setEditorFocusedFilePath(null);
+          void queryClient.invalidateQueries({
+            queryKey: orpc.projects.getUncommittedDiff.queryKey({
+              input: { path: projectPath },
+            }),
+          });
+          void refetchEditableFile();
+          toast.success("Changes saved");
+        },
+        onError: (error) => {
+          const message = getDiffErrorMessage(error);
+          updateEditableDraft(selectedFile.name, { error: message });
+          toast.error(message);
+        },
+      },
+    );
+  }, [
+    applyEditedAnnotationPositions,
+    editDraft,
+    effectiveLineAnnotations,
+    projectPath,
+    queryClient,
+    refetchEditableFile,
+    removeEditableDraft,
+    saveEditMutation,
+    selectedFile,
+    setEditorFocusedFilePath,
+    updateEditableDraft,
+  ]);
+
+  const reloadCurrentEdit = () => {
+    if (!selectedFile || !editDraft) return;
+    confirm({
+      title: "Reload file from disk?",
+      description:
+        "Your unsaved edits in this file will be discarded and replaced with the latest version on disk.",
+      confirmLabel: "Reload",
+      onConfirm: async () => {
+        removeEditableDraft(selectedFile.name);
+        setEditorFocusedFilePath(null);
+        await refetchEditableFile();
+      },
+    });
+  };
+
+  const copyCurrentEdit = () => {
+    if (!editDraft) return;
+    void navigator.clipboard.writeText(editDraft.contents);
+    toast.success("Unsaved edits copied");
+  };
+
+  const editUnavailableReason =
+    editableFileResult?.status === "unavailable"
+      ? editableFileResult.reason
+      : editableFileQuery.isError
+        ? getDiffErrorMessage(editableFileQuery.error)
+        : null;
+  const isPreparingEditor =
+    supportsDiffEditing(selectedFile) &&
+    !editDraft &&
+    !editUnavailableReason &&
+    editableFileQuery.isFetching;
   const requestDiscardAll = () => {
     if (!files || files.length === 0) return;
     const filePaths = gitPathsForConfirmedFiles(
@@ -1775,6 +2391,7 @@ function ProjectDiffPaneContent() {
       onConfirm: async () => {
         await discardAllMutation.mutateAsync({ path: projectPath, filePaths });
         clearConfirmations();
+        removeEditableDrafts();
         discardReview(projectPath);
         await queryClient.invalidateQueries({
           queryKey: orpc.projects.getUncommittedDiff.queryKey({
@@ -1844,6 +2461,11 @@ function ProjectDiffPaneContent() {
     selectFile(files[selectedFileIndex + 1].name);
   };
 
+  useHotkey("Mod+S", saveCurrentEdit, {
+    enabled: Boolean(editDraft?.dirty && !editDraft.conflict),
+    ignoreInputs: false,
+  });
+
   useHotkey(
     "ArrowUp",
     () => {
@@ -1851,7 +2473,10 @@ function ProjectDiffPaneContent() {
       const newIndex = (selectedFileIndex - 1 + files.length) % files.length;
       selectFile(files[newIndex].name);
     },
-    { enabled: !commitDialogOpen && !commentEditorOpen },
+    {
+      enabled:
+        !commitDialogOpen && !commentEditorOpen && !editorFocusedFilePath,
+    },
   );
   useHotkey(
     "ArrowDown",
@@ -1860,7 +2485,10 @@ function ProjectDiffPaneContent() {
       const newIndex = (selectedFileIndex + 1) % files.length;
       selectFile(files[newIndex].name);
     },
-    { enabled: !commitDialogOpen && !commentEditorOpen },
+    {
+      enabled:
+        !commitDialogOpen && !commentEditorOpen && !editorFocusedFilePath,
+    },
   );
   useHotkey(
     "Space",
@@ -1872,6 +2500,7 @@ function ProjectDiffPaneContent() {
       enabled: Boolean(
         !commitDialogOpen &&
           !commentEditorOpen &&
+          !editorFocusedFilePath &&
           files?.length &&
           selectedFile,
       ),
@@ -1903,6 +2532,7 @@ function ProjectDiffPaneContent() {
     hasReviewComments,
     reviewCopied,
     canCommit,
+    hasUnsavedEdits,
     requestDiscardAll,
     isDiscardAllPending: discardAllMutation.isPending,
     onRefresh: refreshProjectDiff,
@@ -1924,11 +2554,20 @@ function ProjectDiffPaneContent() {
   const diffViewerProps = {
     isLoading,
     selectedFile,
+    renderedFile: editDraft?.fileDiff ?? selectedFile,
     diffOptions,
-    lineAnnotations,
+    editorOptions,
+    lineAnnotations: effectiveLineAnnotations,
     staleCommentsForSelectedFile,
+    editDraft,
+    editUnavailableReason,
+    isPreparingEditor,
+    isSavingEdit: saveEditMutation.isPending,
     projectPath,
     selectFile,
+    onSaveEdit: saveCurrentEdit,
+    onReloadEdit: reloadCurrentEdit,
+    onCopyEdit: copyCurrentEdit,
     startCommentDraft,
   };
 

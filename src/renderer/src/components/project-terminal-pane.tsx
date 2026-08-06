@@ -290,7 +290,6 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
   const workspace = useAppState((state) =>
     cwd ? (state.projectTerminals[cwd] ?? null) : null,
   );
-  const hasWorkspace = workspace !== null;
   const activeTerminalId = workspace?.selectedTerminalId ?? null;
   const [isCreating, setIsCreating] = useState(false);
   const [closingTerminalId, setClosingTerminalId] = useState<string | null>(
@@ -313,7 +312,8 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
       return;
     }
 
-    if (hasWorkspace && !activeTerminalId) {
+    // Nothing to revive: terminals are only created on explicit request.
+    if (!activeTerminalId) {
       return;
     }
 
@@ -329,7 +329,7 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
           error instanceof Error ? error.message : "Unknown error";
         toast.error(`Failed to open project terminal: ${message}`);
       });
-  }, [activeTerminalId, cwd, getCurrentSize, hasWorkspace, projectLocked]);
+  }, [activeTerminalId, cwd, getCurrentSize, projectLocked]);
 
   const handleCreateTerminal = useCallback(async () => {
     if (!cwd || projectLocked) {
