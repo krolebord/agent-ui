@@ -44,6 +44,7 @@ vi.mock("../../src/main/project-settings-file", () => ({
 }));
 
 import {
+  formatGitPullError,
   formatGitPushError,
   ProjectGitService,
 } from "../../src/main/project-git-service";
@@ -1956,6 +1957,217 @@ describe("ProjectGitService", () => {
         "Project is not a Git repository.",
       );
       expect(pushMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("pullFromRemote", () => {
+    const headBefore = "a".repeat(40);
+
+    function mockPullableRepo(options?: {
+      upstream?: string | null;
+      pulledCommits?: number;
+      onPull?: () => void;
+    }) {
+      const upstream =
+        options?.upstream === undefined ? "origin/main" : options.upstream;
+      checkIsRepoMock.mockResolvedValue(true);
+      branchLocalMock.mockResolvedValue({ current: "main" });
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref" && args[1] === "--short") {
+            return "main\n";
+          }
+          if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
+            if (!upstream) {
+              throw new Error(
+                "fatal: no upstream configured for branch 'main'",
+              );
+            }
+            return `${upstream}\n`;
+          }
+          if (args[0] === "rev-parse" && args[1] === "HEAD") {
+            return `${headBefore}\n`;
+          }
+          if (args[0] === "rev-parse" && args[1] === "--git-path") {
+            return ".git/index\n";
+          }
+          if (args[0] === "pull") {
+            options?.onPull?.();
+            return "Updating 1234567..89abcde\nFast-forward\n";
+          }
+          if (args[0] === "rev-list" && args[1] === "--count") {
+            return `${options?.pulledCommits ?? 0}\n`;
+          }
+          return "";
+        },
+      );
+    }
+
+    it("fast-forwards the current branch and reports pulled commits", async () => {
+      mockPullableRepo({ pulledCommits: 3 });
+
+      const service = new ProjectGitService(defineProjectState());
+      const result = await service.pullFromRemote("/repo-one");
+
+      expect(result).toEqual({
+        upstreamBranch: "origin/main",
+        pulledCommits: 3,
+      });
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", ["pull", "--ff-only"], {
+        GIT_TERMINAL_PROMPT: "0",
+      });
+      expect(rawMock).toHaveBeenCalledWith(
+        "/repo-one",
+        ["rev-list", "--count", `${headBefore}..HEAD`],
+        { GIT_TERMINAL_PROMPT: "0" },
+      );
+    });
+
+    it("reports zero pulled commits when already up to date", async () => {
+      mockPullableRepo({ pulledCommits: 0 });
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pullFromRemote("/repo-one")).resolves.toEqual({
+        upstreamBranch: "origin/main",
+        pulledCommits: 0,
+      });
+    });
+
+    it("refuses to pull without a configured upstream", async () => {
+      const onPull = vi.fn();
+      mockPullableRepo({ upstream: null, onPull });
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pullFromRemote("/repo-one")).rejects.toThrow(
+        "No upstream branch is configured. Publish the branch first, then pull.",
+      );
+      expect(onPull).not.toHaveBeenCalled();
+    });
+
+    it("rejects pulling into a detached HEAD", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref") {
+            throw new Error("fatal: ref HEAD is not a symbolic ref");
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pullFromRemote("/repo-one")).rejects.toThrow(
+        "Cannot pull into a detached HEAD.",
+      );
+      expect(rawMock).not.toHaveBeenCalledWith(
+        "/repo-one",
+        expect.arrayContaining(["pull"]),
+        expect.anything(),
+      );
+    });
+
+    it("surfaces a blocked fast-forward as a friendly message", async () => {
+      mockPullableRepo({
+        onPull: () => {
+          throw new Error(
+            "fatal: Not possible to fast-forward, aborting.\nhint: divergent branches",
+          );
+        },
+      });
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pullFromRemote("/repo-one")).rejects.toThrow(
+        "Pull stopped: local and remote have diverged. Rebase or merge in a terminal.",
+      );
+    });
+
+    it("throws when the project is not a git repository", async () => {
+      checkIsRepoMock.mockResolvedValue(false);
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pullFromRemote("/plain-dir")).rejects.toThrow(
+        "Project is not a Git repository.",
+      );
+    });
+  });
+
+  describe("formatGitPullError", () => {
+    it("maps blocked fast-forwards", () => {
+      expect(
+        formatGitPullError("fatal: Not possible to fast-forward, aborting."),
+      ).toBe(
+        "Pull stopped: local and remote have diverged. Rebase or merge in a terminal.",
+      );
+      expect(
+        formatGitPullError(
+          "fatal: Need to specify how to reconcile divergent branches.",
+        ),
+      ).toBe(
+        "Pull stopped: local and remote have diverged. Rebase or merge in a terminal.",
+      );
+    });
+
+    it("maps local changes that block the merge", () => {
+      expect(
+        formatGitPullError(
+          [
+            "error: Your local changes to the following files would be overwritten by merge:",
+            "\tsrc/app.ts",
+            "Please commit your changes or stash them before you merge.",
+            "Aborting",
+          ].join("\n"),
+        ),
+      ).toBe(
+        "Pull stopped: local changes would be overwritten. Commit or stash them first.",
+      );
+    });
+
+    it("maps authentication failures", () => {
+      expect(
+        formatGitPullError(
+          "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+        ),
+      ).toBe(
+        "Pull failed: authentication required. Check your Git credentials.",
+      );
+    });
+
+    it("maps a deleted upstream branch", () => {
+      expect(
+        formatGitPullError("fatal: couldn't find remote ref feature/gone"),
+      ).toBe(
+        "Pull failed: the upstream branch no longer exists on the remote.",
+      );
+    });
+
+    it("maps missing remote repositories", () => {
+      expect(
+        formatGitPullError(
+          "fatal: repository 'https://github.com/example/missing.git/' not found",
+        ),
+      ).toBe("Pull failed: remote repository not found or inaccessible.");
+    });
+
+    it("prefers the first error line for unrecognized dumps", () => {
+      expect(
+        formatGitPullError(
+          [
+            "From https://github.com/example/repo",
+            "error: cannot lock ref 'refs/heads/main'",
+            "Done",
+          ].join("\n"),
+        ),
+      ).toBe("error: cannot lock ref 'refs/heads/main'");
+    });
+
+    it("falls back when there is no usable detail", () => {
+      expect(formatGitPullError("")).toBe("Git pull failed.");
+      expect(formatGitPullError("From origin\nDone")).toBe("Git pull failed.");
     });
   });
 

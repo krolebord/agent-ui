@@ -114,6 +114,73 @@ export function formatGitPushError(raw: string): string {
   return "Git push failed.";
 }
 
+/**
+ * Same idea as `formatGitPushError`, for the fetch/fast-forward side. `pull
+ * --ff-only` fails cleanly (the worktree is left untouched), so every case here
+ * is something the user resolves before trying again.
+ */
+export function formatGitPullError(raw: string): string {
+  const text = raw.trim();
+  if (!text) {
+    return "Git pull failed.";
+  }
+
+  const lower = text.toLowerCase();
+
+  if (
+    lower.includes("not possible to fast-forward") ||
+    lower.includes("cannot fast-forward") ||
+    lower.includes("diverging branches") ||
+    lower.includes("divergent branches") ||
+    lower.includes("need to specify how to reconcile")
+  ) {
+    return "Pull stopped: local and remote have diverged. Rebase or merge in a terminal.";
+  }
+
+  if (
+    lower.includes("would be overwritten by merge") ||
+    lower.includes(
+      "local changes to the following files would be overwritten",
+    ) ||
+    lower.includes("please commit your changes or stash them")
+  ) {
+    return "Pull stopped: local changes would be overwritten. Commit or stash them first.";
+  }
+
+  if (
+    lower.includes("could not read username") ||
+    lower.includes("authentication failed") ||
+    lower.includes("auth_header") ||
+    lower.includes("permission denied (publickey)") ||
+    lower.includes("invalid username or password")
+  ) {
+    return "Pull failed: authentication required. Check your Git credentials.";
+  }
+
+  if (
+    lower.includes("couldn't find remote ref") ||
+    lower.includes("could not find remote ref")
+  ) {
+    return "Pull failed: the upstream branch no longer exists on the remote.";
+  }
+
+  if (
+    lower.includes("does not appear to be a git repository") ||
+    (lower.includes("repository") && lower.includes("not found"))
+  ) {
+    return "Pull failed: remote repository not found or inaccessible.";
+  }
+
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^(error|fatal|remote):/i.test(trimmed)) {
+      return trimmed;
+    }
+  }
+
+  return "Git pull failed.";
+}
+
 function parseCommitHistoryOutput(
   output: string,
 ): Omit<GitHistoryCommit, "unpushed">[] {
@@ -356,6 +423,49 @@ async function resolveDiffBaseRef(
     return "HEAD";
   } catch {
     return EMPTY_GIT_TREE_HASH;
+  }
+}
+
+/**
+ * Name of the current branch's configured upstream (e.g. `origin/main`), or
+ * null when none is configured / HEAD is detached.
+ */
+async function resolveUpstreamBranchName(
+  git: ReturnType<typeof simpleGit>,
+): Promise<string | null> {
+  try {
+    const upstreamBranch = (
+      await git.raw([
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "@{upstream}",
+      ])
+    ).trim();
+    return upstreamBranch || null;
+  } catch {
+    return null;
+  }
+}
+
+async function countCommitsSince(
+  git: ReturnType<typeof simpleGit>,
+  baseCommitHash: string,
+): Promise<number> {
+  if (!baseCommitHash) {
+    return 0;
+  }
+
+  try {
+    const output = await git.raw([
+      "rev-list",
+      "--count",
+      `${baseCommitHash}..HEAD`,
+    ]);
+    const count = Number.parseInt(output.trim(), 10);
+    return Number.isFinite(count) ? count : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -670,6 +780,11 @@ export type DeleteWorktreeProjectResult =
       warning?: undefined;
     };
 
+export type PullFromRemoteResult = {
+  upstreamBranch: string;
+  pulledCommits: number;
+};
+
 export type PerformDeleteWorktreeFolderResult = {
   warning?: string;
 };
@@ -937,20 +1052,10 @@ export class ProjectGitService {
       throw new Error("Cannot push from a detached HEAD.");
     }
 
-    let hasUpstream = true;
-    try {
-      await git.raw([
-        "rev-parse",
-        "--abbrev-ref",
-        "--symbolic-full-name",
-        "@{upstream}",
-      ]);
-    } catch {
-      hasUpstream = false;
-    }
+    const upstreamBranch = await resolveUpstreamBranchName(git);
 
     try {
-      if (hasUpstream) {
+      if (upstreamBranch) {
         await git.push();
       } else {
         await git.push(["--set-upstream", "origin", branch]);
@@ -961,6 +1066,51 @@ export class ProjectGitService {
     }
 
     await this.refreshProject(projectPath);
+  }
+
+  /**
+   * Fast-forwards the current branch onto its upstream. `--ff-only` is what
+   * makes this safe to trigger from the UI: a diverged branch or a local edit
+   * in the way aborts the pull with the worktree untouched, instead of leaving
+   * a half-finished merge or rebase there is no way to resolve here.
+   */
+  async pullFromRemote(projectPath: string): Promise<PullFromRemoteResult> {
+    const git = createGit(projectPath, { GIT_TERMINAL_PROMPT: "0" });
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const branch = (
+      await git.raw(["symbolic-ref", "--short", "HEAD"]).catch(() => "")
+    ).trim();
+    if (!branch) {
+      throw new Error("Cannot pull into a detached HEAD.");
+    }
+
+    const upstreamBranch = await resolveUpstreamBranchName(git);
+    if (!upstreamBranch) {
+      throw new Error(
+        "No upstream branch is configured. Publish the branch first, then pull.",
+      );
+    }
+
+    const previousHead = (
+      await git.raw(["rev-parse", "HEAD"]).catch(() => "")
+    ).trim();
+
+    try {
+      await git.raw(["pull", "--ff-only"]);
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : "";
+      throw new Error(formatGitPullError(raw));
+    }
+
+    const pulledCommits = await countCommitsSince(git, previousHead);
+
+    await this.refreshProject(projectPath);
+
+    return { upstreamBranch, pulledCommits };
   }
 
   /**

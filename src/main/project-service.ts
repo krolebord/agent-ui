@@ -34,6 +34,7 @@ import {
   saveEditableFileSnapshot,
   UnsupportedEditableFileError,
 } from "./project-file-edit";
+import type { PullFromRemoteResult } from "./project-git-service";
 import {
   type ProjectSettingsFile,
   readProjectCommands,
@@ -461,6 +462,26 @@ export async function pushProjectToRemote(
   }
 }
 
+/**
+ * Pulls behind the same per-project commit lock as pushing, so a fast-forward
+ * cannot land between the placeholder commit and the amend that rewrites it.
+ */
+export async function pullProjectFromRemote(
+  path: string,
+  context: {
+    projectGitService: {
+      pullFromRemote(projectPath: string): Promise<PullFromRemoteResult>;
+    };
+  },
+): Promise<PullFromRemoteResult> {
+  const releaseCommitLock = await acquireProjectCommitLock(path);
+  try {
+    return await context.projectGitService.pullFromRemote(path);
+  } finally {
+    releaseCommitLock();
+  }
+}
+
 export const projectsRouter = {
   addProject: procedure
     .input(z.object({ path: projectPathSchema }))
@@ -611,7 +632,34 @@ export const projectsRouter = {
     .handler(async ({ input, context }) => {
       const path = normalizeProjectPath(input.path);
       assertProjectPathInteractionAllowed(path, context);
-      await pushProjectToRemote(path, context);
+      try {
+        await pushProjectToRemote(path, context);
+      } catch (error) {
+        // oRPC rewrites a plain Error's message to "Internal server error" on
+        // the way to the renderer, which would drop the git-specific copy.
+        throw new ORPCError("BAD_REQUEST", {
+          message:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : "Git push failed.",
+        });
+      }
+    }),
+  pullFromRemote: procedure
+    .input(z.object({ path: projectPathSchema }))
+    .handler(async ({ input, context }) => {
+      const path = normalizeProjectPath(input.path);
+      assertProjectPathInteractionAllowed(path, context);
+      try {
+        return await pullProjectFromRemote(path, context);
+      } catch (error) {
+        throw new ORPCError("BAD_REQUEST", {
+          message:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : "Git pull failed.",
+        });
+      }
     }),
   commitSelectedChanges: procedure
     .input(

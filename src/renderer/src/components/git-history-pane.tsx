@@ -18,6 +18,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import {
+  ArrowDown,
   ArrowUp,
   Check,
   ChevronLeft,
@@ -532,6 +533,9 @@ function ProjectGitHistoryPaneContent() {
   const upstreamStats = activeProject?.gitUpstreamDiffStats;
   const hasUpstream = Boolean(upstreamStats);
   const aheadCommits = upstreamStats?.aheadCommits ?? 0;
+  // Stale until something fetches: it is measured against the remote-tracking
+  // ref, so it only counts commits a previous fetch or pull already brought in.
+  const behindCommits = upstreamStats?.behindCommits ?? 0;
   const projectLocked = activeProject?.interactionDisabled === true;
 
   const pushMutation = useMutation(
@@ -555,6 +559,37 @@ function ProjectGitHistoryPaneContent() {
       },
     }),
   );
+
+  const pullMutation = useMutation(
+    orpc.projects.pullFromRemote.mutationOptions({
+      onSuccess: (result) => {
+        toast.success(
+          result.pulledCommits === 0
+            ? `Already up to date with ${result.upstreamBranch}`
+            : `Pulled ${result.pulledCommits} commit${
+                result.pulledCommits === 1 ? "" : "s"
+              } from ${result.upstreamBranch}`,
+        );
+        void queryClient.invalidateQueries({
+          queryKey: orpc.projects.getCommitHistory.key(),
+        });
+        // HEAD moved, so the working-tree diff shown elsewhere is now measured
+        // against a different base.
+        void queryClient.invalidateQueries({
+          queryKey: orpc.projects.getUncommittedDiff.key(),
+        });
+      },
+      onError: (error) => {
+        toast.error(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Git pull failed",
+        );
+      },
+    }),
+  );
+
+  const remoteSyncPending = pushMutation.isPending || pullMutation.isPending;
 
   const commits = useMemo(
     () => historyQuery.data?.pages.flatMap((page) => page.commits) ?? [],
@@ -733,14 +768,34 @@ function ProjectGitHistoryPaneContent() {
         )}
       </div>
 
-      <div className="shrink-0 border-t border-border/70 p-1.5 pointer-coarse:p-2">
+      <div className="flex shrink-0 gap-1.5 border-t border-border/70 p-1.5 pointer-coarse:p-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-7 min-w-0 flex-1 px-2 text-xs pointer-coarse:h-10"
+          disabled={remoteSyncPending || projectLocked || !hasUpstream}
+          onClick={() => pullMutation.mutate({ path: projectPath })}
+          title={
+            upstreamStats
+              ? `Fast-forward from ${upstreamStats.upstreamBranch}`
+              : "No upstream branch configured"
+          }
+        >
+          {pullMutation.isPending ? (
+            <LoaderCircle className="size-3 animate-spin" />
+          ) : (
+            <ArrowDown className="size-3" />
+          )}
+          {`Pull${behindCommits > 0 ? ` (${behindCommits})` : ""}`}
+        </Button>
         <Button
           type="button"
           variant="default"
           size="sm"
-          className="h-7 w-full px-2 text-xs pointer-coarse:h-10"
+          className="h-7 min-w-0 flex-1 px-2 text-xs pointer-coarse:h-10"
           disabled={
-            pushMutation.isPending ||
+            remoteSyncPending ||
             projectLocked ||
             commits.length === 0 ||
             (hasUpstream && aheadCommits === 0)
