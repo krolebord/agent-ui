@@ -83,6 +83,7 @@ Agent UI is a desktop workspace for running CLI coding agents and terminal sessi
 \`\`\`
 
 - Worktree setup commands run from the new worktree root and stop at the first failure. They receive \`$PROJECT_ROOT\` and \`$WORKTREE_ROOT\`.
+- Creating a worktree copies the source project's \`.agent-ui\` directory into it, so an ignored (uncommitted) config still reaches the worktree. Files the checkout already provides are left as committed.
 - Each entry in \`commands\` needs \`name\` and \`run\`. Optional keys: \`id\` (stable key; otherwise derived from the name, so set it when the name may change), \`cwd\` (project-relative, must stay inside the project), \`env\` (string map), and \`singleton\` (focus the existing terminal for this preset instead of opening another).
 - Presets are typed into a project terminal when the user picks them, so \`$PROJECT_ROOT\` and \`$WORKTREE_ROOT\` are available and interrupting one leaves a usable shell. Nothing runs a preset automatically.
 - Entries that fail validation are skipped; the rest of the list still loads. Users can also edit presets in the app under the project menu → Commands.

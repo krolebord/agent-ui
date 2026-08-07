@@ -8,6 +8,7 @@ const addMock = vi.hoisted(() => vi.fn());
 const commitMock = vi.hoisted(() => vi.fn());
 const pushMock = vi.hoisted(() => vi.fn());
 const copyFileMock = vi.hoisted(() => vi.fn());
+const cpMock = vi.hoisted(() => vi.fn());
 const readdirMock = vi.hoisted(() => vi.fn());
 const rmMock = vi.hoisted(() => vi.fn());
 const writeFileMock = vi.hoisted(() => vi.fn());
@@ -20,6 +21,7 @@ vi.mock("simple-git", () => ({
 
 vi.mock("node:fs/promises", () => ({
   copyFile: copyFileMock,
+  cp: cpMock,
   readdir: readdirMock,
   rm: rmMock,
   writeFile: writeFileMock,
@@ -37,6 +39,7 @@ function scratchIndexPath(projectPath: string): string {
 }
 
 vi.mock("../../src/main/project-settings-file", () => ({
+  PROJECT_SETTINGS_DIR: ".agent-ui",
   writeProjectSettingsFile: writeProjectSettingsFileMock,
 }));
 
@@ -1193,6 +1196,11 @@ describe("ProjectGitService", () => {
       "/repo-one-feature-new-ui",
       "main",
     ]);
+    expect(cpMock).toHaveBeenCalledWith(
+      "/repo-one/.agent-ui",
+      "/repo-one-feature-new-ui/.agent-ui",
+      { recursive: true, force: false, errorOnExist: false },
+    );
     expect(writeProjectSettingsFileMock).toHaveBeenCalledWith(
       "/repo-one-feature-new-ui",
       {
@@ -1262,6 +1270,34 @@ describe("ProjectGitService", () => {
       "/repo-one-feature-new-ui",
       "main",
     ]);
+  });
+
+  it("still creates the worktree when the .agent-ui copy fails", async () => {
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({
+      current: "main",
+      branches: {
+        main: {},
+      },
+    });
+    cpMock.mockRejectedValue(
+      Object.assign(new Error("permission denied"), { code: "EACCES" }),
+    );
+
+    const projectsState = defineProjectState();
+    const service = new ProjectGitService(projectsState);
+
+    const result = await service.createWorktreeProject({
+      sourcePath: "/repo-one",
+      fromBranch: "main",
+      newBranch: "feature/new-ui",
+      destinationPath: "/repo-one-feature-new-ui",
+    });
+
+    expect(result.path).toBe("/repo-one-feature-new-ui");
+    expect(projectsState.state.map((project) => project.path)).toContain(
+      "/repo-one-feature-new-ui",
+    );
   });
 
   it("rejects worktree creation when the destination path is non-empty", async () => {

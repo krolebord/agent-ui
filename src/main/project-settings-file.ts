@@ -13,6 +13,9 @@ import log from "./logger";
 const SETTINGS_DIR = ".agent-ui";
 const SETTINGS_FILE = "settings.jsonc";
 
+/** Project-relative directory holding all checked-in Agent UI configuration. */
+export const PROJECT_SETTINGS_DIR = SETTINGS_DIR;
+
 export const PROJECT_SETTINGS_RELATIVE_PATH = `${SETTINGS_DIR}/${SETTINGS_FILE}`;
 
 const FORMATTING_OPTIONS = { tabSize: 2, insertSpaces: true } as const;

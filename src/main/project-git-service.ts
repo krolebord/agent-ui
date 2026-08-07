@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { copyFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   ClaudeProject,
@@ -13,6 +13,7 @@ import simpleGit from "simple-git";
 import log from "./logger";
 import type { ProjectState } from "./project-service";
 import {
+  PROJECT_SETTINGS_DIR,
   type ProjectSettingsFile,
   writeProjectSettingsFile,
 } from "./project-settings-file";
@@ -274,6 +275,37 @@ async function isExistingNonEmptyPath(targetPath: string): Promise<boolean> {
     }
 
     return true;
+  }
+}
+
+/**
+ * `git worktree add` only materializes tracked files, so a project that ignores
+ * `.agent-ui` (or only commits part of it) would give the new worktree none of
+ * its settings, icon, or skills. Copy the directory across without overwriting:
+ * whatever the checkout already produced is the committed version and wins.
+ */
+async function copyProjectSettingsDirectory(
+  sourcePath: string,
+  destinationPath: string,
+): Promise<void> {
+  try {
+    await cp(
+      path.join(sourcePath, PROJECT_SETTINGS_DIR),
+      path.join(destinationPath, PROJECT_SETTINGS_DIR),
+      { recursive: true, force: false, errorOnExist: false },
+    );
+  } catch (error) {
+    const fsError = error as NodeJS.ErrnoException;
+    if (fsError?.code === "ENOENT") {
+      return;
+    }
+
+    // The worktree already exists at this point, so a partial copy is reported
+    // rather than failing creation.
+    log.warn(
+      `Failed to copy ${PROJECT_SETTINGS_DIR} from ${sourcePath} to ${destinationPath}:`,
+      error,
+    );
   }
 }
 
@@ -1190,6 +1222,8 @@ export class ProjectGitService {
       destinationPath,
       fromBranch,
     ]);
+
+    await copyProjectSettingsDirectory(sourcePath, destinationPath);
 
     const sourceProjectSettings = getProjectSettingsSnapshot(sourceProject);
     if (hasProjectSettings(sourceProjectSettings)) {
