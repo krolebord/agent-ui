@@ -28,11 +28,15 @@ describe("StateOrchestrator", () => {
     const second = await iterator.next();
 
     expect(orchestrator.getAllStatesSnapshot()).toEqual({
+      appVersion: orchestrator.appVersion,
       version: 2,
       state: {
         projects: { count: 2 },
       },
     });
+    expect(orchestrator.appVersion).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
 
     expect(first).toEqual({
       done: false,

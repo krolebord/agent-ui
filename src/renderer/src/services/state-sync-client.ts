@@ -35,6 +35,7 @@ export async function createSyncStateStore() {
   const bootstrap = await bootstrapStateStream();
 
   let currentVersion = bootstrap.snapshot.version;
+  const appVersion = bootstrap.snapshot.appVersion;
   let streamGeneration = 0;
   let cancelStream: (() => void) | null = null;
   let updateQueue = Promise.resolve();
@@ -42,8 +43,15 @@ export async function createSyncStateStore() {
   const store = createStore<SyncStateSnapshot>(() => bootstrap.snapshot.state);
 
   const applySnapshot = (snapshot: SyncStateBootstrapSnapshot) => {
+    // Main regenerates appVersion each launch; a change means the process
+    // restarted underneath us — hard-reload rather than soft re-bootstrap.
+    if (snapshot.appVersion !== appVersion) {
+      window.location.reload();
+      return false;
+    }
     currentVersion = snapshot.version;
     store.setState(snapshot.state, true);
+    return true;
   };
 
   const resyncState = async () => {
@@ -114,7 +122,9 @@ export async function createSyncStateStore() {
       return;
     }
 
-    applySnapshot(snapshot);
+    if (!applySnapshot(snapshot)) {
+      return;
+    }
     consumeStream(generation, updatesStream);
   };
 

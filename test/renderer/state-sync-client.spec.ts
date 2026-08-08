@@ -5,9 +5,19 @@ enablePatches();
 
 type StateUpdateEvent = { version: number; patch: Patch[] };
 type FullSnapshot<TState extends object> = {
+  appVersion: string;
   version: number;
   state: TState;
 };
+
+const TEST_APP_VERSION = "test-app-version";
+
+const locationReloadMock = vi.hoisted(() => vi.fn());
+
+vi.stubGlobal("window", {
+  location: { reload: locationReloadMock },
+});
+
 type BufferedStream = {
   bufferedEvents: StateUpdateEvent[];
   onEvent: ((event: StateUpdateEvent) => void) | null;
@@ -112,6 +122,7 @@ describe("createSyncStateStore", () => {
       value: FullSnapshot<{ items: string[] }>,
     ) => void;
     snapshotResolver({
+      appVersion: TEST_APP_VERSION,
       version: 1,
       state: { items: ["draft"] },
     });
@@ -133,6 +144,7 @@ describe("createSyncStateStore", () => {
 
     orpcSpies.subscribeToStateUpdates.mockResolvedValue(stream);
     orpcSpies.getFullStateSnapshot.mockResolvedValue({
+      appVersion: TEST_APP_VERSION,
       version: 1,
       state: { count: 1 },
     });
@@ -163,10 +175,12 @@ describe("createSyncStateStore", () => {
     orpcSpies.subscribeToStateUpdates.mockResolvedValue(stream);
     orpcSpies.getFullStateSnapshot
       .mockResolvedValueOnce({
+        appVersion: TEST_APP_VERSION,
         version: 1,
         state: { count: 1 },
       })
       .mockResolvedValueOnce({
+        appVersion: TEST_APP_VERSION,
         version: 4,
         state: { count: 4 },
       });
@@ -192,8 +206,16 @@ describe("createSyncStateStore", () => {
       .mockResolvedValueOnce(firstStream)
       .mockResolvedValueOnce(secondStream);
     orpcSpies.getFullStateSnapshot
-      .mockResolvedValueOnce({ version: 1, state: { count: 1 } })
-      .mockResolvedValueOnce({ version: 7, state: { count: 7 } });
+      .mockResolvedValueOnce({
+        appVersion: TEST_APP_VERSION,
+        version: 1,
+        state: { count: 1 },
+      })
+      .mockResolvedValueOnce({
+        appVersion: TEST_APP_VERSION,
+        version: 7,
+        state: { count: 7 },
+      });
 
     const { store } = await createTrackedStore();
     expect(store.getState()).toEqual({ count: 1 });
@@ -227,6 +249,7 @@ describe("createSyncStateStore", () => {
     const stream = streamSpies.createStream();
     orpcSpies.subscribeToStateUpdates.mockResolvedValue(stream);
     orpcSpies.getFullStateSnapshot.mockResolvedValue({
+      appVersion: TEST_APP_VERSION,
       version: 0,
       state: { count: 0 },
     });
@@ -240,6 +263,35 @@ describe("createSyncStateStore", () => {
 
     await vi.waitFor(() => {
       expect(store.getState()).toEqual({ count: 2 });
+    });
+  });
+
+  it("reloads the window when a later snapshot has a new appVersion", async () => {
+    const firstStream = streamSpies.createStream();
+    const secondStream = streamSpies.createStream();
+
+    orpcSpies.subscribeToStateUpdates
+      .mockResolvedValueOnce(firstStream)
+      .mockResolvedValueOnce(secondStream);
+    orpcSpies.getFullStateSnapshot
+      .mockResolvedValueOnce({
+        appVersion: "launch-1",
+        version: 1,
+        state: { count: 1 },
+      })
+      .mockResolvedValueOnce({
+        appVersion: "launch-2",
+        version: 1,
+        state: { count: 99 },
+      });
+
+    await createTrackedStore();
+
+    setConnectionStatus("disconnected");
+    setConnectionStatus("connected");
+
+    await vi.waitFor(() => {
+      expect(locationReloadMock).toHaveBeenCalledTimes(1);
     });
   });
 });
