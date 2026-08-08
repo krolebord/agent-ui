@@ -153,6 +153,17 @@ function getFileDiffSignature(file: FileDiffMetadata) {
   return file.hunks.map((hunk) => hunk.hunkSpecs ?? "").join("\n");
 }
 
+function formatReviewCommentForCopy(
+  comment: Pick<
+    DiffReviewComment,
+    "filePath" | "side" | "lineNumber" | "body" | "stale"
+  >,
+) {
+  const sideLabel = comment.side === "additions" ? "New" : "Old";
+  const staleLabel = comment.stale ? " (outdated)" : "";
+  return `- ${comment.filePath} (${sideLabel} line ${comment.lineNumber})${staleLabel}\n${comment.body}`;
+}
+
 function formatReviewCommentsForCopy(comments: DiffReviewComment[]) {
   return [...comments]
     .sort((a, b) => {
@@ -161,11 +172,7 @@ function formatReviewCommentsForCopy(comments: DiffReviewComment[]) {
       if (a.lineNumber !== b.lineNumber) return a.lineNumber - b.lineNumber;
       return a.createdAt - b.createdAt;
     })
-    .map((comment) => {
-      const sideLabel = comment.side === "additions" ? "New" : "Old";
-      const staleLabel = comment.stale ? " (outdated)" : "";
-      return `- ${comment.filePath} (${sideLabel} line ${comment.lineNumber})${staleLabel}\n${comment.body}`;
-    })
+    .map((comment) => formatReviewCommentForCopy(comment))
     .join("\n\n");
 }
 
@@ -1163,6 +1170,10 @@ function CommentDraftForm({
   onSubmit,
   submitLabel,
   placeholder,
+  filePath,
+  side,
+  lineNumber,
+  stale = false,
 }: {
   body: string;
   onBodyChange: (body: string) => void;
@@ -1170,9 +1181,15 @@ function CommentDraftForm({
   onSubmit: () => void;
   submitLabel: string;
   placeholder: string;
+  filePath: string;
+  side: AnnotationSide;
+  lineNumber: number;
+  stale?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const initialSelectionEndRef = useRef(body.length);
+  const { copied, copy } = useCopyToClipboard();
+  const trimmedBody = body.trim();
 
   useEffect(() => {
     if (!shouldAutoFocus()) {
@@ -1226,10 +1243,43 @@ function CommentDraftForm({
           Cancel
         </Button>
         <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn(
+            "h-7 px-2 text-xs",
+            copied && "text-emerald-400 hover:text-emerald-300",
+          )}
+          disabled={!trimmedBody}
+          onClick={() => {
+            void copy(
+              formatReviewCommentForCopy({
+                filePath,
+                side,
+                lineNumber,
+                body: trimmedBody,
+                stale,
+              }),
+            );
+          }}
+        >
+          {copied ? (
+            <>
+              <Check className="size-3" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Copy className="size-3" />
+              Copy
+            </>
+          )}
+        </Button>
+        <Button
           type="submit"
           size="sm"
           className="h-7 px-2 text-xs"
-          disabled={!body.trim()}
+          disabled={!trimmedBody}
         >
           {submitLabel}
         </Button>
@@ -1274,7 +1324,7 @@ function CommentActions({
             : "text-zinc-500 hover:text-zinc-100",
         )}
         onClick={() => {
-          void copy(comment.body);
+          void copy(formatReviewCommentForCopy(comment));
         }}
         aria-label={copied ? "Copied" : "Copy comment"}
       >
@@ -1344,6 +1394,9 @@ function CommentAnnotation({
         onSubmit={submitDraft}
         submitLabel="Comment"
         placeholder="Leave a comment"
+        filePath={draft.filePath}
+        side={draft.side}
+        lineNumber={draft.lineNumber}
       />
     );
   }
@@ -1360,6 +1413,10 @@ function CommentAnnotation({
         onSubmit={() => submitEditComment(projectPath)}
         submitLabel="Save"
         placeholder="Edit comment"
+        filePath={comment.filePath}
+        side={comment.side}
+        lineNumber={comment.lineNumber}
+        stale={comment.stale}
       />
     );
   }
@@ -1417,6 +1474,10 @@ function StaleCommentsSection({ comments }: { comments: DiffReviewComment[] }) {
               onSubmit={() => submitEditComment(projectPath)}
               submitLabel="Save"
               placeholder="Edit comment"
+              filePath={comment.filePath}
+              side={comment.side}
+              lineNumber={comment.lineNumber}
+              stale={comment.stale}
             />
           ) : (
             <div
