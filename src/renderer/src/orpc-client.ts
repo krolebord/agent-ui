@@ -4,6 +4,7 @@ import { RPCLink as MessagePortRPCLink } from "@orpc/client/message-port";
 import { RPCLink as WebSocketRPCLink } from "@orpc/client/websocket";
 import type { RouterClient } from "@orpc/server";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { setConnectionStatus } from "@renderer/lib/connection-state";
 import { WebSocket as PartySocketWebSocket } from "partysocket";
 
 function getBrowserWebSocketUrl() {
@@ -24,29 +25,27 @@ function createORPCLink() {
     window.postMessage("start-orpc-client", "*", [serverPort]);
     clientPort.start();
 
+    // The message port lives as long as the window, so it is connected once
+    // and never drops.
+    setConnectionStatus("connected");
+
     return new MessagePortRPCLink({
       port: clientPort,
     });
   }
 
-  let hasOpened = false;
-  let shouldReloadOnReconnect = false;
   const websocket = new PartySocketWebSocket(getBrowserWebSocketUrl(), [], {
     maxEnqueuedMessages: 0,
   });
 
+  // partysocket reconnects on its own; subscribers re-attach their streams and
+  // reload the state snapshot when the epoch bumps.
   websocket.addEventListener("open", () => {
-    if (shouldReloadOnReconnect) {
-      window.location.reload();
-      return;
-    }
-    hasOpened = true;
+    setConnectionStatus("connected");
   });
 
   websocket.addEventListener("close", () => {
-    if (hasOpened) {
-      shouldReloadOnReconnect = true;
-    }
+    setConnectionStatus("disconnected");
   });
 
   return new WebSocketRPCLink({

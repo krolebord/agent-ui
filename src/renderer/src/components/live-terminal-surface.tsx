@@ -3,9 +3,11 @@ import {
   TerminalPane,
   type TerminalPaneHandle,
 } from "@renderer/components/terminal-pane";
+import { useConnectionState } from "@renderer/hooks/use-connection-state";
 import { useTerminalFileUpload } from "@renderer/hooks/use-terminal-file-upload";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
+import { getConnectionState } from "@renderer/lib/connection-state";
 import { orpc } from "@renderer/orpc-client";
 import { useCallback, useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -25,9 +27,18 @@ export function LiveTerminalSurface({
 }) {
   const terminalRef = useRef<TerminalPaneHandle | null>(null);
   const uploadFile = useTerminalFileUpload(terminalId);
+  const { status: connectionStatus, epoch: connectionEpoch } =
+    useConnectionState();
 
   useEffect(() => {
     attachKey;
+    // Keep the last painted output on screen while offline; the server replays
+    // the full scrollback once we re-attach.
+    if (connectionStatus !== "connected") {
+      return;
+    }
+
+    connectionEpoch;
     terminalRef.current?.clear();
 
     const cancel = consumeEventIterator(
@@ -49,13 +60,17 @@ export function LiveTerminalSurface({
           if (message.includes("closed or aborted")) {
             return;
           }
+          // A dropped connection re-attaches on its own — no need to alarm.
+          if (getConnectionState().status !== "connected") {
+            return;
+          }
           toast.error(`Terminal stream disconnected: ${message}`);
         },
       },
     );
 
     return () => void cancel();
-  }, [attachKey, terminalId]);
+  }, [attachKey, terminalId, connectionStatus, connectionEpoch]);
 
   useEffect(() => {
     if (!active) {

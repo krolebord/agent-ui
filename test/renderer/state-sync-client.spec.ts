@@ -1,5 +1,5 @@
 import { enablePatches, type Patch } from "immer";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 enablePatches();
 
@@ -57,11 +57,28 @@ vi.mock("@orpc/client", () => ({
   consumeEventIterator: streamSpies.consumeEventIterator,
 }));
 
+import { setConnectionStatus } from "../../src/renderer/src/lib/connection-state";
 import { createSyncStateStore } from "../../src/renderer/src/services/state-sync-client";
 
 describe("createSyncStateStore", () => {
+  const openStores: Array<() => void> = [];
+
+  /** Stores keep a connection listener alive until unsubscribed. */
+  async function createTrackedStore() {
+    const result = await createSyncStateStore();
+    openStores.push(result.unsubscribe);
+    return result;
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
+    setConnectionStatus("connected");
+  });
+
+  afterEach(() => {
+    for (const unsubscribe of openStores.splice(0)) {
+      unsubscribe();
+    }
   });
 
   it("skips buffered updates already covered by the bootstrap snapshot version", async () => {
@@ -106,7 +123,9 @@ describe("createSyncStateStore", () => {
       expect.any(Object),
     );
     expect(store.getState()).toEqual({ items: ["draft"] });
-    expect(unsubscribe).toBe(streamSpies.unsubscribe);
+
+    unsubscribe();
+    expect(streamSpies.unsubscribe).toHaveBeenCalledTimes(1);
   });
 
   it("applies only the next update version", async () => {
@@ -118,7 +137,7 @@ describe("createSyncStateStore", () => {
       state: { count: 1 },
     });
 
-    const { store } = await createSyncStateStore();
+    const { store } = await createTrackedStore();
 
     streamSpies.emit(stream, {
       version: 1,
@@ -152,7 +171,7 @@ describe("createSyncStateStore", () => {
         state: { count: 4 },
       });
 
-    const { store } = await createSyncStateStore();
+    const { store } = await createTrackedStore();
 
     streamSpies.emit(stream, {
       version: 4,
@@ -165,6 +184,45 @@ describe("createSyncStateStore", () => {
     });
   });
 
+  it("re-subscribes and reloads the snapshot after a reconnect", async () => {
+    const firstStream = streamSpies.createStream();
+    const secondStream = streamSpies.createStream();
+
+    orpcSpies.subscribeToStateUpdates
+      .mockResolvedValueOnce(firstStream)
+      .mockResolvedValueOnce(secondStream);
+    orpcSpies.getFullStateSnapshot
+      .mockResolvedValueOnce({ version: 1, state: { count: 1 } })
+      .mockResolvedValueOnce({ version: 7, state: { count: 7 } });
+
+    const { store } = await createTrackedStore();
+    expect(store.getState()).toEqual({ count: 1 });
+
+    setConnectionStatus("disconnected");
+    setConnectionStatus("connected");
+
+    await vi.waitFor(() => {
+      expect(store.getState()).toEqual({ count: 7 });
+    });
+    expect(orpcSpies.subscribeToStateUpdates).toHaveBeenCalledTimes(2);
+    // The dead stream is released when the fresh one takes over.
+    expect(streamSpies.unsubscribe).toHaveBeenCalledTimes(1);
+
+    // Updates from the stale stream must not corrupt the fresh snapshot.
+    streamSpies.emit(firstStream, {
+      version: 2,
+      patch: [{ op: "replace", path: ["count"], value: 2 }],
+    });
+    streamSpies.emit(secondStream, {
+      version: 8,
+      patch: [{ op: "replace", path: ["count"], value: 8 }],
+    });
+
+    await vi.waitFor(() => {
+      expect(store.getState()).toEqual({ count: 8 });
+    });
+  });
+
   it("applies updates that arrive after bootstrap", async () => {
     const stream = streamSpies.createStream();
     orpcSpies.subscribeToStateUpdates.mockResolvedValue(stream);
@@ -173,7 +231,7 @@ describe("createSyncStateStore", () => {
       state: { count: 0 },
     });
 
-    const { store } = await createSyncStateStore();
+    const { store } = await createTrackedStore();
 
     streamSpies.emit(stream, {
       version: 1,

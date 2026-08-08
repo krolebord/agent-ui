@@ -2,6 +2,7 @@ import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { AddProjectDialog } from "@renderer/components/add-project-dialog";
 import { ArtifactToastListener } from "@renderer/components/artifact-toast-listener";
 import { ConfirmDialog } from "@renderer/components/confirm-dialog";
+import { ConnectionStatusIndicator } from "@renderer/components/connection-status-indicator";
 import { DiffReviewCommitDialog } from "@renderer/components/diff-review-commit-dialog";
 import { ErrorDialog } from "@renderer/components/error-dialog";
 import { InboxSidebar } from "@renderer/components/inbox-sidebar";
@@ -120,6 +121,7 @@ function App() {
         </div>
       </WorkerPoolContextProvider>
 
+      <ConnectionStatusIndicator />
       <ConfirmDialog />
       <AddProjectDialog />
       <ErrorDialog />

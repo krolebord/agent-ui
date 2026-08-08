@@ -5,17 +5,37 @@ import App from "./App";
 import "./index.css";
 import { toast } from "sonner";
 import { SyncStateProvider } from "./components/sync-state-provider";
+import {
+  getConnectionState,
+  subscribeToConnectionState,
+} from "./lib/connection-state";
 import { createSyncStateStore } from "./services/state-sync-client";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     mutations: {
       onError: (error) => {
-        toast.error(error.message || "An unexpected error occurred");
+        const message = error.message || "An unexpected error occurred";
+        // Expected while the transport is reconnecting; connection UI covers it.
+        if (message.includes("WebSocket is not open")) {
+          return;
+        }
+        toast.error(message);
       },
     },
   },
 });
+// Query caches can hold data that changed while we were offline.
+let lastConnectedEpoch = getConnectionState().epoch;
+subscribeToConnectionState(() => {
+  const { status, epoch } = getConnectionState();
+  if (status !== "connected" || epoch === lastConnectedEpoch) {
+    return;
+  }
+  lastConnectedEpoch = epoch;
+  void queryClient.invalidateQueries();
+});
+
 createSyncStateStore()
   .then((syncState) => {
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
