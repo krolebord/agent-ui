@@ -8,6 +8,7 @@ import type {
   GitHistoryPage,
   GitUpstreamDiffStats,
 } from "@shared/claude-types";
+import { autogenerateCommitPlaceholderSubject } from "@shared/commit-message-generation";
 import { buildSuggestedWorktreePath } from "@shared/project-worktree";
 import simpleGit from "simple-git";
 import log from "./logger";
@@ -248,6 +249,52 @@ async function resolveUnpushedCommitHashes(
   } catch {
     return null;
   }
+}
+
+/**
+ * Subjects of commits that would be published by the next push. With an
+ * upstream, that's `@{upstream}..HEAD`; when first publishing to origin, it's
+ * everything on HEAD that isn't already on any origin ref.
+ */
+async function resolveUnpushedCommitSubjects(
+  git: ReturnType<typeof simpleGit>,
+  hasUpstream: boolean,
+): Promise<string[]> {
+  const logArgs = hasUpstream
+    ? ["log", "--format=%s", "@{upstream}..HEAD"]
+    : ["log", "--format=%s", "HEAD", "--not", "--remotes=origin"];
+
+  const output = await git.raw(logArgs);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Blocks publishing the temporary autogenerate subject if message generation
+ * failed (or an amend never finished) and the placeholder is still on HEAD.
+ * If the unpushed range can't be resolved, skip the check — the push itself
+ * will surface a clearer git error.
+ */
+async function assertNoAutogeneratePlaceholderInUnpushedCommits(
+  git: ReturnType<typeof simpleGit>,
+  hasUpstream: boolean,
+): Promise<void> {
+  let subjects: string[];
+  try {
+    subjects = await resolveUnpushedCommitSubjects(git, hasUpstream);
+  } catch {
+    return;
+  }
+
+  if (!subjects.includes(autogenerateCommitPlaceholderSubject)) {
+    return;
+  }
+
+  throw new Error(
+    `Push rejected: unpushed history still contains "${autogenerateCommitPlaceholderSubject}". Amend those commits before pushing.`,
+  );
 }
 
 type ProjectGitMetadata = Pick<
@@ -1053,6 +1100,10 @@ export class ProjectGitService {
     }
 
     const upstreamBranch = await resolveUpstreamBranchName(git);
+    await assertNoAutogeneratePlaceholderInUnpushedCommits(
+      git,
+      Boolean(upstreamBranch),
+    );
 
     try {
       if (upstreamBranch) {

@@ -49,6 +49,7 @@ import {
   ProjectGitService,
 } from "../../src/main/project-git-service";
 import { defineProjectState } from "../../src/main/project-service";
+import { autogenerateCommitPlaceholderSubject } from "../../src/shared/commit-message-generation";
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -1886,6 +1887,68 @@ describe("ProjectGitService", () => {
 
       await expect(service.pushToRemote("/repo-one")).rejects.toThrow(
         "Cannot push from a detached HEAD.",
+      );
+      expect(pushMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects push when unpushed history still has the autogenerate placeholder", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref" && args[1] === "--short") {
+            return "main\n";
+          }
+          if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
+            return "origin/main\n";
+          }
+          if (
+            args[0] === "log" &&
+            args.includes("--format=%s") &&
+            args.includes("@{upstream}..HEAD")
+          ) {
+            return [
+              "Real commit",
+              autogenerateCommitPlaceholderSubject,
+              "Older commit",
+            ].join("\n");
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pushToRemote("/repo-one")).rejects.toThrow(
+        `Push rejected: unpushed history still contains "${autogenerateCommitPlaceholderSubject}". Amend those commits before pushing.`,
+      );
+      expect(pushMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects first publish when unpushed history still has the autogenerate placeholder", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref" && args[1] === "--short") {
+            return "feature/new-ui\n";
+          }
+          if (args[0] === "rev-parse" && args.includes("@{upstream}")) {
+            throw new Error("no upstream configured");
+          }
+          if (
+            args[0] === "log" &&
+            args.includes("--format=%s") &&
+            args.includes("--remotes=origin")
+          ) {
+            return `${autogenerateCommitPlaceholderSubject}\n`;
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.pushToRemote("/repo-one")).rejects.toThrow(
+        `Push rejected: unpushed history still contains "${autogenerateCommitPlaceholderSubject}". Amend those commits before pushing.`,
       );
       expect(pushMock).not.toHaveBeenCalled();
     });
