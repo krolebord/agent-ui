@@ -35,6 +35,7 @@ import {
   EllipsisVertical,
   Eye,
   EyeOff,
+  FileText,
   FolderOpen,
   FolderPlus,
   GitBranch,
@@ -146,6 +147,9 @@ export function SessionSidebar() {
   const openAddProjectDialog = useAddProjectDialogStore((x) => x.open);
   const mainView = useMainViewStore((state) => state.view);
   const toggleSkills = useMainViewStore((state) => state.toggleSkills);
+  const toggleGlobalInstructions = useMainViewStore(
+    (state) => state.toggleGlobalInstructions,
+  );
   const toggleScheduledSessions = useMainViewStore(
     (state) => state.toggleScheduledSessions,
   );
@@ -252,6 +256,7 @@ export function SessionSidebar() {
                 className={cn(
                   "h-full w-9 shrink-0 px-0",
                   (mainView === "skills" ||
+                    mainView === "globalInstructions" ||
                     mainView === "scheduledSessions" ||
                     mainView === "accounts" ||
                     mainView === "artifacts") &&
@@ -267,6 +272,10 @@ export function SessionSidebar() {
               <DropdownMenuItem onClick={toggleSkills}>
                 <Sparkles className="size-3.5" />
                 Skills
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={toggleGlobalInstructions}>
+                <FileText className="size-3.5" />
+                Global instructions
               </DropdownMenuItem>
               <DropdownMenuItem onClick={toggleScheduledSessions}>
                 <CalendarClock className="size-3.5" />

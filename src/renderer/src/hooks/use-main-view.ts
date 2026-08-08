@@ -4,6 +4,7 @@ import { combine } from "zustand/middleware";
 export type MainView =
   | "sessions"
   | "skills"
+  | "globalInstructions"
   | "scheduledSessions"
   | "accounts"
   | "artifacts";
@@ -19,6 +20,17 @@ export const useMainViewStore = create(
     toggleSkills: () => {
       set((state) => ({
         view: state.view === "skills" ? "sessions" : "skills",
+      }));
+    },
+    showGlobalInstructions: () => {
+      set({ view: "globalInstructions" });
+    },
+    toggleGlobalInstructions: () => {
+      set((state) => ({
+        view:
+          state.view === "globalInstructions"
+            ? "sessions"
+            : "globalInstructions",
       }));
     },
     showScheduledSessions: () => {

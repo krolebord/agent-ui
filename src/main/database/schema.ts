@@ -11,6 +11,14 @@ export interface SessionBuffersTable {
   updated_at: number;
 }
 
+/** Desired global agent instruction files (Claude/Codex). Files are projections. */
+export interface GlobalInstructionsTable {
+  target: string;
+  content: string;
+  updated_at: number;
+  last_pushed_at: number | null;
+}
+
 /**
  * Kysely's compile-time view of the application database.
  *
@@ -19,4 +27,5 @@ export interface SessionBuffersTable {
 export interface AgentUiDatabase {
   app_metadata: AppMetadataTable;
   session_buffers: SessionBuffersTable;
+  global_instructions: GlobalInstructionsTable;
 }

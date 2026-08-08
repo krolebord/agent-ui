@@ -4,6 +4,7 @@ import { appSettingsRouter } from "./app-settings";
 import { artifactsRouter } from "./artifacts-service";
 import { claudeAccountsRouter } from "./claude-accounts";
 import { fsRouter } from "./fs.router";
+import { globalInstructionsRouter } from "./global-instructions-service";
 import { moveStoppedSessionToProject } from "./move-stopped-session-to-project";
 import { procedure } from "./orpc";
 import { projectsRouter } from "./project-service";
@@ -248,5 +249,6 @@ export const orpcRouter = {
   stateSync: stateSyncRouter,
   sessions: sessionsRouter,
   skills: skillsRouter,
+  globalInstructions: globalInstructionsRouter,
   scheduledSessions: scheduledSessionsRouter,
 };

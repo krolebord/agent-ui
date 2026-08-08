@@ -43,6 +43,7 @@ describe("DatabaseService", () => {
     expect(tables.rows.map((row) => row.name)).toEqual(
       expect.arrayContaining([
         "app_metadata",
+        "global_instructions",
         "kysely_migration",
         "kysely_migration_lock",
         "session_buffers",

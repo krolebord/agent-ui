@@ -25,6 +25,10 @@ import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { DatabaseService } from "./database/database-service";
 import { SqliteSessionBufferStore } from "./database/session-buffer-store";
+import {
+  GlobalInstructionsService,
+  SqliteGlobalInstructionsStore,
+} from "./global-instructions-service";
 import { defineHandoffsState, HandoffsService } from "./handoffs-service";
 import log from "./logger";
 import { defineMachineStatsState, MachineStatsMonitor } from "./machine-stats";
@@ -189,6 +193,9 @@ export async function createServices(options: CreateServicesOptions) {
   // Created before the session managers, which write buffers through it.
   const databaseService = await DatabaseService.create(userDataPath);
   const sessionBuffers = new SqliteSessionBufferStore(databaseService.db);
+  const globalInstructionsService = new GlobalInstructionsService({
+    store: new SqliteGlobalInstructionsStore(databaseService.db),
+  });
 
   const persistenceService = new PersistenceOrchestrator({
     schemaVersion: STORAGE_SCHEMA_VERSION,
@@ -494,6 +501,7 @@ export async function createServices(options: CreateServicesOptions) {
     stateService,
     databaseService,
     sessionBuffers,
+    globalInstructionsService,
     shutdown,
     managedPluginDir,
     pluginWarning,

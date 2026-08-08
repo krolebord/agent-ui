@@ -9,6 +9,7 @@ import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
 import {
   CalendarClock,
+  FileText,
   Inbox,
   ListTree,
   PackageOpen,
@@ -60,6 +61,9 @@ export function SidebarViewToggle() {
 export function SidebarNavMenuItems() {
   const openSettingsDialog = useSettingsStore((x) => x.openSettingsDialog);
   const toggleSkills = useMainViewStore((state) => state.toggleSkills);
+  const toggleGlobalInstructions = useMainViewStore(
+    (state) => state.toggleGlobalInstructions,
+  );
   const toggleScheduledSessions = useMainViewStore(
     (state) => state.toggleScheduledSessions,
   );
@@ -71,6 +75,10 @@ export function SidebarNavMenuItems() {
       <DropdownMenuItem onClick={toggleSkills}>
         <Sparkles className="size-3.5" />
         Skills
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={toggleGlobalInstructions}>
+        <FileText className="size-3.5" />
+        Global instructions
       </DropdownMenuItem>
       <DropdownMenuItem onClick={toggleScheduledSessions}>
         <CalendarClock className="size-3.5" />
