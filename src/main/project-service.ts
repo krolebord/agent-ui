@@ -11,12 +11,14 @@ import {
   autogenerateCommitPlaceholderSubject,
   type CommitProgressEvent,
   formatCommittedWithPlaceholderNote,
+  type GeneratedCommitMessage,
 } from "../shared/commit-message-generation";
 import {
   PROJECT_COMMANDS_LIMIT,
   projectCommandWriteSchema,
 } from "../shared/project-commands";
 import { defineServiceState } from "../shared/service-state";
+import type { TitleGenerationSettings } from "../shared/title-generation";
 import { generateCommitMessage } from "./commit-message-generation";
 import type { Services } from "./create-services";
 import log from "./logger";
@@ -482,6 +484,144 @@ export async function pullProjectFromRemote(
   }
 }
 
+interface CommitSelectedChangesGitService {
+  getSelectedChangesDiff(
+    projectPath: string,
+    paths: string[],
+  ): Promise<string | null>;
+  commitSelectedChanges(
+    projectPath: string,
+    input: {
+      paths: string[];
+      subject: string;
+      description?: string;
+    },
+  ): Promise<void>;
+  getLastCommitDiff(
+    projectPath: string,
+    paths: string[],
+  ): Promise<string | null>;
+  amendLastCommitMessage(
+    projectPath: string,
+    input: {
+      subject: string;
+      description?: string;
+    },
+  ): Promise<void>;
+}
+
+/**
+ * Commits selected paths with a placeholder, then amends in a generated
+ * message. Generation starts from the uncommitted selected-file diff so it
+ * overlaps the git commit instead of waiting for it.
+ */
+export async function* commitSelectedChangesWithGeneratedMessage(input: {
+  path: string;
+  filePaths: string[];
+  description?: string;
+  projectGitService: CommitSelectedChangesGitService;
+  titleGeneration: TitleGenerationSettings;
+  generateCommitMessage?: (
+    settings: TitleGenerationSettings,
+    diff: string,
+  ) => Promise<GeneratedCommitMessage | null>;
+}): AsyncGenerator<CommitProgressEvent> {
+  const generate = input.generateCommitMessage ?? generateCommitMessage;
+  const placeholderNote = formatCommittedWithPlaceholderNote();
+  let generatedPromise: Promise<GeneratedCommitMessage | null> | null = null;
+
+  try {
+    const diff = await input.projectGitService.getSelectedChangesDiff(
+      input.path,
+      input.filePaths,
+    );
+    if (diff?.trim()) {
+      generatedPromise = generate(input.titleGeneration, diff);
+      yield { stage: "generating" } satisfies CommitProgressEvent;
+    }
+  } catch (error) {
+    log.warn("Failed to read selected changes diff for commit message", {
+      path: input.path,
+      error,
+    });
+  }
+
+  try {
+    await input.projectGitService.commitSelectedChanges(input.path, {
+      paths: input.filePaths,
+      subject: autogenerateCommitPlaceholderSubject,
+    });
+  } catch (error) {
+    void generatedPromise?.catch(() => undefined);
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : "Git commit failed.";
+    throw new ORPCError("BAD_REQUEST", { message });
+  }
+
+  yield { stage: "committed" } satisfies CommitProgressEvent;
+
+  if (!generatedPromise) {
+    yield { stage: "generating" } satisfies CommitProgressEvent;
+  }
+
+  try {
+    let generated: GeneratedCommitMessage | null = null;
+    if (generatedPromise) {
+      generated = await generatedPromise;
+    } else {
+      const diff = await input.projectGitService.getLastCommitDiff(
+        input.path,
+        input.filePaths,
+      );
+      if (!diff) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Failed to generate commit message. ${placeholderNote}`,
+        });
+      }
+      generated = await generate(input.titleGeneration, diff);
+    }
+
+    if (!generated?.subject.trim()) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Failed to generate commit message. ${placeholderNote}`,
+      });
+    }
+
+    const finalSubject = generated.subject.trim();
+    const finalDescription = input.description ?? generated.description?.trim();
+
+    try {
+      await input.projectGitService.amendLastCommitMessage(input.path, {
+        subject: finalSubject,
+        description: finalDescription,
+      });
+    } catch (error) {
+      const detail =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Failed to update commit message.";
+      throw new ORPCError("BAD_REQUEST", {
+        message: `${detail} ${placeholderNote}`,
+      });
+    }
+  } catch (error) {
+    if (error instanceof ORPCError) {
+      throw error;
+    }
+    const detail =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : "Failed to generate commit message.";
+    throw new ORPCError("BAD_REQUEST", {
+      message: `${detail} ${placeholderNote}`,
+    });
+  }
+
+  yield { stage: "done" } satisfies CommitProgressEvent;
+}
+
 export const projectsRouter = {
   addProject: procedure
     .input(z.object({ path: projectPathSchema }))
@@ -682,78 +822,13 @@ export const projectsRouter = {
       const releaseCommitLock = await acquireProjectCommitLock(path);
       try {
         if (!subject) {
-          try {
-            await context.projectGitService.commitSelectedChanges(path, {
-              paths: input.filePaths,
-              subject: autogenerateCommitPlaceholderSubject,
-            });
-          } catch (error) {
-            const message =
-              error instanceof Error && error.message.trim()
-                ? error.message
-                : "Git commit failed.";
-            throw new ORPCError("BAD_REQUEST", { message });
-          }
-
-          yield { stage: "committed" } satisfies CommitProgressEvent;
-
-          const placeholderNote = formatCommittedWithPlaceholderNote();
-
-          yield { stage: "generating" } satisfies CommitProgressEvent;
-
-          try {
-            const diff = await context.projectGitService.getLastCommitDiff(
-              path,
-              input.filePaths,
-            );
-            if (!diff) {
-              throw new ORPCError("BAD_REQUEST", {
-                message: `Failed to generate commit message. ${placeholderNote}`,
-              });
-            }
-
-            const generated = await generateCommitMessage(
-              context.appSettingsState.state.titleGeneration,
-              diff,
-            );
-            if (!generated?.subject.trim()) {
-              throw new ORPCError("BAD_REQUEST", {
-                message: `Failed to generate commit message. ${placeholderNote}`,
-              });
-            }
-
-            const finalSubject = generated.subject.trim();
-            const finalDescription =
-              description ?? generated.description?.trim();
-
-            try {
-              await context.projectGitService.amendLastCommitMessage(path, {
-                subject: finalSubject,
-                description: finalDescription,
-              });
-            } catch (error) {
-              const detail =
-                error instanceof Error && error.message.trim()
-                  ? error.message
-                  : "Failed to update commit message.";
-              throw new ORPCError("BAD_REQUEST", {
-                message: `${detail} ${placeholderNote}`,
-              });
-            }
-          } catch (error) {
-            if (error instanceof ORPCError) {
-              throw error;
-            }
-            const detail =
-              error instanceof Error && error.message.trim()
-                ? error.message
-                : "Failed to generate commit message.";
-            throw new ORPCError("BAD_REQUEST", {
-              message: `${detail} ${placeholderNote}`,
-            });
-          }
-
-          yield { stage: "done" } satisfies CommitProgressEvent;
+          yield* commitSelectedChangesWithGeneratedMessage({
+            path,
+            filePaths: input.filePaths,
+            description,
+            projectGitService: context.projectGitService,
+            titleGeneration: context.appSettingsState.state.titleGeneration,
+          });
           return;
         }
 

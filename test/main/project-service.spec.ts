@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acquireProjectCommitLock,
   addTrackedProject,
+  commitSelectedChangesWithGeneratedMessage,
   defineProjectState,
   pullProjectFromRemote,
   pushProjectToRemote,
@@ -373,5 +374,146 @@ describe("project-service refreshTrackedProject", () => {
 
     expect(result).toEqual({ path: "/repo-one" });
     expect(refreshProject).toHaveBeenCalledWith("/repo-one");
+  });
+});
+
+describe("project-service commitSelectedChangesWithGeneratedMessage", () => {
+  const titleGeneration = {
+    provider: "cursor" as const,
+    model: "composer-2.5",
+  };
+
+  async function collectStages(
+    iterator: AsyncGenerator<{ stage: string }>,
+  ): Promise<string[]> {
+    const stages: string[] = [];
+    for await (const event of iterator) {
+      stages.push(event.stage);
+    }
+    return stages;
+  }
+
+  it("starts message generation before the git commit finishes", async () => {
+    const commitStarted = createDeferred<void>();
+    const commitFinished = createDeferred<void>();
+
+    const generateCommitMessage = vi.fn(async () => ({
+      subject: "Add auth tests",
+    }));
+
+    const projectGitService = {
+      getSelectedChangesDiff: vi
+        .fn()
+        .mockResolvedValue("diff --git a/auth.ts b/auth.ts"),
+      commitSelectedChanges: vi.fn(async () => {
+        commitStarted.resolve();
+        await commitFinished.promise;
+      }),
+      getLastCommitDiff: vi.fn(),
+      amendLastCommitMessage: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const iterator = commitSelectedChangesWithGeneratedMessage({
+      path: "/repo",
+      filePaths: ["auth.ts"],
+      projectGitService,
+      titleGeneration,
+      generateCommitMessage,
+    });
+
+    const stagesPromise = collectStages(iterator);
+
+    await commitStarted.promise;
+    expect(generateCommitMessage).toHaveBeenCalledTimes(1);
+    expect(generateCommitMessage).toHaveBeenCalledWith(
+      titleGeneration,
+      "diff --git a/auth.ts b/auth.ts",
+    );
+    expect(projectGitService.amendLastCommitMessage).not.toHaveBeenCalled();
+
+    commitFinished.resolve();
+    await expect(stagesPromise).resolves.toEqual([
+      "generating",
+      "committed",
+      "done",
+    ]);
+    expect(projectGitService.getLastCommitDiff).not.toHaveBeenCalled();
+    expect(projectGitService.amendLastCommitMessage).toHaveBeenCalledWith(
+      "/repo",
+      { subject: "Add auth tests", description: undefined },
+    );
+  });
+
+  it("falls back to the last commit diff when the selected diff is empty", async () => {
+    const generateCommitMessage = vi.fn(async () => ({
+      subject: "Fix login",
+      description: "Handle missing users.",
+    }));
+
+    const projectGitService = {
+      getSelectedChangesDiff: vi.fn().mockResolvedValue(null),
+      commitSelectedChanges: vi.fn().mockResolvedValue(undefined),
+      getLastCommitDiff: vi
+        .fn()
+        .mockResolvedValue("diff --git a/login.ts b/login.ts"),
+      amendLastCommitMessage: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const stages = await collectStages(
+      commitSelectedChangesWithGeneratedMessage({
+        path: "/repo",
+        filePaths: ["login.ts"],
+        description: "Keep caller body.",
+        projectGitService,
+        titleGeneration,
+        generateCommitMessage,
+      }),
+    );
+
+    expect(stages).toEqual(["committed", "generating", "done"]);
+    expect(generateCommitMessage).toHaveBeenCalledTimes(1);
+    expect(generateCommitMessage).toHaveBeenCalledWith(
+      titleGeneration,
+      "diff --git a/login.ts b/login.ts",
+    );
+    expect(projectGitService.amendLastCommitMessage).toHaveBeenCalledWith(
+      "/repo",
+      { subject: "Fix login", description: "Keep caller body." },
+    );
+  });
+
+  it("does not wait for generation when the git commit fails", async () => {
+    const generateFinished = createDeferred<void>();
+    const generateCommitMessage = vi.fn(async () => {
+      await generateFinished.promise;
+      return { subject: "Should not amend" };
+    });
+
+    const projectGitService = {
+      getSelectedChangesDiff: vi
+        .fn()
+        .mockResolvedValue("diff --git a/a.ts b/a.ts"),
+      commitSelectedChanges: vi
+        .fn()
+        .mockRejectedValue(new Error("index locked")),
+      getLastCommitDiff: vi.fn(),
+      amendLastCommitMessage: vi.fn(),
+    };
+
+    await expect(
+      collectStages(
+        commitSelectedChangesWithGeneratedMessage({
+          path: "/repo",
+          filePaths: ["a.ts"],
+          projectGitService,
+          titleGeneration,
+          generateCommitMessage,
+        }),
+      ),
+    ).rejects.toMatchObject({ message: "index locked" });
+
+    expect(projectGitService.amendLastCommitMessage).not.toHaveBeenCalled();
+    generateFinished.resolve();
+    await generateFinished.promise;
   });
 });
