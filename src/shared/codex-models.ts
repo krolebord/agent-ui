@@ -17,7 +17,7 @@ export const codexModels: CodexModel[] = [
   {
     label: "GPT-5.6-Sol",
     value: "gpt-5.6-sol",
-    defaultReasoningEffort: "xhigh",
+    defaultReasoningEffort: "medium",
     supportedReasoningEfforts: [
       "low",
       "medium",
@@ -31,7 +31,7 @@ export const codexModels: CodexModel[] = [
   {
     label: "GPT-5.6-Terra",
     value: "gpt-5.6-terra",
-    defaultReasoningEffort: "xhigh",
+    defaultReasoningEffort: "medium",
     supportedReasoningEfforts: [
       "low",
       "medium",
@@ -45,7 +45,7 @@ export const codexModels: CodexModel[] = [
   {
     label: "GPT-5.6-Luna",
     value: "gpt-5.6-luna",
-    defaultReasoningEffort: "xhigh",
+    defaultReasoningEffort: "medium",
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     supportsFastMode: true,
   },
@@ -62,6 +62,7 @@ export const codexModels: CodexModel[] = [
     defaultReasoningEffort: "medium",
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
     supportsFastMode: true,
+    upgradeTo: "gpt-5.6-terra",
   },
   {
     label: "GPT-5.4-Mini",
@@ -69,5 +70,6 @@ export const codexModels: CodexModel[] = [
     defaultReasoningEffort: "medium",
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
     supportsFastMode: false,
+    upgradeTo: "gpt-5.6-luna",
   },
 ];

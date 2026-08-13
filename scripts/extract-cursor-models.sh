@@ -21,14 +21,17 @@ if [ "${#MODELS[@]}" -eq 0 ]; then
   exit 1
 fi
 
-# Match the historical generated-file ordering: "auto" first, Composer models
-# next, then the remaining model ids in reverse lexicographic order.
+# Ordering: "auto", Grok (version desc, effort desc, fast first), Composer
+# (reverse lex), then remaining ids in reverse lexicographic order.
 HAS_AUTO=false
+GROK_MODELS=()
 COMPOSER_MODELS=()
 OTHER_MODELS=()
 for model in "${MODELS[@]}"; do
   if [ "$model" = "auto" ]; then
     HAS_AUTO=true
+  elif [[ "$model" == *grok* ]]; then
+    GROK_MODELS+=("$model")
   elif [[ "$model" == composer-* ]]; then
     COMPOSER_MODELS+=("$model")
   else
@@ -36,9 +39,80 @@ for model in "${MODELS[@]}"; do
   fi
 done
 
+# Decorate Grok ids for sorting: version, effort rank, fast flag, model id.
+# Effort order (high → low): ultra, max, xhigh/extra-high, high, medium, low, none.
+decorate_grok_model() {
+  local model="$1"
+  local base="$model"
+  local is_fast=0
+  local effort="unknown"
+  local effort_rank=0
+  local ver
+
+  if [[ "$base" == *-fast ]]; then
+    is_fast=1
+    base="${base%-fast}"
+  fi
+
+  if [[ "$base" == *-extra-high ]]; then
+    effort="extra-high"
+    base="${base%-extra-high}"
+  elif [[ "$base" == *-xhigh ]]; then
+    effort="xhigh"
+    base="${base%-xhigh}"
+  elif [[ "$base" == *-ultra ]]; then
+    effort="ultra"
+    base="${base%-ultra}"
+  elif [[ "$base" == *-max ]]; then
+    effort="max"
+    base="${base%-max}"
+  elif [[ "$base" == *-high ]]; then
+    effort="high"
+    base="${base%-high}"
+  elif [[ "$base" == *-medium ]]; then
+    effort="medium"
+    base="${base%-medium}"
+  elif [[ "$base" == *-low ]]; then
+    effort="low"
+    base="${base%-low}"
+  elif [[ "$base" == *-none ]]; then
+    effort="none"
+    base="${base%-none}"
+  fi
+
+  case "$effort" in
+    ultra) effort_rank=70 ;;
+    max) effort_rank=60 ;;
+    xhigh | extra-high) effort_rank=50 ;;
+    high) effort_rank=40 ;;
+    medium) effort_rank=30 ;;
+    low) effort_rank=20 ;;
+    none) effort_rank=10 ;;
+    *) effort_rank=0 ;;
+  esac
+
+  # Strip a leading vendor prefix so "cursor-grok-4.6" and "grok-4.6" share a key.
+  ver="${base##*grok-}"
+  if [ "$ver" = "$base" ]; then
+    ver="$base"
+  fi
+
+  printf '%s\t%d\t%d\t%s\n' "$ver" "$effort_rank" "$is_fast" "$model"
+}
+
 SORTED_MODELS=()
 if [ "$HAS_AUTO" = true ]; then
   SORTED_MODELS+=("auto")
+fi
+if [ "${#GROK_MODELS[@]}" -gt 0 ]; then
+  while IFS= read -r model; do
+    [ -z "$model" ] && continue
+    SORTED_MODELS+=("$model")
+  done < <(
+    for model in "${GROK_MODELS[@]}"; do
+      decorate_grok_model "$model"
+    done | LC_ALL=C sort -t $'\t' -k1,1Vr -k2,2nr -k3,3nr -k4,4 | cut -f4
+  )
 fi
 while IFS= read -r model; do
   [ -z "$model" ] && continue
