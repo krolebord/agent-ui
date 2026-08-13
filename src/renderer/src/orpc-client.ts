@@ -4,6 +4,10 @@ import { RPCLink as MessagePortRPCLink } from "@orpc/client/message-port";
 import { RPCLink as WebSocketRPCLink } from "@orpc/client/websocket";
 import type { RouterClient } from "@orpc/server";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import {
+  attachBrowserWakeReconnect,
+  BROWSER_WS_MIN_RECONNECTION_DELAY_MS,
+} from "@renderer/lib/browser-websocket";
 import { setConnectionStatus } from "@renderer/lib/connection-state";
 import { WebSocket as PartySocketWebSocket } from "partysocket";
 
@@ -36,10 +40,12 @@ function createORPCLink() {
 
   const websocket = new PartySocketWebSocket(getBrowserWebSocketUrl(), [], {
     maxEnqueuedMessages: 0,
+    minReconnectionDelay: BROWSER_WS_MIN_RECONNECTION_DELAY_MS,
   });
 
   // partysocket reconnects on its own; subscribers re-attach their streams and
-  // reload the state snapshot when the epoch bumps.
+  // reload the state snapshot when the epoch bumps. Wake/online only nudges
+  // when the socket is already down, so a live tab is not torn down.
   websocket.addEventListener("open", () => {
     setConnectionStatus("connected");
   });
@@ -47,6 +53,8 @@ function createORPCLink() {
   websocket.addEventListener("close", () => {
     setConnectionStatus("disconnected");
   });
+
+  attachBrowserWakeReconnect(websocket);
 
   return new WebSocketRPCLink({
     websocket: websocket as unknown as Pick<
