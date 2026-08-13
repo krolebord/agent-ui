@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { ProjectFavicon } from "./project-favicon";
 
 type EditorTarget = { mode: "create" } | { mode: "edit"; entry: SkillEntry };
 
@@ -221,8 +222,14 @@ export function SkillsPage() {
               ) : (
                 groups.map((group) => (
                   <div key={group.key}>
-                    <div className="bg-muted/50 text-muted-foreground sticky top-0 px-3 py-1.5 text-xs font-medium">
-                      {group.label}
+                    <div className="bg-muted/50 text-muted-foreground sticky top-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium">
+                      {group.key !== GLOBAL_SCOPE ? (
+                        <ProjectFavicon
+                          projectPath={group.key}
+                          className="size-3"
+                        />
+                      ) : null}
+                      <span className="truncate">{group.label}</span>
                     </div>
                     <ul className="divide-y divide-border/40">
                       {group.entries.map((entry) => (
