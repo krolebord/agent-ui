@@ -101,6 +101,11 @@ export function DiffReviewCommitDialog() {
           onCommitted?.();
           invalidateDiff();
         },
+        onUndone: () => {
+          onCommitted?.();
+          invalidateDiff();
+          invalidateHistory();
+        },
       },
     )
       .then(() => {

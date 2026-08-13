@@ -717,6 +717,156 @@ describe("ProjectGitService", () => {
     );
   });
 
+  describe("undoLastCommit", () => {
+    const headHash = "a".repeat(40);
+    const parentHash = "b".repeat(40);
+
+    function mockUndoGit(input?: {
+      branch?: string | null;
+      head?: string;
+      parents?: string;
+      unpushed?: string[] | Error;
+      originUnpushed?: string[] | Error;
+      resetError?: Error;
+    }) {
+      checkIsRepoMock.mockResolvedValue(true);
+      branchLocalMock.mockResolvedValue({
+        current: input?.branch ?? "main",
+        branches: {},
+      });
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "symbolic-ref" && args[1] === "--short") {
+            const branch = input?.branch === undefined ? "main" : input.branch;
+            if (!branch) {
+              throw new Error("detached HEAD");
+            }
+            return `${branch}\n`;
+          }
+          if (args[0] === "rev-parse" && args[1] === "HEAD") {
+            return `${input?.head ?? headHash}\n`;
+          }
+          if (
+            args[0] === "log" &&
+            args.includes("-1") &&
+            args.includes("--format=%P")
+          ) {
+            return `${input?.parents ?? parentHash}\n`;
+          }
+          if (args[0] === "rev-list" && args[1] === "@{upstream}..HEAD") {
+            const unpushed = input?.unpushed;
+            if (unpushed instanceof Error) {
+              throw unpushed;
+            }
+            return `${(unpushed ?? [headHash]).join("\n")}\n`;
+          }
+          if (
+            args[0] === "rev-list" &&
+            args[1] === "HEAD" &&
+            args.includes("--remotes=origin")
+          ) {
+            const originUnpushed = input?.originUnpushed;
+            if (originUnpushed instanceof Error) {
+              throw originUnpushed;
+            }
+            return `${(originUnpushed ?? []).join("\n")}\n`;
+          }
+          if (args[0] === "reset") {
+            if (input?.resetError) {
+              throw input.resetError;
+            }
+            return "";
+          }
+          return "";
+        },
+      );
+    }
+
+    it("soft-resets HEAD when the latest commit is unpushed", async () => {
+      mockUndoGit();
+      const service = new ProjectGitService(defineProjectState());
+
+      await service.undoLastCommit("/repo-one");
+
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "reset",
+        "--soft",
+        "HEAD~1",
+      ]);
+    });
+
+    it("uses unpublished origin commits when no upstream is configured", async () => {
+      mockUndoGit({
+        unpushed: new Error("no upstream configured"),
+        originUnpushed: [headHash],
+      });
+      const service = new ProjectGitService(defineProjectState());
+
+      await service.undoLastCommit("/repo-one");
+
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "rev-list",
+        "HEAD",
+        "--not",
+        "--remotes=origin",
+      ]);
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "reset",
+        "--soft",
+        "HEAD~1",
+      ]);
+    });
+
+    it("rejects a detached HEAD", async () => {
+      mockUndoGit({ branch: null });
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.undoLastCommit("/repo-one")).rejects.toThrow(
+        "Cannot undo commit from a detached HEAD.",
+      );
+      expect(rawMock).not.toHaveBeenCalledWith(
+        "/repo-one",
+        expect.arrayContaining(["reset"]),
+      );
+    });
+
+    it("rejects the root commit", async () => {
+      mockUndoGit({ parents: "" });
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.undoLastCommit("/repo-one")).rejects.toThrow(
+        "Cannot undo the only commit on this branch.",
+      );
+    });
+
+    it("rejects a merge commit", async () => {
+      mockUndoGit({ parents: `${parentHash} ${"c".repeat(40)}` });
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.undoLastCommit("/repo-one")).rejects.toThrow(
+        "Cannot undo a merge commit.",
+      );
+    });
+
+    it("rejects a commit that has already been pushed", async () => {
+      mockUndoGit({ unpushed: [] });
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.undoLastCommit("/repo-one")).rejects.toThrow(
+        "Cannot undo commit: the latest commit has already been pushed.",
+      );
+    });
+
+    it("rejects when the path is not a git repository", async () => {
+      checkIsRepoMock.mockResolvedValue(false);
+      const service = new ProjectGitService(defineProjectState());
+
+      await expect(service.undoLastCommit("/plain-dir")).rejects.toThrow(
+        "Project is not a Git repository.",
+      );
+    });
+  });
+
   it("discards a staged new file by resetting it and deleting it", async () => {
     checkIsRepoMock.mockResolvedValue(true);
     branchLocalMock.mockResolvedValue({ current: "main", branches: {} });
@@ -1770,7 +1920,51 @@ describe("ProjectGitService", () => {
       ]);
     });
 
-    it("treats all commits as pushed when no upstream is configured", async () => {
+    it("marks commits not on origin as unpushed when no upstream is configured", async () => {
+      checkIsRepoMock.mockResolvedValue(true);
+      rawMock.mockImplementation(
+        async (_projectPath: string, args: string[]) => {
+          if (args[0] === "rev-parse" && args[1] === "--verify") {
+            return `${hashA}\n`;
+          }
+          if (args[0] === "rev-list" && args[1] === "@{upstream}..HEAD") {
+            throw new Error("no upstream configured");
+          }
+          if (
+            args[0] === "rev-list" &&
+            args[1] === "HEAD" &&
+            args.includes("--remotes=origin")
+          ) {
+            return `${hashA}\n`;
+          }
+          if (args[0] === "log") {
+            return [
+              logRecord({ hash: hashA, subject: "Local only" }),
+              logRecord({ hash: hashB, subject: "Already on origin" }),
+            ].join("\n");
+          }
+          return "";
+        },
+      );
+
+      const service = new ProjectGitService(defineProjectState());
+      const page = await service.getCommitHistory("/repo-one", { limit: 30 });
+
+      expect(rawMock).toHaveBeenCalledWith("/repo-one", [
+        "rev-list",
+        "HEAD",
+        "--not",
+        "--remotes=origin",
+      ]);
+      expect(
+        page.commits.map(({ hash, unpushed }) => ({ hash, unpushed })),
+      ).toEqual([
+        { hash: hashA, unpushed: true },
+        { hash: hashB, unpushed: false },
+      ]);
+    });
+
+    it("treats commits as pushed when they are already on origin", async () => {
       checkIsRepoMock.mockResolvedValue(true);
       rawMock.mockImplementation(
         async (_projectPath: string, args: string[]) => {

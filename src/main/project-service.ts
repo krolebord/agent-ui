@@ -484,6 +484,26 @@ export async function pullProjectFromRemote(
   }
 }
 
+/**
+ * Undoes HEAD behind the same per-project commit lock as commit/push/pull, so
+ * a toast Undo cannot race the autogenerate amend that rewrites that commit.
+ */
+export async function undoLastCommit(
+  path: string,
+  context: {
+    projectGitService: {
+      undoLastCommit(projectPath: string): Promise<void>;
+    };
+  },
+): Promise<void> {
+  const releaseCommitLock = await acquireProjectCommitLock(path);
+  try {
+    await context.projectGitService.undoLastCommit(path);
+  } finally {
+    releaseCommitLock();
+  }
+}
+
 interface CommitSelectedChangesGitService {
   getSelectedChangesDiff(
     projectPath: string,
@@ -798,6 +818,22 @@ export const projectsRouter = {
             error instanceof Error && error.message.trim()
               ? error.message
               : "Git pull failed.",
+        });
+      }
+    }),
+  undoLastCommit: procedure
+    .input(z.object({ path: projectPathSchema }))
+    .handler(async ({ input, context }) => {
+      const path = normalizeProjectPath(input.path);
+      assertProjectPathInteractionAllowed(path, context);
+      try {
+        await undoLastCommit(path, context);
+      } catch (error) {
+        throw new ORPCError("BAD_REQUEST", {
+          message:
+            error instanceof Error && error.message.trim()
+              ? error.message
+              : "Failed to undo commit.",
         });
       }
     }),

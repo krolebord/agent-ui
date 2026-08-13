@@ -230,24 +230,39 @@ function parseCommitHistoryOutput(
   return commits;
 }
 
+function parseRevListHashes(output: string): Set<string> {
+  return new Set(
+    output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+}
+
 /**
- * Hashes of commits not yet pushed to the configured upstream. Returns null
- * when there is no upstream (or HEAD is detached), so callers can tell
- * "everything is pushed" apart from "there is nothing to compare against".
+ * Hashes of commits not yet published. Prefers `@{upstream}..HEAD`; when no
+ * upstream is configured, falls back to commits on HEAD that aren't on any
+ * origin ref (the same range a first-time "Publish branch" would push).
+ * Returns null only when neither range can be resolved.
  */
 async function resolveUnpushedCommitHashes(
   git: ReturnType<typeof simpleGit>,
 ): Promise<Set<string> | null> {
   try {
     const output = await git.raw(["rev-list", "@{upstream}..HEAD"]);
-    return new Set(
-      output
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean),
-    );
+    return parseRevListHashes(output);
   } catch {
-    return null;
+    try {
+      const output = await git.raw([
+        "rev-list",
+        "HEAD",
+        "--not",
+        "--remotes=origin",
+      ]);
+      return parseRevListHashes(output);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -1254,6 +1269,64 @@ export class ProjectGitService {
     } catch (error) {
       const msg =
         error instanceof Error ? error.message : "Failed to amend commit.";
+      throw new Error(msg);
+    }
+
+    await this.refreshProject(projectPath);
+  }
+
+  /**
+   * Moves HEAD back one commit with `--soft`, so the undone commit's files
+   * stay in the index and show up again in the uncommitted diff. Refuses
+   * detached HEAD, the root commit, merge commits, and anything already
+   * published to the upstream (or to origin when no upstream is set).
+   */
+  async undoLastCommit(projectPath: string): Promise<void> {
+    const git = createGit(projectPath);
+    const isRepo = await git.checkIsRepo();
+    if (!isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const branch = (
+      await git.raw(["symbolic-ref", "--short", "HEAD"]).catch(() => "")
+    ).trim();
+    if (!branch) {
+      throw new Error("Cannot undo commit from a detached HEAD.");
+    }
+
+    const head = (await git.raw(["rev-parse", "HEAD"]).catch(() => "")).trim();
+    if (!head) {
+      throw new Error("Cannot undo commit: this branch has no commits.");
+    }
+
+    const parents = (
+      await git.raw(["log", "-1", "--format=%P", "HEAD"]).catch(() => "")
+    )
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (parents.length === 0) {
+      throw new Error("Cannot undo the only commit on this branch.");
+    }
+    if (parents.length > 1) {
+      throw new Error("Cannot undo a merge commit.");
+    }
+
+    const unpushedHashes = await resolveUnpushedCommitHashes(git);
+    if (!unpushedHashes?.has(head)) {
+      throw new Error(
+        "Cannot undo commit: the latest commit has already been pushed.",
+      );
+    }
+
+    try {
+      await git.raw(["reset", "--soft", "HEAD~1"]);
+    } catch (error) {
+      const msg =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Failed to undo commit.";
       throw new Error(msg);
     }
 

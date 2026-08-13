@@ -10,6 +10,7 @@ import {
   pullProjectFromRemote,
   pushProjectToRemote,
   refreshTrackedProject,
+  undoLastCommit,
 } from "../../src/main/project-service";
 
 const readProjectSettingsFileMock = vi.hoisted(() => vi.fn());
@@ -357,6 +358,46 @@ describe("project-service pullProjectFromRemote", () => {
         projectGitService: { pullFromRemote },
       }),
     ).rejects.toThrow("pull failed");
+
+    const releaseCommitLock = await acquireProjectCommitLock("/repo");
+    releaseCommitLock();
+  });
+});
+
+describe("project-service undoLastCommit", () => {
+  it("waits for a pending commit pipeline before undoing", async () => {
+    const events: string[] = [];
+    const undoLastCommitFn = vi.fn(async () => {
+      events.push("undone");
+    });
+
+    const releaseCommitLock = await acquireProjectCommitLock("/repo");
+
+    const undoPromise = undoLastCommit("/repo", {
+      projectGitService: { undoLastCommit: undoLastCommitFn },
+    });
+
+    await flushMicrotasks();
+    expect(undoLastCommitFn).not.toHaveBeenCalled();
+
+    events.push("commit-released");
+    releaseCommitLock();
+
+    await undoPromise;
+    expect(events).toEqual(["commit-released", "undone"]);
+    expect(undoLastCommitFn).toHaveBeenCalledWith("/repo");
+  });
+
+  it("releases the commit lock when undo fails", async () => {
+    const undoLastCommitFn = vi.fn(async () => {
+      throw new Error("already pushed");
+    });
+
+    await expect(
+      undoLastCommit("/repo", {
+        projectGitService: { undoLastCommit: undoLastCommitFn },
+      }),
+    ).rejects.toThrow("already pushed");
 
     const releaseCommitLock = await acquireProjectCommitLock("/repo");
     releaseCommitLock();

@@ -32,6 +32,7 @@ import {
   LoaderCircle,
   RefreshCw,
   Tag,
+  Undo2,
 } from "lucide-react";
 import {
   createContext,
@@ -45,6 +46,7 @@ import { toast } from "sonner";
 import { createStore, type ExtractState } from "zustand";
 import { combine } from "zustand/middleware";
 import { useStore } from "zustand/react";
+import { useConfirmDialogStore } from "./confirm-dialog";
 import { useAppState } from "./sync-state-provider";
 import { Button } from "./ui/button";
 import {
@@ -336,10 +338,14 @@ function CommitDetailsHeader({
   commit,
   files,
   showDiffViewToggle = true,
+  canUndo = false,
+  onUndo,
 }: {
   commit: GitHistoryCommit;
   files: FileDiffMetadata[];
   showDiffViewToggle?: boolean;
+  canUndo?: boolean;
+  onUndo?: () => void;
 }) {
   const { copied, copy } = useCopyToClipboard();
   const shortHash = commit.hash.slice(0, 7);
@@ -408,6 +414,20 @@ function CommitDetailsHeader({
         )}
         {shortHash}
       </Button>
+      {canUndo ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-5 shrink-0 gap-1 px-1.5 text-[10px] text-zinc-500 hover:text-zinc-200"
+          onClick={onUndo}
+          aria-label="Undo this commit"
+          title="Undo this commit and keep the changes"
+        >
+          <Undo2 className="size-2.5" />
+          Undo
+        </Button>
+      ) : null}
       {showDiffViewToggle ? <DiffViewModeToggle /> : null}
     </header>
   );
@@ -589,7 +609,31 @@ function ProjectGitHistoryPaneContent() {
     }),
   );
 
-  const remoteSyncPending = pushMutation.isPending || pullMutation.isPending;
+  const undoMutation = useMutation(
+    orpc.projects.undoLastCommit.mutationOptions({
+      onSuccess: () => {
+        toast.success("Commit undone");
+        void queryClient.invalidateQueries({
+          queryKey: orpc.projects.getCommitHistory.key(),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: orpc.projects.getUncommittedDiff.key(),
+        });
+      },
+      onError: (error) => {
+        toast.error(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : "Failed to undo commit",
+        );
+      },
+    }),
+  );
+
+  const confirmUndo = useConfirmDialogStore((state) => state.confirm);
+
+  const remoteSyncPending =
+    pushMutation.isPending || pullMutation.isPending || undoMutation.isPending;
 
   const commits = useMemo(
     () => historyQuery.data?.pages.flatMap((page) => page.commits) ?? [],
@@ -603,6 +647,27 @@ function ProjectGitHistoryPaneContent() {
     const selectedCommitIndex = foundIndex >= 0 ? foundIndex : 0;
     return commits[selectedCommitIndex] ?? null;
   }, [commits, selectedCommitHash]);
+
+  const headCommit = commits[0] ?? null;
+  const canUndoSelected = Boolean(
+    selectedCommit &&
+      headCommit &&
+      selectedCommit.hash === headCommit.hash &&
+      headCommit.unpushed &&
+      headCommit.parentHashes.length === 1 &&
+      !projectLocked &&
+      !remoteSyncPending,
+  );
+
+  const requestUndoLastCommit = () => {
+    const subject = selectedCommit?.subject.trim() || "the latest commit";
+    confirmUndo({
+      title: "Undo commit",
+      description: `Undo "${subject}"? The commit is removed from this branch. The files stay in your working tree.`,
+      confirmLabel: "Undo",
+      onConfirm: () => undoMutation.mutateAsync({ path: projectPath }),
+    });
+  };
 
   const diffQuery = useQuery(
     orpc.projects.getCommitDiff.queryOptions({
@@ -825,7 +890,12 @@ function ProjectGitHistoryPaneContent() {
       {selectedCommit ? (
         <>
           {includeDetailsHeader ? (
-            <CommitDetailsHeader commit={selectedCommit} files={files ?? []} />
+            <CommitDetailsHeader
+              commit={selectedCommit}
+              files={files ?? []}
+              canUndo={canUndoSelected}
+              onUndo={requestUndoLastCommit}
+            />
           ) : null}
           <div className="min-h-0 flex-1 overflow-auto">
             {diffQuery.isLoading ? (
@@ -926,6 +996,8 @@ function ProjectGitHistoryPaneContent() {
                 commit={selectedCommit}
                 files={files ?? []}
                 showDiffViewToggle={false}
+                canUndo={canUndoSelected}
+                onUndo={requestUndoLastCommit}
               />
               {changedFilesList("min-h-0 flex-1 border-l-0", () =>
                 setMobileScreen("file-diff"),

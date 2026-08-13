@@ -11,7 +11,10 @@ type CommitInput = {
 
 type CommitHandlers = {
   onCommitted?: () => void;
+  onUndone?: () => void;
 };
+
+const undoToastDurationMs = 8_000;
 
 export async function runCommitWithProgress(
   input: CommitInput,
@@ -31,7 +34,35 @@ export async function runCommitWithProgress(
           break;
       }
     }
-    toast.success("Commit created", { id: toastId });
+
+    let undoStarted = false;
+    toast.success("Commit created", {
+      id: toastId,
+      duration: undoToastDurationMs,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          if (undoStarted) {
+            return;
+          }
+          undoStarted = true;
+          void (async () => {
+            try {
+              await orpc.projects.undoLastCommit.call({ path: input.path });
+              handlers.onUndone?.();
+              toast.success("Commit undone");
+            } catch (error) {
+              const { message } = createClickableErrorToastResult(
+                error,
+                "Undo failed",
+                "Failed to undo commit.",
+              );
+              toast.error(message);
+            }
+          })();
+        },
+      },
+    });
   } catch (error) {
     const { message } = createClickableErrorToastResult(
       error,
