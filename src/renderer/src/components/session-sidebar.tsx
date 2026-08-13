@@ -30,27 +30,22 @@ import {
 } from "@renderer/services/terminal-session-selectors";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  CalendarClock,
   ChevronRight,
   EllipsisVertical,
   Eye,
   EyeOff,
-  FileText,
   FolderOpen,
   FolderPlus,
   GitBranch,
   GitFork,
   ImageIcon,
-  PackageOpen,
   PlayIcon,
   Plus,
   RefreshCw,
   Settings,
-  Sparkles,
   SquareIcon,
   TerminalSquare,
   Trash2,
-  Users,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -69,8 +64,7 @@ import {
   statusIndicatorMeta,
   useTypeSpecificSessionMenuActions,
 } from "./session-sidebar-item";
-import { useSettingsStore } from "./settings-dialog";
-import { SidebarViewToggle } from "./sidebar-view-toggle";
+import { SidebarNavMenuItems, SidebarViewToggle } from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
 import { useWorktreeDeleteDialogStore } from "./worktree-delete-dialog";
 
@@ -143,18 +137,8 @@ export function SessionSidebar() {
   const sessions = useAppState((x) => x.sessions);
   const [showHiddenProjects, setShowHiddenProjects] = useState(false);
 
-  const openSettingsDialog = useSettingsStore((x) => x.openSettingsDialog);
   const openAddProjectDialog = useAddProjectDialogStore((x) => x.open);
   const mainView = useMainViewStore((state) => state.view);
-  const toggleSkills = useMainViewStore((state) => state.toggleSkills);
-  const toggleGlobalInstructions = useMainViewStore(
-    (state) => state.toggleGlobalInstructions,
-  );
-  const toggleScheduledSessions = useMainViewStore(
-    (state) => state.toggleScheduledSessions,
-  );
-  const toggleAccounts = useMainViewStore((state) => state.toggleAccounts);
-  const toggleArtifacts = useMainViewStore((state) => state.toggleArtifacts);
 
   const groups: ProjectSessionGroup[] = useMemo(
     () =>
@@ -269,44 +253,21 @@ export function SessionSidebar() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={toggleSkills}>
-                <Sparkles className="size-3.5" />
-                Skills
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={toggleGlobalInstructions}>
-                <FileText className="size-3.5" />
-                Global instructions
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={toggleScheduledSessions}>
-                <CalendarClock className="size-3.5" />
-                Scheduled sessions
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={toggleAccounts}>
-                <Users className="size-3.5" />
-                Accounts
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={toggleArtifacts}>
-                <PackageOpen className="size-3.5" />
-                Artifacts
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => setShowHiddenProjects((value) => !value)}
-              >
-                {showHiddenProjects ? (
-                  <Eye className="size-3.5" />
-                ) : (
-                  <EyeOff className="size-3.5" />
-                )}
-                {showHiddenProjects
-                  ? "Hide hidden projects"
-                  : "Show hidden projects"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={openSettingsDialog}>
-                <Settings className="size-3.5" />
-                Settings
-              </DropdownMenuItem>
+              <SidebarNavMenuItems>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => setShowHiddenProjects((value) => !value)}
+                >
+                  {showHiddenProjects ? (
+                    <Eye className="size-3.5" />
+                  ) : (
+                    <EyeOff className="size-3.5" />
+                  )}
+                  {showHiddenProjects
+                    ? "Hide hidden projects"
+                    : "Show hidden projects"}
+                </DropdownMenuItem>
+              </SidebarNavMenuItems>
             </DropdownMenuContent>
           </DropdownMenu>
           <SidebarViewToggle />

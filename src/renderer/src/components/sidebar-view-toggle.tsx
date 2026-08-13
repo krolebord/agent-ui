@@ -13,10 +13,12 @@ import {
   Inbox,
   ListTree,
   PackageOpen,
+  RefreshCw,
   Settings,
   Sparkles,
   Users,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useSettingsStore } from "./settings-dialog";
 import { useAppState } from "./sync-state-provider";
 
@@ -58,7 +60,7 @@ export function SidebarViewToggle() {
  * The main-view entries shared by both sidebars' overflow menus, so switching
  * sidebars never costs you access to skills, schedules, accounts or settings.
  */
-export function SidebarNavMenuItems() {
+export function SidebarNavMenuItems({ children }: { children?: ReactNode }) {
   const openSettingsDialog = useSettingsStore((x) => x.openSettingsDialog);
   const toggleSkills = useMainViewStore((state) => state.toggleSkills);
   const toggleGlobalInstructions = useMainViewStore(
@@ -92,10 +94,15 @@ export function SidebarNavMenuItems() {
         <PackageOpen className="size-3.5" />
         Artifacts
       </DropdownMenuItem>
+      {children}
       <DropdownMenuSeparator />
       <DropdownMenuItem onClick={openSettingsDialog}>
         <Settings className="size-3.5" />
         Settings
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => window.location.reload()}>
+        <RefreshCw className="size-3.5" />
+        Reload app
       </DropdownMenuItem>
     </>
   );
