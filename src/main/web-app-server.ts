@@ -34,6 +34,8 @@ const contentTypes: Record<string, string> = {
   ".png": "image/png",
   ".svg": "image/svg+xml",
   ".webp": "image/webp",
+  ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
 };
@@ -197,9 +199,10 @@ async function serveStatic(
   res.writeHead(200, {
     "content-type": contentTypes[ext] ?? "application/octet-stream",
     "content-length": stats.size,
-    "cache-control": filePath.endsWith("index.html")
-      ? "no-store"
-      : "public, max-age=31536000, immutable",
+    "cache-control":
+      filePath.endsWith("index.html") || filePath.endsWith(".webmanifest")
+        ? "no-store"
+        : "public, max-age=31536000, immutable",
   });
   createReadStream(filePath).pipe(res);
 }

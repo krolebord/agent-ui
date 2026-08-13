@@ -91,6 +91,32 @@ describe("web app server", () => {
     expect(await response.text()).toBe('<div id="root"></div>');
   });
 
+  it("serves the web app manifest without caching", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    await writeFile(
+      path.join(rendererDist, "manifest.webmanifest"),
+      '{"name":"Agent UI"}',
+    );
+
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => null,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${server.url}/manifest.webmanifest`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "application/manifest+json",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe('{"name":"Agent UI"}');
+  });
+
   it("uses the next port when the requested port is occupied", async () => {
     const reservation = await reservePort();
     occupiedServers.push(reservation.server);
