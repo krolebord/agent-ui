@@ -25,11 +25,6 @@ export interface SearchableModelOption {
 const MAX_RECENT_MODELS = 8;
 const MODEL_FILTER_SCORE_THRESHOLD = 0.2;
 
-const modelCollator = new Intl.Collator(undefined, {
-  numeric: true,
-  sensitivity: "base",
-});
-
 interface SearchableModelPickerProps {
   id?: string;
   value: string;
@@ -42,10 +37,6 @@ interface SearchableModelPickerProps {
 
 function uniqueModels(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))];
-}
-
-function sortModels(models: SearchableModelOption[]): SearchableModelOption[] {
-  return [...models].sort((a, b) => modelCollator.compare(a.label, b.label));
 }
 
 export function addRecentModel(
@@ -91,9 +82,7 @@ export function SearchableModelPicker({
     const recentValueSet = new Set(recentOptions.map((model) => model.value));
 
     return {
-      allModels: sortModels(
-        models.filter((model) => !recentValueSet.has(model.value)),
-      ),
+      allModels: models.filter((model) => !recentValueSet.has(model.value)),
       recentModelOptions: recentOptions,
       selectedModel: modelsByValue.get(value) ?? {
         label: value,
