@@ -228,6 +228,7 @@ describe("CursorAgentSessionsManager", () => {
         "session-1"
       ]?.status,
     ).toBe("idle");
+    expect(terminalSessionSpies.write).toHaveBeenCalledWith("\u001b[I");
 
     monitor?.callbacks.onHookEvent?.({ conversation_id: "chat-1" });
     expect(
@@ -242,6 +243,7 @@ describe("CursorAgentSessionsManager", () => {
         "session-1"
       ]?.status,
     ).toBe("running");
+    expect(terminalSessionSpies.write).toHaveBeenLastCalledWith("\u001b[O");
 
     monitor?.callbacks.onStatusChange("awaiting_user_response");
     expect(
@@ -249,6 +251,7 @@ describe("CursorAgentSessionsManager", () => {
         "session-1"
       ]?.status,
     ).toBe("awaiting_user_response");
+    expect(terminalSessionSpies.write).toHaveBeenLastCalledWith("\u001b[I");
 
     await manager.stopLiveSession("session-1");
     expect(sessionLogFileManager.cleanup).toHaveBeenCalledWith(

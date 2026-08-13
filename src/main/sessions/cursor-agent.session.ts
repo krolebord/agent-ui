@@ -9,6 +9,7 @@ import {
   type CursorAgentMode,
   type CursorAgentPermissionMode,
 } from "../cursor-cli";
+import { CursorFocusReporter } from "../cursor-focus-reporter";
 import { getCursorUsage } from "../cursor-usage";
 import {
   createInMemorySessionBufferStore,
@@ -27,9 +28,6 @@ import {
 import type { SessionServiceState } from "./state";
 
 const DEFAULT_CURSOR_AGENT_SESSION_TITLE = "Cursor Agent Session";
-const CURSOR_FOCUS_REPORTING_ENABLED = "\u001b[?1004h";
-const CURSOR_FOCUS_OUT = "\u001b[O";
-const CURSOR_FOCUS_IN = "\u001b[I";
 
 const cursorAgentModeSchema = z.enum(["plan", "ask"]).optional();
 const cursorAgentPermissionModeSchema = z
@@ -404,6 +402,18 @@ export class CursorAgentSessionsManager {
       },
     });
     let isDisposing = false;
+    let injectingFocus = false;
+    const focusReporter = new CursorFocusReporter({
+      write: (data) => {
+        injectingFocus = true;
+        try {
+          this.terminalManager.writeToTerminal(sessionId, data);
+        } finally {
+          injectingFocus = false;
+        }
+      },
+    });
+    disposable.addDisposable(() => focusReporter.dispose());
 
     const setSessionStatus = (
       nextStatus: SessionStatus,
@@ -419,6 +429,7 @@ export class CursorAgentSessionsManager {
           target.lastActivityAt = Date.now();
         }
       });
+      focusReporter.setStatus(nextStatus);
     };
 
     const hookLogFilePath = this.sessionLogFileManager
@@ -481,7 +492,6 @@ export class CursorAgentSessionsManager {
     });
 
     let activityState: ClaudeActivityState | null = activityMonitor.getState();
-    let focusReportingOutputTail = "";
 
     const { args: finalArgs } = buildCursorAgentArgs({
       cursorChatId,
@@ -524,19 +534,17 @@ export class CursorAgentSessionsManager {
           TERM_PROGRAM_VERSION: "1.0",
         },
       },
-      transformInput: (data) => data.replaceAll(CURSOR_FOCUS_IN, ""),
+      transformInput: (data) => {
+        if (injectingFocus) {
+          return data;
+        }
+        return focusReporter.transformInput(data);
+      },
       onData: (chunk) => {
         if (!isDisposing) {
           activityMonitor.handleTerminalOutput(chunk);
         }
-
-        const focusReportingOutput = focusReportingOutputTail + chunk;
-        if (focusReportingOutput.includes(CURSOR_FOCUS_REPORTING_ENABLED)) {
-          this.terminalManager.writeToTerminal(sessionId, CURSOR_FOCUS_OUT);
-        }
-        focusReportingOutputTail = focusReportingOutput.slice(
-          -(CURSOR_FOCUS_REPORTING_ENABLED.length - 1),
-        );
+        focusReporter.handleOutput(chunk);
       },
       onStatusChange: (status) => {
         setSessionStatus(getCursorSessionStatus(status, activityState), {

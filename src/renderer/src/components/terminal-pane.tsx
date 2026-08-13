@@ -298,6 +298,8 @@ export function TerminalPane({
     return () => {
       detachTouchScroll();
       container.removeEventListener("paste", onPaste, true);
+      // Blur while onData is still attached so DECSET 1004 focus-out reaches the PTY.
+      terminal.blur();
       onDataDisposable.dispose();
       onResizeDisposable.dispose();
       resizeObserver.disconnect();
