@@ -1,4 +1,11 @@
 import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
+import {
+  computeUsagePace,
+  computeUsagePaceBetween,
+  formatUsagePaceDelta,
+  parseEpochMillis,
+  type UsagePace,
+} from "@renderer/lib/usage-pace";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { useQuery } from "@tanstack/react-query";
@@ -13,6 +20,12 @@ const BUCKET_LABELS: { key: UsageBucketKey; label: string }[] = [
   { key: "seven_day", label: "Weekly" },
   { key: "seven_day_sonnet", label: "Sonnet" },
 ];
+
+const CLAUDE_WINDOW_SECONDS: Record<UsageBucketKey, number> = {
+  five_hour: 5 * 60 * 60,
+  seven_day: 7 * 24 * 60 * 60,
+  seven_day_sonnet: 7 * 24 * 60 * 60,
+};
 
 type UsageSource = "claude" | "codex" | "cursorAgent";
 
@@ -84,17 +97,48 @@ function formatMembership(type: string | null | undefined): string | null {
     .join(" ");
 }
 
+function formatCodexWindowLabel(windowSeconds: number): string {
+  const minutes = windowSeconds / 60;
+  if (Math.abs(minutes - 10_080) <= 60) {
+    return "Weekly";
+  }
+  if (Math.abs(minutes - 300) <= 15) {
+    return "5 hour";
+  }
+  if (Math.abs(minutes - 60) <= 5) {
+    return "Hourly";
+  }
+
+  const hours = minutes / 60;
+  if (hours >= 36) {
+    return `${Math.round(hours / 24)} day`;
+  }
+  if (hours >= 1.5) {
+    return `${Math.round(hours)} hour`;
+  }
+  return `${Math.round(minutes)} min`;
+}
+
 function MetricBar({
   label,
   subLabel,
   valueLabel,
   pct,
+  pace,
 }: {
   label: string;
   subLabel?: string | null;
   valueLabel: string;
   pct: number;
+  pace?: UsagePace | null;
 }) {
+  const roundedDelta = pace ? Math.round(pace.deltaPercent) : null;
+  const paceDeltaLabel =
+    roundedDelta != null && roundedDelta !== 0
+      ? formatUsagePaceDelta(roundedDelta)
+      : null;
+  const paceIsDeficit = (roundedDelta ?? 0) < 0;
+
   return (
     <div className="space-y-0.5">
       <div className="flex items-center justify-between text-[10px]">
@@ -104,15 +148,36 @@ function MetricBar({
             <span className="text-zinc-500">{` (${subLabel})`}</span>
           ) : null}
         </span>
-        <span className={cn("tabular-nums", getTextColor(pct))}>
-          {valueLabel}
+        <span className="flex items-baseline gap-1 tabular-nums">
+          <span className={getTextColor(pct)}>{valueLabel}</span>
+          {paceDeltaLabel && roundedDelta != null ? (
+            <span
+              className={paceIsDeficit ? "text-[#DE7356]" : "text-zinc-500"}
+              title={
+                paceIsDeficit
+                  ? `${Math.abs(roundedDelta)}% deficit vs even pace`
+                  : `${roundedDelta}% reserve vs even pace`
+              }
+            >
+              {paceDeltaLabel}
+            </span>
+          ) : null}
         </span>
       </div>
-      <div className="h-1 rounded-full bg-white/10">
+      <div className="relative h-1 rounded-full bg-white/10">
         <div
           className={cn("h-full rounded-full transition-all", getBarColor(pct))}
           style={{ width: `${Math.min(pct, 100)}%` }}
         />
+        {pace ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 z-10 h-2 w-px -translate-x-1/2 -translate-y-1/2 bg-zinc-300/80"
+            style={{
+              left: `${Math.min(Math.max(pace.elapsedPercent, 0), 100)}%`,
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -199,13 +264,23 @@ export function UsagePanel() {
       const planLabel = formatMembership(usage.membershipType) ?? "Plan";
 
       const slData = usage.spendLimitUsage;
-      const cycleEnd = new Date(Number(usage.billingCycleEnd));
-      const cycleEndLabel = Number.isNaN(cycleEnd.getTime())
-        ? null
-        : new Intl.DateTimeFormat(undefined, {
-            month: "short",
-            day: "numeric",
-          }).format(cycleEnd);
+      const cycleStartMs = parseEpochMillis(usage.billingCycleStart);
+      const cycleEndMs = parseEpochMillis(usage.billingCycleEnd);
+      const cycleEndLabel =
+        cycleEndMs == null
+          ? null
+          : new Intl.DateTimeFormat(undefined, {
+              month: "short",
+              day: "numeric",
+            }).format(new Date(cycleEndMs));
+      const monthlyPace =
+        cycleStartMs != null && cycleEndMs != null
+          ? computeUsagePaceBetween({
+              usedPercent: plan.totalPercentUsed,
+              startMs: cycleStartMs,
+              endMs: cycleEndMs,
+            })
+          : null;
 
       const onDemand: {
         key: string;
@@ -241,12 +316,13 @@ export function UsagePanel() {
       return (
         <div className="border-t border-border/70 p-2">
           <div className="space-y-1.5">
-            {cycleEndLabel ? (
-              <div className="text-[10px] text-zinc-500">
-                {planLabel}
-                {` (resets ${cycleEndLabel})`}
-              </div>
-            ) : null}
+            <MetricBar
+              label={planLabel}
+              subLabel={cycleEndLabel ? `resets ${cycleEndLabel}` : null}
+              valueLabel={`${Math.round(plan.totalPercentUsed)}%`}
+              pct={Math.round(plan.totalPercentUsed)}
+              pace={monthlyPace}
+            />
             {plan.autoPercentUsed != null ? (
               <MetricBar
                 label="Auto"
@@ -271,6 +347,15 @@ export function UsagePanel() {
                   label={entry.label}
                   valueLabel={`$${used.toFixed(2)} / $${cap.toFixed(2)}`}
                   pct={pct}
+                  pace={
+                    cycleStartMs != null && cycleEndMs != null
+                      ? computeUsagePaceBetween({
+                          usedPercent: (entry.used / entry.limit) * 100,
+                          startMs: cycleStartMs,
+                          endMs: cycleEndMs,
+                        })
+                      : null
+                  }
                 />
               );
             })}
@@ -327,18 +412,11 @@ export function UsagePanel() {
     if (codexQuery.data?.ok && codexQuery.data.usage) {
       const usage = codexQuery.data.usage as CodexUsageData;
       const planType = usage.planType?.trim();
-      const primaryPct = usage.primaryWindow
-        ? Math.round(usage.primaryWindow.utilization)
-        : null;
-      const secondaryPct = usage.secondaryWindow
-        ? Math.round(usage.secondaryWindow.utilization)
-        : null;
-      const primaryResetsAt = usage.primaryWindow
-        ? formatResetsAt(usage.primaryWindow.resetsAt)
-        : null;
-      const secondaryResetsAt = usage.secondaryWindow
-        ? formatResetsAt(usage.secondaryWindow.resetsAt)
-        : null;
+      const windows = [usage.primaryWindow, usage.secondaryWindow]
+        .filter(
+          (window): window is NonNullable<typeof window> => window != null,
+        )
+        .sort((a, b) => a.windowSeconds - b.windowSeconds);
       return (
         <div className="border-t border-border/70 p-2">
           <div className="space-y-1.5">
@@ -348,58 +426,23 @@ export function UsagePanel() {
                 <span className="tabular-nums text-zinc-300">{planType}</span>
               </div>
             ) : null}
-            {primaryPct !== null ? (
-              <div className="space-y-0.5">
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-zinc-400">
-                    5 hour
-                    {primaryResetsAt ? (
-                      <span className="text-zinc-500">{` (${primaryResetsAt})`}</span>
-                    ) : null}
-                  </span>
-                  <span
-                    className={cn("tabular-nums", getTextColor(primaryPct))}
-                  >
-                    {primaryPct}%
-                  </span>
-                </div>
-                <div className="h-1 rounded-full bg-white/10">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      getBarColor(primaryPct),
-                    )}
-                    style={{ width: `${Math.min(primaryPct, 100)}%` }}
-                  />
-                </div>
-              </div>
-            ) : null}
-            {secondaryPct !== null ? (
-              <div className="space-y-0.5">
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-zinc-400">
-                    Weekly
-                    {secondaryResetsAt ? (
-                      <span className="text-zinc-500">{` (${secondaryResetsAt})`}</span>
-                    ) : null}
-                  </span>
-                  <span
-                    className={cn("tabular-nums", getTextColor(secondaryPct))}
-                  >
-                    {secondaryPct}%
-                  </span>
-                </div>
-                <div className="h-1 rounded-full bg-white/10">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      getBarColor(secondaryPct),
-                    )}
-                    style={{ width: `${Math.min(secondaryPct, 100)}%` }}
-                  />
-                </div>
-              </div>
-            ) : null}
+            {windows.map((window) => {
+              const pct = Math.round(window.utilization);
+              return (
+                <MetricBar
+                  key={`${window.windowSeconds}-${window.resetsAt ?? ""}`}
+                  label={formatCodexWindowLabel(window.windowSeconds)}
+                  subLabel={formatResetsAt(window.resetsAt)}
+                  valueLabel={`${pct}%`}
+                  pct={pct}
+                  pace={computeUsagePace({
+                    usedPercent: window.utilization,
+                    windowSeconds: window.windowSeconds,
+                    resetsAt: window.resetsAt,
+                  })}
+                />
+              );
+            })}
             {usage.credits?.hasCredits ? (
               <div className="flex items-center justify-between text-[10px]">
                 <span className="text-zinc-400">Credits</span>
@@ -484,30 +527,19 @@ export function UsagePanel() {
             const bucket = usage[key];
             if (!bucket) return null;
             const pct = Math.round(bucket.utilization);
-            const resetsAt = formatResetsAt(bucket.resets_at);
             return (
-              <div key={key} className="space-y-0.5">
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-zinc-400">
-                    {label}
-                    {resetsAt ? (
-                      <span className="text-zinc-500">{` (${resetsAt})`}</span>
-                    ) : null}
-                  </span>
-                  <span className={cn("tabular-nums", getTextColor(pct))}>
-                    {pct}%
-                  </span>
-                </div>
-                <div className="h-1 rounded-full bg-white/10">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      getBarColor(pct),
-                    )}
-                    style={{ width: `${Math.min(pct, 100)}%` }}
-                  />
-                </div>
-              </div>
+              <MetricBar
+                key={key}
+                label={label}
+                subLabel={formatResetsAt(bucket.resets_at)}
+                valueLabel={`${pct}%`}
+                pct={pct}
+                pace={computeUsagePace({
+                  usedPercent: bucket.utilization,
+                  windowSeconds: CLAUDE_WINDOW_SECONDS[key],
+                  resetsAt: bucket.resets_at,
+                })}
+              />
             );
           })}
           {usage.extra_usage?.is_enabled

@@ -120,6 +120,55 @@ describe("getCodexUsage", () => {
     expect(appServerStopMock).toHaveBeenCalledOnce();
   });
 
+  it("keeps a weekly-only window as primary when the 5-hour bucket is absent", async () => {
+    readAccountRateLimitsMock.mockResolvedValue({
+      rateLimits: {
+        limitId: "codex",
+        limitName: null,
+        primary: {
+          usedPercent: 47,
+          windowDurationMins: 10_080,
+          resetsAt: 1_787_040_569,
+        },
+        secondary: null,
+        credits: {
+          hasCredits: false,
+          unlimited: false,
+          balance: null,
+        },
+        planType: "team",
+        rateLimitReachedType: null,
+      },
+      rateLimitsByLimitId: {
+        codex: {
+          limitId: "codex",
+          primary: {
+            usedPercent: 47,
+            windowDurationMins: 10_080,
+            resetsAt: 1_787_040_569,
+          },
+          secondary: null,
+          planType: "team",
+        },
+      },
+    });
+
+    const result = await getCodexUsage();
+
+    expect(result).toMatchObject({
+      ok: true,
+      usage: {
+        planType: "team",
+        primaryWindow: {
+          utilization: 47,
+          windowSeconds: 604_800,
+          resetsAt: "2026-08-18T08:09:29.000Z",
+        },
+        secondaryWindow: null,
+      },
+    });
+  });
+
   it("uses the codex multi-bucket snapshot when the compatibility view is null", async () => {
     readAccountRateLimitsMock.mockResolvedValue({
       rateLimits: null,
