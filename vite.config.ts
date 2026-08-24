@@ -7,6 +7,7 @@ import { visualizer } from "rollup-plugin-visualizer";
 import { defineConfig } from "vite";
 import electron from "vite-plugin-electron/simple";
 import pkg from "./package.json" with { type: "json" };
+import { precompressAssets } from "./scripts/vite-plugin-precompress";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +43,7 @@ export default defineConfig(({ command }) => {
     plugins: [
       react(),
       tailwindcss(),
+      precompressAssets(),
       !!process.env.ANALYZE &&
         visualizer({
           open: true,

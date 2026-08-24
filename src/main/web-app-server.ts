@@ -155,6 +155,41 @@ function redirectToVite(
   res.end();
 }
 
+// Ordered by preference: brotli wins on ratio, gzip is the universal fallback.
+const encodedVariants = [
+  { extension: ".br", token: "br" },
+  { extension: ".gz", token: "gzip" },
+] as const;
+
+function acceptsEncoding(header: string | undefined, token: string) {
+  if (!header) return false;
+  return header.split(",").some((part) => {
+    const [name, ...params] = part.trim().split(";");
+    if (name?.trim().toLowerCase() !== token) return false;
+    const quality = params
+      .map((param) => param.trim())
+      .find((param) => param.startsWith("q="));
+    return quality ? Number(quality.slice(2)) > 0 : true;
+  });
+}
+
+// Finds a `.br`/`.gz` sibling from the precompress plugin, or null when the
+// client rejects every encoding or the build produced none.
+async function resolvePrecompressed(
+  filePath: string,
+  acceptEncoding: string | undefined,
+) {
+  for (const { extension, token } of encodedVariants) {
+    if (!acceptsEncoding(acceptEncoding, token)) continue;
+    const variantPath = `${filePath}${extension}`;
+    const stats = await stat(variantPath).catch(() => null);
+    if (stats?.isFile()) {
+      return { path: variantPath, size: stats.size, encoding: token };
+    }
+  }
+  return null;
+}
+
 function resolveStaticPath(rendererDist: string, requestUrl: string) {
   const url = new URL(requestUrl, "http://agent-ui.local");
   const decodedPathname = decodeURIComponent(url.pathname);
@@ -196,15 +231,26 @@ async function serveStatic(
   }
 
   const ext = path.extname(filePath);
-  res.writeHead(200, {
+  const variant = await resolvePrecompressed(
+    filePath,
+    req.headers["accept-encoding"] as string | undefined,
+  );
+
+  const headers: Record<string, string | number> = {
     "content-type": contentTypes[ext] ?? "application/octet-stream",
-    "content-length": stats.size,
+    "content-length": variant?.size ?? stats.size,
     "cache-control":
       filePath.endsWith("index.html") || filePath.endsWith(".webmanifest")
         ? "no-store"
         : "public, max-age=31536000, immutable",
-  });
-  createReadStream(filePath).pipe(res);
+    vary: "accept-encoding",
+  };
+  if (variant) {
+    headers["content-encoding"] = variant.encoding;
+  }
+
+  res.writeHead(200, headers);
+  createReadStream(variant?.path ?? filePath).pipe(res);
 }
 
 function listen(
@@ -237,7 +283,18 @@ export async function startWebAppServer(options: WebAppServerOptions) {
       }),
     ],
   });
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({
+    noServer: true,
+    // Only scrollback replays and state-sync snapshots are large enough to
+    // benefit; small steady-state PTY chunks and Immer patches skip the
+    // threshold. No context takeover keeps each connection's zlib memory bounded.
+    perMessageDeflate: {
+      threshold: 1024,
+      zlibDeflateOptions: { level: 4, memLevel: 7 },
+      serverNoContextTakeover: true,
+      clientNoContextTakeover: true,
+    },
+  });
 
   let boundPort = config.port;
   const server = createServer((req, res) => {

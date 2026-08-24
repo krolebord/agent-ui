@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import { brotliCompressSync, gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Services } from "../../src/main/create-services";
 import { startWebAppServer } from "../../src/main/web-app-server";
@@ -115,6 +116,100 @@ describe("web app server", () => {
     );
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.text()).toBe('{"name":"Agent UI"}');
+  });
+
+  it("serves the precompressed variant a client accepts", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    const assetBody = "console.log('agent ui');".repeat(200);
+    await writeFile(path.join(rendererDist, "app.js"), assetBody);
+    await writeFile(
+      path.join(rendererDist, "app.js.gz"),
+      gzipSync(Buffer.from(assetBody)),
+    );
+
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => null,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${server.url}/app.js`, {
+      headers: { "accept-encoding": "gzip" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBe("gzip");
+    expect(response.headers.get("content-type")).toBe(
+      "text/javascript; charset=utf-8",
+    );
+    expect(response.headers.get("vary")).toBe("accept-encoding");
+    // undici transparently decodes, so the body still matches the original.
+    expect(await response.text()).toBe(assetBody);
+  });
+
+  it("prefers brotli over gzip when both are available", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    const assetBody = "body { color: red; }".repeat(200);
+    await writeFile(path.join(rendererDist, "app.css"), assetBody);
+    await writeFile(
+      path.join(rendererDist, "app.css.gz"),
+      gzipSync(Buffer.from(assetBody)),
+    );
+    await writeFile(
+      path.join(rendererDist, "app.css.br"),
+      brotliCompressSync(Buffer.from(assetBody)),
+    );
+
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => null,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${server.url}/app.css`, {
+      headers: { "accept-encoding": "gzip, br" },
+    });
+
+    expect(response.headers.get("content-encoding")).toBe("br");
+    expect(await response.text()).toBe(assetBody);
+  });
+
+  it("falls back to the raw file when the client rejects every variant", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    const assetBody = "console.log('agent ui');".repeat(200);
+    await writeFile(path.join(rendererDist, "app.js"), assetBody);
+    await writeFile(
+      path.join(rendererDist, "app.js.gz"),
+      gzipSync(Buffer.from(assetBody)),
+    );
+
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => null,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${server.url}/app.js`, {
+      headers: { "accept-encoding": "gzip;q=0" },
+    });
+
+    expect(response.headers.get("content-encoding")).toBe(null);
+    expect(response.headers.get("content-length")).toBe(
+      String(Buffer.byteLength(assetBody)),
+    );
+    expect(await response.text()).toBe(assetBody);
   });
 
   it("uses the next port when the requested port is occupied", async () => {

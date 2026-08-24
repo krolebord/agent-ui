@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import pkg from "./package.json" with { type: "json" };
+import { precompressAssets } from "./scripts/vite-plugin-precompress";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,6 +25,6 @@ export default defineConfig({
   worker: {
     format: "es",
   },
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), precompressAssets()],
   clearScreen: false,
 });
