@@ -36,6 +36,37 @@ interface TerminalPaneProps {
   ref: React.RefObject<TerminalPaneHandle | null>;
 }
 
+// atob yields Latin-1 code units, so reinterpret the bytes as UTF-8.
+function decodeBase64Utf8(base64: string): string {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+// Routes OSC 52 clipboard writes (e.g. Claude Code's own copy) to the client
+// clipboard. Payload is "<selection>;<data>"; "<data>" is base64 or "?" (a read
+// query we don't answer).
+function handleOsc52(payload: string): boolean {
+  const separator = payload.indexOf(";");
+  if (separator === -1) {
+    return true;
+  }
+
+  const data = payload.slice(separator + 1);
+  if (data === "" || data === "?") {
+    return true;
+  }
+
+  try {
+    const text = decodeBase64Utf8(data);
+    void navigator.clipboard?.writeText(text).catch(() => {});
+  } catch {}
+  return true;
+}
+
 function getPastedFile(clipboardData: DataTransfer | null): File | null {
   if (!clipboardData) {
     return null;
@@ -120,6 +151,8 @@ export function TerminalPane({
     }
 
     const terminal = new Terminal({
+      // Required for terminal.parser.registerOscHandler below.
+      allowProposedApi: true,
       convertEol: true,
       cursorBlink: true,
       disableStdin: readOnly,
@@ -141,6 +174,11 @@ export function TerminalPane({
     terminal.open(container);
     terminalRef.current = terminal;
     const detachTouchScroll = attachTouchScroll(terminal, container);
+
+    const onOsc52Disposable = terminal.parser.registerOscHandler(
+      52,
+      handleOsc52,
+    );
 
     const flushResize = () => {
       const pending = pendingResizeRef.current;
@@ -302,6 +340,7 @@ export function TerminalPane({
       terminal.blur();
       onDataDisposable.dispose();
       onResizeDisposable.dispose();
+      onOsc52Disposable.dispose();
       resizeObserver.disconnect();
       window.removeEventListener("resize", onWindowResize);
       if (resizeTimeoutRef.current != null) {
