@@ -1,5 +1,10 @@
 import type { ScheduledSession } from "@main/scheduled-sessions/state";
 import {
+  addRecentClaudeModel,
+  CLAUDE_DEFAULT_MODEL_VALUE,
+  ClaudeModelPicker,
+} from "@renderer/components/claude-model-picker";
+import {
   addRecentCodexModel,
   CODEX_DEFAULT_MODEL_VALUE,
   CodexModelPicker,
@@ -59,8 +64,8 @@ import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { isCoarsePointer } from "@renderer/lib/pointer";
 import { orpc } from "@renderer/orpc-client";
-import { MODEL_OPTIONS } from "@renderer/services/terminal-session-selectors";
-import type { ClaudeEffort, ClaudeModel } from "@shared/claude-types";
+import { claudeCatalogModels } from "@shared/claude-models";
+import type { ClaudeEffort } from "@shared/claude-types";
 import { codexModels } from "@shared/codex-models";
 import type {
   CodexFastMode,
@@ -167,7 +172,21 @@ const CLAUDE_EFFORT_OPTIONS: { value: ClaudeEffort; label: string }[] = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
   { value: "high", label: "High" },
+  { value: "xhigh", label: "XHigh" },
+  { value: "max", label: "Max" },
 ];
+
+function getClaudeSupportedEfforts(modelValue: string): ClaudeEffort[] {
+  const selectedModel = claudeCatalogModels.find(
+    (model) => model.value === modelValue,
+  );
+
+  if (selectedModel?.supportedEfforts.length) {
+    return selectedModel.supportedEfforts;
+  }
+
+  return CLAUDE_EFFORT_OPTIONS.map((option) => option.value);
+}
 
 const switchSessionTypeHotkey: Hotkey = "Alt+Tab";
 
@@ -232,8 +251,10 @@ function buildLastSessionOptions(input: {
 
 function claudeConfigToOptions(
   config: Extract<ScheduledSession["config"], { type: "claude" }>,
+  stored: LastClaudeSessionOptions,
 ): LastClaudeSessionOptions {
   return {
+    ...stored,
     model: config.model ?? "opus",
     effort: config.effort,
     permissionMode: config.permissionMode ?? "default",
@@ -368,7 +389,7 @@ export function NewSessionDialog() {
       setScheduleDraft(scheduleSpecToDraft(editEntry.schedule));
       setClaudeOptions(
         config.type === "claude"
-          ? claudeConfigToOptions(config)
+          ? claudeConfigToOptions(config, resolvedClaude)
           : resolvedClaude,
       );
       setCodexOptions(
@@ -615,6 +636,25 @@ function LocalClaudeSessionForm({
   const setActiveSessionId = useActiveSessionStore((s) => s.setActiveSessionId);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const supportedClaudeEfforts = useMemo(
+    () => getClaudeSupportedEfforts(options.model),
+    [options.model],
+  );
+  const claudeEffortOptions = useMemo(
+    () =>
+      CLAUDE_EFFORT_OPTIONS.filter((option) =>
+        supportedClaudeEfforts.includes(option.value),
+      ),
+    [supportedClaudeEfforts],
+  );
+
+  useEffect(() => {
+    if (!options.effort || supportedClaudeEfforts.includes(options.effort)) {
+      return;
+    }
+    setOptions((current) => ({ ...current, effort: undefined }));
+  }, [options.effort, setOptions, supportedClaudeEfforts]);
+
   const handleError = (error: unknown) => {
     if (error instanceof Error && error.message.trim()) {
       setErrorMessage(error.message);
@@ -793,27 +833,19 @@ function LocalClaudeSessionForm({
 
       <div className="flex items-end gap-3">
         <div className="min-w-0 flex-1 space-y-2">
-          <Label>Model</Label>
-          <Select
+          <Label htmlFor="new-session-claude-model">Model</Label>
+          <ClaudeModelPicker
+            id="new-session-claude-model"
             value={options.model}
-            onValueChange={(value) => {
+            recentModels={options.recentModels}
+            onChange={(value) => {
               setOptions((current) => ({
                 ...current,
-                model: value as ClaudeModel,
+                model: value,
+                recentModels: addRecentClaudeModel(current.recentModels, value),
               }));
             }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MODEL_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          />
         </div>
 
         <div className="w-fit shrink-0 space-y-2">
@@ -834,7 +866,7 @@ function LocalClaudeSessionForm({
               <SelectItem value="no" className="whitespace-nowrap">
                 Default
               </SelectItem>
-              {CLAUDE_EFFORT_OPTIONS.map((option) => (
+              {claudeEffortOptions.map((option) => (
                 <SelectItem
                   key={option.value}
                   value={option.value}
@@ -939,55 +971,43 @@ function LocalClaudeSessionForm({
           </div>
 
           <div className="space-y-2">
-            <Label>Override haiku model</Label>
-            <Select
-              value={options.haikuModelOverride ?? "no"}
-              onValueChange={(value) => {
+            <Label htmlFor="new-session-claude-haiku-override">
+              Override haiku model
+            </Label>
+            <ClaudeModelPicker
+              id="new-session-claude-haiku-override"
+              includeDefault
+              value={options.haikuModelOverride ?? CLAUDE_DEFAULT_MODEL_VALUE}
+              recentModels={options.recentModels}
+              onChange={(value) => {
                 setOptions((current) => ({
                   ...current,
                   haikuModelOverride:
-                    value === "no" ? undefined : (value as ClaudeModel),
+                    value === CLAUDE_DEFAULT_MODEL_VALUE ? undefined : value,
                 }));
               }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="no">Default</SelectItem>
-                {MODEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </div>
 
           <div className="space-y-2">
-            <Label>Override subagent model</Label>
-            <Select
-              value={options.subagentModelOverride ?? "no"}
-              onValueChange={(value) => {
+            <Label htmlFor="new-session-claude-subagent-override">
+              Override subagent model
+            </Label>
+            <ClaudeModelPicker
+              id="new-session-claude-subagent-override"
+              includeDefault
+              value={
+                options.subagentModelOverride ?? CLAUDE_DEFAULT_MODEL_VALUE
+              }
+              recentModels={options.recentModels}
+              onChange={(value) => {
                 setOptions((current) => ({
                   ...current,
                   subagentModelOverride:
-                    value === "no" ? undefined : (value as ClaudeModel),
+                    value === CLAUDE_DEFAULT_MODEL_VALUE ? undefined : value,
                 }));
               }}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="no">Default</SelectItem>
-                {MODEL_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            />
           </div>
 
           <div className="space-y-2">

@@ -27,7 +27,8 @@
     "test": "vitest run",
     "test:headless": "pnpm build:headless && node test/headless/smoke.mjs",
     "extract-cursor-models": "bash scripts/extract-cursor-models.sh",
-    "extract-codex-models": "bash scripts/extract-codex-models.sh"
+    "extract-codex-models": "bash scripts/extract-codex-models.sh",
+    "extract-claude-models": "bash scripts/extract-claude-models.sh"
   },
   "dependencies": {
     "@dnd-kit/dom": "^0.5.0",

@@ -1,9 +1,5 @@
 import type { Session } from "@main/sessions/state";
-import type {
-  ClaudeModel,
-  ClaudeProject,
-  GitUpstreamDiffStats,
-} from "@shared/claude-types";
+import type { ClaudeProject, GitUpstreamDiffStats } from "@shared/claude-types";
 import { isSessionSettled } from "@shared/session-lifecycle";
 
 export interface ProjectSessionGroup {
@@ -19,14 +15,6 @@ export interface ProjectSessionGroup {
   interactionDisabled: boolean;
   sessions: Session[];
 }
-
-export const MODEL_OPTIONS: { value: ClaudeModel; label: string }[] = [
-  { value: "haiku", label: "Haiku" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "sonnet[1m]", label: "Sonnet 1m" },
-  { value: "opus", label: "Opus" },
-  { value: "fable", label: "Fable" },
-];
 
 interface BuildProjectSessionGroupsInput {
   projects: ClaudeProject[];

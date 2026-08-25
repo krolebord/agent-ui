@@ -10,13 +10,8 @@ export const claudeActivityStateSchema = z.enum([
 
 export type ClaudeActivityState = z.infer<typeof claudeActivityStateSchema>;
 
-export const claudeModelSchema = z.enum([
-  "haiku",
-  "sonnet",
-  "sonnet[1m]",
-  "fable",
-  "opus",
-]);
+/** An alias (`opus`, `sonnet[1m]`) or a concrete id (`claude-opus-5`). */
+export const claudeModelSchema = z.string().trim().min(1);
 
 export type ClaudeModel = z.infer<typeof claudeModelSchema>;
 
@@ -29,7 +24,13 @@ export const claudePermissionModeSchema = z.enum([
 
 export type ClaudePermissionMode = z.infer<typeof claudePermissionModeSchema>;
 
-export const claudeEffortSchema = z.enum(["low", "medium", "high"]);
+export const claudeEffortSchema = z.enum([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
 
 export type ClaudeEffort = z.infer<typeof claudeEffortSchema>;
 

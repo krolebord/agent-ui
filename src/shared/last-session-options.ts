@@ -24,6 +24,7 @@ export type LastSessionType = z.infer<typeof lastSessionTypeSchema>;
 
 export interface LastClaudeSessionOptions {
   model: ClaudeModel;
+  recentModels: string[];
   effort?: ClaudeEffort;
   permissionMode: ClaudePermissionMode;
   haikuModelOverride?: ClaudeModel;
@@ -63,6 +64,11 @@ const cursorAgentPermissionModeSchema = z.enum(["default", "yolo"]);
 
 export const lastClaudeSessionOptionsSchema = z.object({
   model: claudeModelSchema.catch("opus"),
+  recentModels: z
+    .array(z.string().trim().min(1))
+    .default([])
+    .catch([])
+    .transform((models) => [...new Set(models)].slice(0, 8)),
   effort: claudeEffortSchema.optional().catch(undefined),
   permissionMode: claudePermissionModeSchema.catch("default"),
   haikuModelOverride: claudeModelSchema.optional().catch(undefined),
@@ -108,6 +114,7 @@ export const lastSessionOptionsSchema = z.object({
 export function defaultClaudeSessionOptions(): LastClaudeSessionOptions {
   return {
     model: "opus",
+    recentModels: [],
     effort: undefined,
     permissionMode: "default",
     haikuModelOverride: undefined,
