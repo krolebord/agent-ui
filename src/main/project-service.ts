@@ -176,7 +176,12 @@ async function getUncommittedFiles(
   context: Pick<Services, "projectGitService">,
 ): Promise<FileDiffMetadata[]> {
   const diff = await context.projectGitService.getUncommittedDiff(projectPath);
-  return diff ? parsePatchFiles(diff).flatMap((patch) => patch.files) : [];
+  return diff
+    ? assignDiffCacheKeys(
+        parsePatchFiles(diff).flatMap((patch) => patch.files),
+        `worktree:${projectPath}`,
+      )
+    : [];
 }
 
 function editableFileUnavailableReason(file: FileDiffMetadata): string | null {
@@ -197,6 +202,29 @@ function getFileDiffSourceSignature(file: FileDiffMetadata): string {
     return `${file.prevObjectId ?? "0000000"}..${file.newObjectId ?? "0000000"}`;
   }
   return file.hunks.map((hunk) => hunk.hunkSpecs ?? "").join("\n");
+}
+
+/**
+ * Stamps every diff with a content-derived `cacheKey` before it reaches the
+ * renderer.
+ *
+ * `@pierre/diffs` caches syntax-highlight ASTs in one app-wide LRU keyed solely
+ * by `cacheKey`, and when we leave it unset the library falls back to the file
+ * path. Every revision of a file then collides on one entry, so a refreshed
+ * diff gets paired with the previous revision's AST — stale highlighting when
+ * the content shrank, and a "deletionLine and additionLine are null" throw out
+ * of `DiffHunksRenderer` once it grew past the cached line count. The blob pair
+ * ties the entry to the exact content it was highlighted from.
+ */
+export function assignDiffCacheKeys(
+  files: FileDiffMetadata[],
+  scope: string,
+): FileDiffMetadata[] {
+  for (const file of files) {
+    const source = `${file.prevName ?? file.name}>${file.name}`;
+    file.cacheKey = `${scope}:${source}:${getFileDiffSourceSignature(file)}`;
+  }
+  return files;
 }
 
 function assertProjectFileEditingAllowed(
@@ -780,12 +808,16 @@ export const projectsRouter = {
       }),
     )
     .handler(async ({ input, context }) => {
+      const projectPath = normalizeProjectPath(input.path);
       const diff = await context.projectGitService.getCommitDiff(
-        normalizeProjectPath(input.path),
+        projectPath,
         input.commitHash,
       );
       if (!diff) return [] as FileDiffMetadata[];
-      return parsePatchFiles(diff).flatMap((p) => p.files);
+      return assignDiffCacheKeys(
+        parsePatchFiles(diff).flatMap((p) => p.files),
+        `commit:${projectPath}:${input.commitHash}`,
+      );
     }),
   pushToRemote: procedure
     .input(z.object({ path: projectPathSchema }))

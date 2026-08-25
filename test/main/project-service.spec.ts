@@ -1,10 +1,12 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { parsePatchFiles } from "@pierre/diffs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acquireProjectCommitLock,
   addTrackedProject,
+  assignDiffCacheKeys,
   commitSelectedChangesWithGeneratedMessage,
   defineProjectState,
   pullProjectFromRemote,
@@ -556,5 +558,114 @@ describe("project-service commitSelectedChangesWithGeneratedMessage", () => {
     expect(projectGitService.amendLastCommitMessage).not.toHaveBeenCalled();
     generateFinished.resolve();
     await generateFinished.promise;
+  });
+});
+
+describe("project-service assignDiffCacheKeys", () => {
+  function parseFiles(patch: string) {
+    return parsePatchFiles(patch).flatMap((p) => p.files);
+  }
+
+  function patchForBlobs(prevObjectId: string, newObjectId: string) {
+    return [
+      "diff --git a/src/app.ts b/src/app.ts",
+      `index ${prevObjectId}..${newObjectId} 100644`,
+      "--- a/src/app.ts",
+      "+++ b/src/app.ts",
+      "@@ -1,2 +1,3 @@",
+      " const a = 1;",
+      "+const b = 2;",
+      " const c = 3;",
+      "",
+    ].join("\n");
+  }
+
+  it("keys diffs by their blob pair so a new revision cannot reuse a stale highlight cache entry", () => {
+    const [before] = assignDiffCacheKeys(
+      parseFiles(patchForBlobs("825d3b5", "3114a09")),
+      "worktree:/repo",
+    );
+    const [after] = assignDiffCacheKeys(
+      parseFiles(patchForBlobs("825d3b5", "9f2c1de")),
+      "worktree:/repo",
+    );
+
+    expect(before.cacheKey).toBeTruthy();
+    expect(before.cacheKey).not.toEqual(after.cacheKey);
+  });
+
+  it("reuses the same key for an unchanged file so highlights stay cached across refreshes", () => {
+    const [first] = assignDiffCacheKeys(
+      parseFiles(patchForBlobs("825d3b5", "3114a09")),
+      "worktree:/repo",
+    );
+    const [second] = assignDiffCacheKeys(
+      parseFiles(patchForBlobs("825d3b5", "3114a09")),
+      "worktree:/repo",
+    );
+
+    expect(first.cacheKey).toEqual(second.cacheKey);
+  });
+
+  it("separates identical paths across scopes and across renames", () => {
+    const patch = patchForBlobs("825d3b5", "3114a09");
+    const [worktree] = assignDiffCacheKeys(parseFiles(patch), "worktree:/repo");
+    const [otherProject] = assignDiffCacheKeys(
+      parseFiles(patch),
+      "worktree:/other-repo",
+    );
+    const [commit] = assignDiffCacheKeys(
+      parseFiles(patch),
+      "commit:/repo:abc1234",
+    );
+    const [renamed] = assignDiffCacheKeys(
+      parseFiles(
+        [
+          "diff --git a/src/old.ts b/src/app.ts",
+          "similarity index 90%",
+          "rename from src/old.ts",
+          "rename to src/app.ts",
+          "index 825d3b5..3114a09 100644",
+          "--- a/src/old.ts",
+          "+++ b/src/app.ts",
+          "@@ -1,2 +1,3 @@",
+          " const a = 1;",
+          "+const b = 2;",
+          " const c = 3;",
+          "",
+        ].join("\n"),
+      ),
+      "worktree:/repo",
+    );
+
+    expect(
+      new Set([
+        worktree.cacheKey,
+        otherProject.cacheKey,
+        commit.cacheKey,
+        renamed.cacheKey,
+      ]).size,
+    ).toBe(4);
+  });
+
+  it("falls back to hunk specs when git omits blob ids", () => {
+    const [file] = assignDiffCacheKeys(
+      parseFiles(
+        [
+          "--- a/src/app.ts",
+          "+++ b/src/app.ts",
+          "@@ -1,2 +1,3 @@",
+          " const a = 1;",
+          "+const b = 2;",
+          " const c = 3;",
+          "",
+        ].join("\n"),
+      ),
+      "worktree:/repo",
+    );
+
+    expect(file.prevObjectId).toBeUndefined();
+    expect(file.newObjectId).toBeUndefined();
+    expect(file.cacheKey).toContain("@@ -1,2 +1,3 @@");
   });
 });
