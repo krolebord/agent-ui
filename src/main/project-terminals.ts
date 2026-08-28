@@ -29,7 +29,6 @@ export const projectTerminalInstanceSchema = z.object({
   title: z.string().catch("Terminal"),
   cwd: z.string(),
   createdAt: z.number().default(Date.now()),
-  lastActivityAt: z.number().default(Date.now()),
   status: sessionStatusSchema.catch("stopped"),
   errorMessage: z.string().optional(),
   /**
@@ -58,10 +57,45 @@ export type ProjectTerminalWorkspaceData = z.infer<
   typeof projectTerminalWorkspaceSchema
 >;
 
-function normalizeWorkspace(
-  workspace: ProjectTerminalWorkspaceData,
-): ProjectTerminalWorkspaceData {
-  const terminals: Record<string, ProjectTerminalInstanceData> = {};
+type WorkspaceShape<TTerminal> = Omit<
+  ProjectTerminalWorkspaceData,
+  "terminals"
+> & {
+  terminals: Record<string, TTerminal>;
+};
+
+/**
+ * Fields the PTY owns, so a restart must never resurrect them: the shell behind
+ * a `running` status and any error it reported both died with the app. Omitting
+ * them from the persisted schema is what keeps them out of the store, since Zod
+ * objects drop unknown keys and the orchestrator writes the parse result.
+ */
+const runtimeTerminalFields = {
+  status: true,
+  errorMessage: true,
+} as const;
+
+const persistedProjectTerminalInstanceSchema =
+  projectTerminalInstanceSchema.omit(runtimeTerminalFields);
+type PersistedProjectTerminalInstance = z.infer<
+  typeof persistedProjectTerminalInstanceSchema
+>;
+
+const persistedProjectTerminalWorkspaceSchema =
+  projectTerminalWorkspaceSchema.extend({
+    terminals: z
+      .record(z.string(), persistedProjectTerminalInstanceSchema)
+      .catch({}),
+  });
+
+/**
+ * Generic over the terminal shape so the persisted records — which carry no
+ * runtime fields — can reuse it.
+ */
+function normalizeWorkspace<TTerminal extends { terminalId: string }>(
+  workspace: WorkspaceShape<TTerminal>,
+): WorkspaceShape<TTerminal> {
+  const terminals: Record<string, TTerminal> = {};
   const seen = new Set<string>();
   const order: string[] = [];
 
@@ -106,10 +140,13 @@ function normalizeWorkspace(
   };
 }
 
-const projectTerminalStateSchema = z
-  .record(z.string(), projectTerminalWorkspaceSchema)
+const persistedProjectTerminalStateSchema = z
+  .record(z.string(), persistedProjectTerminalWorkspaceSchema)
   .transform((workspaces) => {
-    const normalized: Record<string, ProjectTerminalWorkspaceData> = {};
+    const normalized: Record<
+      string,
+      WorkspaceShape<PersistedProjectTerminalInstance>
+    > = {};
     for (const [cwd, workspace] of Object.entries(workspaces)) {
       normalized[cwd] = normalizeWorkspace({
         ...workspace,
@@ -118,6 +155,21 @@ const projectTerminalStateSchema = z
     }
     return normalized;
   });
+
+/** No PTY survives a restart, so every hydrated terminal starts stopped. */
+function hydrateWorkspace(
+  workspace: WorkspaceShape<PersistedProjectTerminalInstance>,
+): ProjectTerminalWorkspaceData {
+  return {
+    ...workspace,
+    terminals: Object.fromEntries(
+      Object.entries(workspace.terminals).map(([terminalId, terminal]) => [
+        terminalId,
+        { ...terminal, status: "stopped" as const },
+      ]),
+    ),
+  };
+}
 
 export const defineProjectTerminalsState = () =>
   defineServiceState({
@@ -134,7 +186,14 @@ export const defineProjectTerminalsPersistence = (
 ) =>
   defineStatePersistence({
     serviceState: state,
-    schema: projectTerminalStateSchema,
+    schema: persistedProjectTerminalStateSchema,
+    fromPersisted: (_defaults, persisted) =>
+      Object.fromEntries(
+        Object.entries(persisted).map(([cwd, workspace]) => [
+          cwd,
+          hydrateWorkspace(workspace),
+        ]),
+      ),
   });
 
 interface LiveProjectTerminal {
@@ -424,7 +483,6 @@ export class ProjectTerminalsManager {
         title: title ?? `Terminal ${ordinal}`,
         cwd,
         createdAt: now,
-        lastActivityAt: now,
         status: "stopped",
         commandId,
         launchCwd: launchCwd && launchCwd !== cwd ? launchCwd : undefined,
@@ -859,12 +917,6 @@ export class ProjectTerminalsManager {
         env: env ?? this.shellIntegrationEnv,
       },
       transformOutputChunk: (chunk) => shellMonitor.processChunk(chunk),
-      onData: () => {
-        if (!lifecycleActive) return;
-        this.updateTerminalState(cwd, terminalId, (terminal) => {
-          terminal.lastActivityAt = Date.now();
-        });
-      },
       onStatusChange: (status) => {
         if (!lifecycleActive) return;
         this.updateTerminalState(cwd, terminalId, (terminal) => {
