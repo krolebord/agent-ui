@@ -127,7 +127,7 @@ function AttachFileButton({ terminalId }: { terminalId: string }) {
         type="button"
         variant="outline"
         size="sm"
-        className="size-8 shrink-0 px-0 max-md:hidden"
+        className="size-7 shrink-0 px-0 max-md:hidden"
         aria-label="Attach file"
         title="Attach file"
         onClick={openFilePicker}
@@ -277,11 +277,13 @@ export function SessionHeader({ session }: { session: Session }) {
   );
 
   return (
-    <header className="flex min-h-11 shrink-0 items-center gap-3 border-b border-border/70 px-2 py-1.5">
+    <header className="flex min-h-9 shrink-0 items-center gap-3 border-b border-border/70 px-2 py-1">
       <MobileSidebarTrigger className="md:hidden" />
       {Icon ? <Icon className="size-4 shrink-0 text-muted-foreground" /> : null}
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{session.title}</div>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="min-w-0 shrink truncate text-sm font-medium">
+          {session.title}
+        </div>
         {activeProject?.gitBranch ? (
           <BranchName branch={activeProject.gitBranch} />
         ) : null}
@@ -325,7 +327,7 @@ export function SessionHeader({ session }: { session: Session }) {
             variant="outline"
             size="sm"
             className={cn(
-              "size-8 shrink-0 px-0",
+              "size-7 shrink-0 px-0",
               index === 0
                 ? "rounded-r-none"
                 : index === bottomPaneViewItems.length - 1
@@ -356,7 +358,7 @@ export function SessionHeader({ session }: { session: Session }) {
             variant="outline"
             size="sm"
             disabled={openFolderInAppMutation.isPending || projectLocked}
-            className="rounded-r-none border-r-0 text-xs"
+            className="h-7 rounded-r-none border-r-0 text-xs"
             onClick={() => {
               openFolder(preferredApp);
             }}
@@ -371,7 +373,7 @@ export function SessionHeader({ session }: { session: Session }) {
                 variant="outline"
                 size="sm"
                 disabled={openFolderInAppMutation.isPending || projectLocked}
-                className="rounded-l-none px-2 text-xs"
+                className="h-7 rounded-l-none px-2 text-xs"
               >
                 <ChevronDown className="size-3.5 text-muted-foreground" />
               </Button>
