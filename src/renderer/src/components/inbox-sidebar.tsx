@@ -23,6 +23,7 @@ import {
 } from "@renderer/hooks/use-active-session-id";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
 import { useSessionLifecycleActions } from "@renderer/hooks/use-session-lifecycle-actions";
+import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import {
   resolveSnoozePresets,
   type SnoozePreset,
@@ -933,7 +934,8 @@ export function InboxSidebar() {
 
   const handleUnsettle = useCallback(
     (sessionId: string) => {
-      unsettleMutation.mutate({ sessionId });
+      const { cols, rows } = getTerminalSize();
+      unsettleMutation.mutate({ sessionId, cols, rows });
     },
     [unsettleMutation],
   );

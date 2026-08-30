@@ -1,4 +1,9 @@
-import { canSettleSession, canSnoozeSession } from "@shared/session-lifecycle";
+import { call } from "@orpc/server";
+import {
+  canSettleSession,
+  canSnoozeSession,
+  isSessionSettled,
+} from "@shared/session-lifecycle";
 import { z } from "zod";
 import { appSettingsRouter } from "./app-settings";
 import { artifactsRouter } from "./artifacts-service";
@@ -19,7 +24,7 @@ import { skillsRouter } from "./skills-service";
 import { stateSyncRouter } from "./state-orchestrator";
 import { terminalsRouter } from "./terminal-manager";
 
-const sessionsRouter = {
+export const sessionsRouter = {
   markSeen: procedure
     .input(
       z.object({
@@ -122,16 +127,95 @@ const sessionsRouter = {
       }
     }),
   unsettle: procedure
-    .input(z.object({ sessionId: z.string() }))
+    .input(
+      z.object({
+        sessionId: z.string(),
+        cols: z.number().optional(),
+        rows: z.number().optional(),
+      }),
+    )
     .handler(async ({ input, context }) => {
+      const session = context.sessions.state.state[input.sessionId];
+      if (!session || !isSessionSettled(session)) {
+        return;
+      }
+      const sessionType = session.type;
+
+      let didUnsettle = false;
       context.sessions.state.updateState((state) => {
-        const session = state[input.sessionId];
-        if (!session) {
+        const current = state[input.sessionId];
+        if (!current || !isSessionSettled(current)) {
           return;
         }
-        delete session.settledOverride;
-        delete session.settledAt;
+        delete current.settledOverride;
+        delete current.settledAt;
+        // Active sort is newest-created first and does not move on ordinary
+        // activity. Unsettle is a lifecycle transition, so re-stamp createdAt
+        // (and lastActivityAt) to put the row at the top.
+        const now = Date.now();
+        current.createdAt = now;
+        current.lastActivityAt = now;
+        didUnsettle = true;
       });
+
+      if (!didUnsettle) {
+        return;
+      }
+
+      // Inverse of settle: bringing a row back also starts it. Worktree setup
+      // has no resume path — it runs once.
+      switch (sessionType) {
+        case "claude-local-terminal":
+          await call(
+            claudeSessionsRouter.resumeSession,
+            {
+              sessionId: input.sessionId,
+              cols: input.cols,
+              rows: input.rows,
+            },
+            { context },
+          );
+          break;
+        case "local-terminal":
+          await call(
+            localTerminalRouter.resumeSession,
+            {
+              sessionId: input.sessionId,
+              cols: input.cols,
+              rows: input.rows,
+            },
+            { context },
+          );
+          break;
+        case "codex-local-terminal":
+          await call(
+            codexSessionsRouter.resumeSession,
+            {
+              sessionId: input.sessionId,
+              cols: input.cols,
+              rows: input.rows,
+            },
+            { context },
+          );
+          break;
+        case "cursor-agent":
+          await call(
+            cursorAgentSessionsRouter.resumeSession,
+            {
+              sessionId: input.sessionId,
+              cols: input.cols,
+              rows: input.rows,
+            },
+            { context },
+          );
+          break;
+        case "worktree-setup":
+          break;
+        default: {
+          const exhaustiveCheck: never = sessionType;
+          return exhaustiveCheck;
+        }
+      }
     }),
   snooze: procedure
     .input(z.object({ sessionId: z.string(), snoozedUntil: z.number() }))
