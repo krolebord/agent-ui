@@ -4,7 +4,6 @@ import { defineServiceState } from "../shared/service-state";
 import {
   defaultTitleGenerationSettings,
   type TitleGenerationSettings,
-  titleGenerationProviders,
   titleGenerationSettingsSchema,
 } from "../shared/title-generation";
 import { procedure } from "./orpc";
@@ -155,12 +154,7 @@ export const appSettingsRouter = {
       });
     }),
   setTitleGeneration: procedure
-    .input(
-      z.object({
-        provider: z.enum(titleGenerationProviders),
-        model: z.string().trim().min(1),
-      }),
-    )
+    .input(titleGenerationSettingsSchema)
     .handler(async ({ input, context }) => {
       context.appSettingsState.updateState((state) => {
         state.titleGeneration = input;

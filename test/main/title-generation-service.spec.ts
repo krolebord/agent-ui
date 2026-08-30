@@ -6,13 +6,17 @@ const generateTitleMock = vi.hoisted(() =>
 );
 
 vi.mock("../../src/main/title-generation", () => ({
-  generateTitle: (_settings: unknown, prompt: string) =>
-    generateTitleMock(prompt),
+  generateTitle: (
+    _settings: unknown,
+    prompt: string,
+    _workingDirectory: string,
+  ) => generateTitleMock(prompt),
 }));
 
 function createService() {
   return new TitleGenerationService({
-    getSettings: () => ({ provider: "cursor", model: "composer-2-fast" }),
+    getSettings: () => ({ provider: "codex", model: "gpt-5.6-luna" }),
+    workingDirectory: "/var/tmp/agent-ui-title-generation-test",
   });
 }
 

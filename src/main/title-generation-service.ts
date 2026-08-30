@@ -8,6 +8,7 @@ import { generateTitle } from "./title-generation";
 
 interface TitleGenerationServiceOptions {
   getSettings: () => TitleGenerationSettings;
+  workingDirectory: string;
 }
 
 export interface TitleGenerationRequestParams {
@@ -23,9 +24,11 @@ export class TitleGenerationService {
   private readonly inFlight = new Set<string>();
   private readonly provisionalPromptBySession = new Map<string, string>();
   private readonly getSettings: () => TitleGenerationSettings;
+  private readonly workingDirectory: string;
 
   constructor(options: TitleGenerationServiceOptions) {
     this.getSettings = options.getSettings;
+    this.workingDirectory = options.workingDirectory;
   }
 
   forget(sessionId: string): void {
@@ -78,7 +81,7 @@ export class TitleGenerationService {
     this.inFlight.add(params.sessionId);
     log.info("Title generation triggered", { sessionId: params.sessionId });
 
-    void generateTitle(this.getSettings(), trimmedPrompt)
+    void generateTitle(this.getSettings(), trimmedPrompt, this.workingDirectory)
       .then((title) => {
         if (!title) {
           log.warn("Title generation returned empty result", {

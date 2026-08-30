@@ -1,5 +1,6 @@
 import type { TitleGenerationProvider } from "@shared/title-generation";
-import { type CursorProviderOptions, createCursorProvider } from "./cursor";
+import { type CodexProviderOptions, createCodexProvider } from "./codex";
+import { createCursorProvider } from "./cursor";
 import type { LlmProvider } from "./types";
 
 export type { LlmProvider } from "./types";
@@ -11,10 +12,14 @@ export interface LlmProviderSettings {
 
 export function createLlmProvider(
   settings: LlmProviderSettings,
-  options?: CursorProviderOptions,
+  options: CodexProviderOptions,
 ): LlmProvider {
   switch (settings.provider) {
+    case "codex":
+      return createCodexProvider(settings.model, options);
     case "cursor":
-      return createCursorProvider(settings.model, options);
+      return createCursorProvider(settings.model, {
+        timeoutMs: options.timeoutMs,
+      });
   }
 }

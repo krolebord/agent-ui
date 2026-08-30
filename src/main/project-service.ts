@@ -569,9 +569,11 @@ export async function* commitSelectedChangesWithGeneratedMessage(input: {
   description?: string;
   projectGitService: CommitSelectedChangesGitService;
   titleGeneration: TitleGenerationSettings;
+  textGenerationWorkingDirectory: string;
   generateCommitMessage?: (
     settings: TitleGenerationSettings,
     diff: string,
+    options: { workingDirectory: string },
   ) => Promise<GeneratedCommitMessage | null>;
 }): AsyncGenerator<CommitProgressEvent> {
   const generate = input.generateCommitMessage ?? generateCommitMessage;
@@ -584,7 +586,9 @@ export async function* commitSelectedChangesWithGeneratedMessage(input: {
       input.filePaths,
     );
     if (diff?.trim()) {
-      generatedPromise = generate(input.titleGeneration, diff);
+      generatedPromise = generate(input.titleGeneration, diff, {
+        workingDirectory: input.textGenerationWorkingDirectory,
+      });
       yield { stage: "generating" } satisfies CommitProgressEvent;
     }
   } catch (error) {
@@ -628,7 +632,9 @@ export async function* commitSelectedChangesWithGeneratedMessage(input: {
           message: `Failed to generate commit message. ${placeholderNote}`,
         });
       }
-      generated = await generate(input.titleGeneration, diff);
+      generated = await generate(input.titleGeneration, diff, {
+        workingDirectory: input.textGenerationWorkingDirectory,
+      });
     }
 
     if (!generated?.subject.trim()) {
@@ -896,6 +902,8 @@ export const projectsRouter = {
             description,
             projectGitService: context.projectGitService,
             titleGeneration: context.appSettingsState.state.titleGeneration,
+            textGenerationWorkingDirectory:
+              context.textGenerationWorkingDirectory,
           });
           return;
         }

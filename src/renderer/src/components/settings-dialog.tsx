@@ -30,7 +30,11 @@ import { Switch } from "@renderer/components/ui/switch";
 import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { orpc } from "@renderer/orpc-client";
-import { titleGenerationProviders } from "@shared/title-generation";
+import {
+  cursorTextGenerationDefaultModel,
+  defaultTitleGenerationSettings,
+  titleGenerationProviders,
+} from "@shared/title-generation";
 import { useMutation } from "@tanstack/react-query";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -459,6 +463,7 @@ const titleGenerationProviderLabels: Record<
   (typeof titleGenerationProviders)[number],
   string
 > = {
+  codex: "Codex",
   cursor: "Cursor",
 };
 
@@ -481,11 +486,34 @@ function TitleGenerationSettings() {
         <Label className="text-sm font-medium">LLM provider</Label>
         <Select
           value={titleGeneration.provider}
-          onValueChange={(value) => {
-            setTitleGeneration.mutate({
-              provider: value as typeof titleGeneration.provider,
-              model: titleGeneration.model,
-            });
+          onValueChange={(provider) => {
+            if (provider === "codex") {
+              if (titleGeneration.provider === "cursor") {
+                setLastSessionOptions.mutate({
+                  ...lastSessionOptions,
+                  cursor: {
+                    ...lastSessionOptions.cursor,
+                    model: titleGeneration.model,
+                    permissionMode:
+                      lastSessionOptions.cursor?.permissionMode ?? "default",
+                    recentModels: addRecentCursorModel(
+                      recentCursorModels,
+                      titleGeneration.model,
+                    ),
+                  },
+                });
+              }
+              setTitleGeneration.mutate(defaultTitleGenerationSettings);
+              return;
+            }
+            if (provider === "cursor") {
+              setTitleGeneration.mutate({
+                provider,
+                model:
+                  lastSessionOptions.cursor?.model?.trim() ||
+                  cursorTextGenerationDefaultModel,
+              });
+            }
           }}
         >
           <SelectTrigger className="w-full">
@@ -505,26 +533,36 @@ function TitleGenerationSettings() {
       </div>
       <div className="space-y-2">
         <Label className="text-sm font-medium">Model</Label>
-        <CursorModelPicker
-          value={titleGeneration.model}
-          recentModels={recentCursorModels}
-          includeAuto
-          onChange={(model) => {
-            setTitleGeneration.mutate({
-              provider: titleGeneration.provider,
-              model,
-            });
-            setLastSessionOptions.mutate({
-              ...lastSessionOptions,
-              cursor: {
-                ...lastSessionOptions.cursor,
-                permissionMode:
-                  lastSessionOptions.cursor?.permissionMode ?? "default",
-                recentModels: addRecentCursorModel(recentCursorModels, model),
-              },
-            });
-          }}
-        />
+        {titleGeneration.provider === "cursor" ? (
+          <CursorModelPicker
+            value={titleGeneration.model}
+            recentModels={recentCursorModels}
+            includeAuto
+            onChange={(model) => {
+              setTitleGeneration.mutate({ provider: "cursor", model });
+              setLastSessionOptions.mutate({
+                ...lastSessionOptions,
+                cursor: {
+                  ...lastSessionOptions.cursor,
+                  model,
+                  permissionMode:
+                    lastSessionOptions.cursor?.permissionMode ?? "default",
+                  recentModels: addRecentCursorModel(recentCursorModels, model),
+                },
+              });
+            }}
+          />
+        ) : (
+          <>
+            <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm">
+              GPT-5.6 Luna
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Standard tier. Titles use low reasoning; commit messages use
+              medium.
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

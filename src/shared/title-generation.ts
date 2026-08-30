@@ -1,23 +1,41 @@
 import z from "zod";
 
-export const titleGenerationProviders = ["cursor"] as const;
+export const codexTextGenerationModel = "gpt-5.6-luna";
+export const cursorTextGenerationDefaultModel = "composer-2.5";
+
+export const titleGenerationProviders = ["codex", "cursor"] as const;
 
 export type TitleGenerationProvider = (typeof titleGenerationProviders)[number];
 
-export interface TitleGenerationSettings {
-  provider: TitleGenerationProvider;
-  model: string;
-}
+export type TitleGenerationSettings =
+  | {
+      provider: "codex";
+      model: typeof codexTextGenerationModel;
+    }
+  | {
+      provider: "cursor";
+      model: string;
+    };
 
 export const defaultTitleGenerationSettings: TitleGenerationSettings = {
-  provider: "cursor",
-  model: "composer-2.5",
+  provider: "codex",
+  model: codexTextGenerationModel,
 };
 
-export const titleGenerationSettingsSchema = z.object({
-  provider: z.enum(titleGenerationProviders).catch("cursor"),
-  model: z.string().trim().min(1).catch("composer-2.5"),
-});
+export const titleGenerationSettingsSchema = z
+  .discriminatedUnion("provider", [
+    z.object({
+      provider: z.literal("codex"),
+      model: z
+        .literal(codexTextGenerationModel)
+        .catch(codexTextGenerationModel),
+    }),
+    z.object({
+      provider: z.literal("cursor"),
+      model: z.string().trim().min(1).catch(cursorTextGenerationDefaultModel),
+    }),
+  ])
+  .catch(defaultTitleGenerationSettings);
 
 export const provisionalSessionTitleMaxLength = 100;
 

@@ -10,6 +10,7 @@ const commitMessageTimeoutMs = 60_000;
 export async function generateCommitMessage(
   settings: TitleGenerationSettings,
   diff: string,
+  options: { workingDirectory: string },
 ): Promise<GeneratedCommitMessage | null> {
   const trimmedDiff = diff.trim();
   if (!trimmedDiff) {
@@ -18,6 +19,8 @@ export async function generateCommitMessage(
 
   const provider = createLlmProvider(settings, {
     timeoutMs: commitMessageTimeoutMs,
+    workingDirectory: options.workingDirectory,
+    reasoningEffort: "medium",
   });
   const prompt = generateCommitMessagePrompt(
     truncateDiffForCommitMessage(trimmedDiff),

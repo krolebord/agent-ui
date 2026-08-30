@@ -422,9 +422,11 @@ describe("project-service refreshTrackedProject", () => {
 
 describe("project-service commitSelectedChangesWithGeneratedMessage", () => {
   const titleGeneration = {
-    provider: "cursor" as const,
-    model: "composer-2.5",
+    provider: "codex" as const,
+    model: "gpt-5.6-luna" as const,
   };
+  const textGenerationWorkingDirectory =
+    "/var/tmp/agent-ui-text-generation-test";
 
   async function collectStages(
     iterator: AsyncGenerator<{ stage: string }>,
@@ -461,6 +463,7 @@ describe("project-service commitSelectedChangesWithGeneratedMessage", () => {
       filePaths: ["auth.ts"],
       projectGitService,
       titleGeneration,
+      textGenerationWorkingDirectory,
       generateCommitMessage,
     });
 
@@ -471,6 +474,7 @@ describe("project-service commitSelectedChangesWithGeneratedMessage", () => {
     expect(generateCommitMessage).toHaveBeenCalledWith(
       titleGeneration,
       "diff --git a/auth.ts b/auth.ts",
+      { workingDirectory: textGenerationWorkingDirectory },
     );
     expect(projectGitService.amendLastCommitMessage).not.toHaveBeenCalled();
 
@@ -509,6 +513,7 @@ describe("project-service commitSelectedChangesWithGeneratedMessage", () => {
         description: "Keep caller body.",
         projectGitService,
         titleGeneration,
+        textGenerationWorkingDirectory,
         generateCommitMessage,
       }),
     );
@@ -518,6 +523,7 @@ describe("project-service commitSelectedChangesWithGeneratedMessage", () => {
     expect(generateCommitMessage).toHaveBeenCalledWith(
       titleGeneration,
       "diff --git a/login.ts b/login.ts",
+      { workingDirectory: textGenerationWorkingDirectory },
     );
     expect(projectGitService.amendLastCommitMessage).toHaveBeenCalledWith(
       "/repo",
@@ -550,6 +556,7 @@ describe("project-service commitSelectedChangesWithGeneratedMessage", () => {
           filePaths: ["a.ts"],
           projectGitService,
           titleGeneration,
+          textGenerationWorkingDirectory,
           generateCommitMessage,
         }),
       ),

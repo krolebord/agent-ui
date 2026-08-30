@@ -69,6 +69,7 @@ import { ensureShellIntegrationScripts } from "./shell-integration/scripts";
 import { defineSkillsState, SkillsService } from "./skills-service";
 import { StateOrchestrator } from "./state-orchestrator";
 import { TerminalManager } from "./terminal-manager";
+import { getTextGenerationWorkingDirectory } from "./text-generation-workspace";
 import { TitleGenerationService } from "./title-generation-service";
 
 const STORAGE_SCHEMA_VERSION = 3;
@@ -207,6 +208,9 @@ export async function createServices(options: CreateServicesOptions) {
     defineAppSettingsPersistence(appSettingsState),
   );
 
+  const textGenerationWorkingDirectory =
+    getTextGenerationWorkingDirectory(userDataPath);
+
   const claudeAccountsInternalState = defineClaudeAccountsInternalState();
   persistenceService.registerAndHydrate(
     defineClaudeAccountsPersistence(claudeAccountsInternalState),
@@ -237,6 +241,7 @@ export async function createServices(options: CreateServicesOptions) {
 
   const titleGenerationService = new TitleGenerationService({
     getSettings: () => appSettingsState.state.titleGeneration,
+    workingDirectory: textGenerationWorkingDirectory,
   });
 
   const projectsState = defineProjectState();
@@ -502,6 +507,7 @@ export async function createServices(options: CreateServicesOptions) {
     databaseService,
     sessionBuffers,
     globalInstructionsService,
+    textGenerationWorkingDirectory,
     shutdown,
     managedPluginDir,
     pluginWarning,
