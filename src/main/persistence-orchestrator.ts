@@ -3,7 +3,7 @@ import type { ZodIssue, ZodType } from "zod";
 import type { ServiceState } from "../shared/service-state";
 import { withDebouncedRunner } from "./debounce-runner";
 
-const PERSISTENCE_DEBOUNCE_MS = 75;
+const PERSISTENCE_DEBOUNCE_MS = 100;
 const STORE_NAME = "agent-ui";
 const SCHEMA_VERSION_KEY = "schemaVersion";
 

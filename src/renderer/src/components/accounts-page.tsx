@@ -15,6 +15,7 @@ import {
 import { Input } from "@renderer/components/ui/input";
 import { Label } from "@renderer/components/ui/label";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
+import { formatPlanType } from "@renderer/lib/plan-label";
 import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -56,14 +57,6 @@ const LOGIN_COPY: Record<
     successMessage: "Codex account added",
   },
 };
-
-export function formatAccountPlan(planType: string): string {
-  return planType
-    .split(/[_-]/)
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
 
 function confirmRemoveAccount(
   account: { id: string; label: string },
@@ -387,9 +380,7 @@ function AccountRow({
           <span className="truncate text-sm font-medium">{account.label}</span>
           {typeLabel ? <Badge variant="secondary">{typeLabel}</Badge> : null}
           {account.planType ? (
-            <Badge variant="outline">
-              {formatAccountPlan(account.planType)}
-            </Badge>
+            <Badge variant="outline">{formatPlanType(account.planType)}</Badge>
           ) : null}
           {account.status === "needs-relogin" ? (
             <Badge variant="destructive">Needs re-login</Badge>

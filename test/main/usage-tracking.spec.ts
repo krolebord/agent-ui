@@ -234,6 +234,32 @@ describe("UsageTracker", () => {
     harness.tracker.dispose();
   });
 
+  it("re-reads every tracked entry on refreshAll", async () => {
+    const harness = createTracker();
+    harness.claudePublicState.updateState((draft) => {
+      draft.accounts = [managedClaudeAccount("claude-1")];
+    });
+
+    harness.tracker.start();
+    await vi.waitFor(() => {
+      const entries = Object.values(harness.entries());
+      expect(entries).toHaveLength(4);
+      for (const entry of entries) {
+        expect(entry.status).toBe("ok");
+        expect(entry.refreshing).toBe(false);
+      }
+    });
+    vi.clearAllMocks();
+
+    await harness.tracker.refreshAll();
+
+    expect(claudeUsageMocks.getUsage).toHaveBeenCalledOnce();
+    expect(claudeUsageMocks.fetchUsageWithToken).toHaveBeenCalledOnce();
+    expect(codexUsageMocks.getCodexUsage).toHaveBeenCalledOnce();
+    expect(cursorUsageMocks.getCursorUsage).toHaveBeenCalledOnce();
+    harness.tracker.dispose();
+  });
+
   it("marks accounts that cannot report usage unsupported without fetching", async () => {
     const harness = createTracker();
     harness.claudePublicState.updateState((draft) => {

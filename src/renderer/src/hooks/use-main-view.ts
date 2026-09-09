@@ -7,7 +7,8 @@ export type MainView =
   | "globalInstructions"
   | "scheduledSessions"
   | "accounts"
-  | "artifacts";
+  | "artifacts"
+  | "usage";
 
 export const useMainViewStore = create(
   combine({ view: "sessions" as MainView }, (set) => ({
@@ -45,6 +46,14 @@ export const useMainViewStore = create(
     toggleArtifacts: () => {
       set((state) => ({
         view: state.view === "artifacts" ? "sessions" : "artifacts",
+      }));
+    },
+    showUsage: () => {
+      set({ view: "usage" });
+    },
+    toggleUsage: () => {
+      set((state) => ({
+        view: state.view === "usage" ? "sessions" : "usage",
       }));
     },
     toggleAccounts: () => {

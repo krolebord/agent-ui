@@ -8,6 +8,7 @@ import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
 import {
+  BarChart3,
   CalendarClock,
   FileText,
   Inbox,
@@ -71,6 +72,7 @@ export function SidebarNavMenuItems({ children }: { children?: ReactNode }) {
   );
   const toggleAccounts = useMainViewStore((state) => state.toggleAccounts);
   const toggleArtifacts = useMainViewStore((state) => state.toggleArtifacts);
+  const toggleUsage = useMainViewStore((state) => state.toggleUsage);
 
   return (
     <>
@@ -93,6 +95,10 @@ export function SidebarNavMenuItems({ children }: { children?: ReactNode }) {
       <DropdownMenuItem onClick={toggleArtifacts}>
         <PackageOpen className="size-3.5" />
         Artifacts
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={toggleUsage}>
+        <BarChart3 className="size-3.5" />
+        Usage
       </DropdownMenuItem>
       {children}
       <DropdownMenuSeparator />

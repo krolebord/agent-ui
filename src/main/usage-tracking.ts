@@ -236,6 +236,14 @@ export class UsageTracker {
     this.clearTimer();
   }
 
+  /**
+   * Refreshes every tracked entry on demand and restarts the polling interval
+   * from now. A cycle already under way is left to finish on its own.
+   */
+  async refreshAll(): Promise<void> {
+    await this.runCycle();
+  }
+
   /** Refreshes one entry on demand, e.g. from the panel's refresh button. */
   async refresh(key: string): Promise<UsageRefreshResult> {
     const target = this.collectTargets().find((entry) => entry.key === key);
@@ -524,6 +532,9 @@ export class UsageTracker {
 }
 
 export const usageRouter = {
+  refreshAll: procedure.handler(async ({ context }) => {
+    await context.usageTracker.refreshAll();
+  }),
   refresh: procedure
     .input(z.object({ key: z.string() }))
     .handler(async ({ input, context }) => {

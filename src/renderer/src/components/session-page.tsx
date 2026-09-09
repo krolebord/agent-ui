@@ -38,6 +38,7 @@ import { GlobalInstructionsPage } from "./global-instructions-page";
 import { ScheduledSessionsPage } from "./scheduled-sessions-page";
 import { SkillsPage } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
+import { UsagePage } from "./usage-page";
 import { WelcomePage } from "./welcome-page";
 
 function useActiveSession() {
@@ -93,6 +94,10 @@ export function SessionPage() {
 
   if (mainView === "artifacts") {
     return <ArtifactsPage />;
+  }
+
+  if (mainView === "usage") {
+    return <UsagePage />;
   }
 
   if (!session) {

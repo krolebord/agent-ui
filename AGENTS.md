@@ -34,7 +34,7 @@ State flows from main to renderer via JSON Patches:
 
 ### Persistence
 
-`PersistenceOrchestrator` registers `ServiceState` instances with Zod schemas, debounces writes (75ms default) to `electron-store`, and hydrates state on boot.
+`PersistenceOrchestrator` registers `ServiceState` instances with Zod schemas, debounces writes (100ms default) to `electron-store`, and hydrates state on boot.
 
 ### Services Lifecycle
 
