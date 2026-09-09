@@ -82,7 +82,13 @@ import {
   useCommonSessionMenuActions,
   useTypeSpecificSessionMenuActions,
 } from "./session-sidebar-item";
-import { SidebarNavMenuItems, SidebarViewToggle } from "./sidebar-view-toggle";
+import {
+  PinnedNavButtons,
+  SidebarNavMenuItems,
+  SidebarViewToggle,
+  sidebarHeaderClassName,
+  useUnpinnedNavPageActive,
+} from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
 
 // History shouldn't dominate the sidebar and the common lookups are recent, so
@@ -789,6 +795,7 @@ export function InboxSidebar() {
     (x) => x.setOpenProjectCwd,
   );
   const openAddProjectDialog = useAddProjectDialogStore((x) => x.open);
+  const unpinnedNavPageActive = useUnpinnedNavPageActive();
 
   const settleMutation = useMutation(orpc.sessions.settle.mutationOptions());
   const unsettleMutation = useMutation(
@@ -1002,13 +1009,17 @@ export function InboxSidebar() {
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-border/70 bg-black/35 backdrop-blur-xl">
-      <div className="flex h-9 items-center border-b border-border/70 pl-16 [app-region:drag]">
+      <div className={sidebarHeaderClassName}>
         <div className="ml-auto flex h-full items-center [app-region:no-drag]">
+          <PinnedNavButtons />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="flat"
-                className="h-full w-9 shrink-0 px-0"
+                className={cn(
+                  "h-full w-9 shrink-0 px-0",
+                  unpinnedNavPageActive && "text-zinc-100",
+                )}
                 aria-label="More sidebar actions"
                 title="More"
               >

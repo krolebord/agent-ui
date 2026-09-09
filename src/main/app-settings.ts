@@ -2,6 +2,12 @@ import z from "zod";
 import { lastSessionOptionsSchema } from "../shared/last-session-options";
 import { defineServiceState } from "../shared/service-state";
 import {
+  defaultPinnedItems,
+  normalizePinnedItems,
+  type PinnableItemId,
+  pinnableItemIds,
+} from "../shared/sidebar-nav";
+import {
   defaultTitleGenerationSettings,
   type TitleGenerationSettings,
   titleGenerationSettingsSchema,
@@ -56,6 +62,7 @@ export const machineStatsSettingsSchema = z
 
 export interface AppSettings {
   sidebarView: SidebarView;
+  pinnedHeaderItems: PinnableItemId[];
   sleepBlockMode: SleepBlockMode;
   dockBadgeForAttention: boolean;
   dockBounceOnAttention: boolean;
@@ -66,6 +73,7 @@ export interface AppSettings {
 
 const defaults: AppSettings = {
   sidebarView: "projects",
+  pinnedHeaderItems: [...defaultPinnedItems],
   sleepBlockMode: "working",
   dockBadgeForAttention: true,
   dockBounceOnAttention: false,
@@ -85,6 +93,10 @@ const sleepBlockModeSchema = z.enum(sleepBlockModes);
 const appSettingsPersistenceSchema = z
   .object({
     sidebarView: z.enum(sidebarViews).catch(defaults.sidebarView),
+    pinnedHeaderItems: z
+      .array(z.string())
+      .catch(defaultPinnedItems)
+      .transform(normalizePinnedItems),
     sleepBlockMode: z
       .union([sleepBlockModeSchema, z.undefined()])
       .catch(undefined),
@@ -116,6 +128,17 @@ export const appSettingsRouter = {
     .handler(async ({ input, context }) => {
       context.appSettingsState.updateState((state) => {
         state.sidebarView = input.view;
+      });
+    }),
+  setHeaderItemPinned: procedure
+    .input(z.object({ item: z.enum(pinnableItemIds), pinned: z.boolean() }))
+    .handler(async ({ input, context }) => {
+      context.appSettingsState.updateState((state) => {
+        state.pinnedHeaderItems = normalizePinnedItems(
+          input.pinned
+            ? [...state.pinnedHeaderItems, input.item]
+            : state.pinnedHeaderItems.filter((item) => item !== input.item),
+        );
       });
     }),
   setSleepBlockMode: procedure

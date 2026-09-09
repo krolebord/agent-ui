@@ -1,14 +1,8 @@
+import type { NavPageId } from "@shared/sidebar-nav";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 
-export type MainView =
-  | "sessions"
-  | "skills"
-  | "globalInstructions"
-  | "scheduledSessions"
-  | "accounts"
-  | "artifacts"
-  | "usage";
+export type MainView = "sessions" | NavPageId;
 
 export const useMainViewStore = create(
   combine({ view: "sessions" as MainView }, (set) => ({
@@ -18,21 +12,8 @@ export const useMainViewStore = create(
     showSkills: () => {
       set({ view: "skills" });
     },
-    toggleSkills: () => {
-      set((state) => ({
-        view: state.view === "skills" ? "sessions" : "skills",
-      }));
-    },
     showGlobalInstructions: () => {
       set({ view: "globalInstructions" });
-    },
-    toggleGlobalInstructions: () => {
-      set((state) => ({
-        view:
-          state.view === "globalInstructions"
-            ? "sessions"
-            : "globalInstructions",
-      }));
     },
     showScheduledSessions: () => {
       set({ view: "scheduledSessions" });
@@ -43,29 +24,11 @@ export const useMainViewStore = create(
     showArtifacts: () => {
       set({ view: "artifacts" });
     },
-    toggleArtifacts: () => {
-      set((state) => ({
-        view: state.view === "artifacts" ? "sessions" : "artifacts",
-      }));
-    },
     showUsage: () => {
       set({ view: "usage" });
     },
-    toggleUsage: () => {
-      set((state) => ({
-        view: state.view === "usage" ? "sessions" : "usage",
-      }));
-    },
-    toggleAccounts: () => {
-      set((state) => ({
-        view: state.view === "accounts" ? "sessions" : "accounts",
-      }));
-    },
-    toggleScheduledSessions: () => {
-      set((state) => ({
-        view:
-          state.view === "scheduledSessions" ? "sessions" : "scheduledSessions",
-      }));
+    toggleView: (view: NavPageId) => {
+      set((state) => ({ view: state.view === view ? "sessions" : view }));
     },
   })),
 );

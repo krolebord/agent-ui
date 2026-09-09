@@ -15,7 +15,6 @@ import {
 import { ScrollArea } from "@renderer/components/ui/scroll-area";
 import { UsagePanel } from "@renderer/components/usage-panel";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
-import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import {
   stopSession,
   useSessionLifecycleActions,
@@ -64,7 +63,13 @@ import {
   statusIndicatorMeta,
   useTypeSpecificSessionMenuActions,
 } from "./session-sidebar-item";
-import { SidebarNavMenuItems, SidebarViewToggle } from "./sidebar-view-toggle";
+import {
+  PinnedNavButtons,
+  SidebarNavMenuItems,
+  SidebarViewToggle,
+  sidebarHeaderClassName,
+  useUnpinnedNavPageActive,
+} from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
 import { useWorktreeDeleteDialogStore } from "./worktree-delete-dialog";
 
@@ -138,7 +143,7 @@ export function SessionSidebar() {
   const [showHiddenProjects, setShowHiddenProjects] = useState(false);
 
   const openAddProjectDialog = useAddProjectDialogStore((x) => x.open);
-  const mainView = useMainViewStore((state) => state.view);
+  const unpinnedNavPageActive = useUnpinnedNavPageActive();
 
   const groups: ProjectSessionGroup[] = useMemo(
     () =>
@@ -231,20 +236,16 @@ export function SessionSidebar() {
 
   return (
     <aside className="flex h-full w-full flex-col border-r border-border/70 bg-black/35 backdrop-blur-xl">
-      <div className="flex h-9 items-center border-b border-border/70 pl-16 [app-region:drag]">
+      <div className={sidebarHeaderClassName}>
         <div className="ml-auto flex h-full items-center [app-region:no-drag]">
+          <PinnedNavButtons />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="flat"
                 className={cn(
                   "h-full w-9 shrink-0 px-0",
-                  (mainView === "skills" ||
-                    mainView === "globalInstructions" ||
-                    mainView === "scheduledSessions" ||
-                    mainView === "accounts" ||
-                    mainView === "artifacts") &&
-                    "text-zinc-100",
+                  unpinnedNavPageActive && "text-zinc-100",
                 )}
                 aria-label="More sidebar actions"
                 title="More"
