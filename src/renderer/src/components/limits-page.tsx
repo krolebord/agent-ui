@@ -10,9 +10,9 @@ import {
 import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
 import { Gauge, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { UsageLimitsTab } from "./usage-limits-tab";
+import { UsageLimitsList } from "./usage-limits-list";
 
 const AGE_TICK_MS = 30_000;
 
@@ -39,7 +39,10 @@ export function LimitsPage() {
   const codexAccounts = useAppState((state) => state.codexAccounts.accounts);
   const now = useNow(AGE_TICK_MS);
 
-  const groups = buildUsageGroups({ entries, claudeAccounts, codexAccounts });
+  const groups = useMemo(
+    () => buildUsageGroups({ entries, claudeAccounts, codexAccounts }),
+    [entries, claudeAccounts, codexAccounts],
+  );
   const trackedCount = groups.reduce((total, g) => total + g.rows.length, 0);
   const lastUpdated = formatUsageAge(latestFetchedAt(entries), now);
   const anyRefreshing = isAnyUsageRefreshing(entries);
@@ -82,7 +85,7 @@ export function LimitsPage() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="p-4">
-          <UsageLimitsTab now={now} />
+          <UsageLimitsList groups={groups} now={now} />
         </div>
       </div>
     </div>

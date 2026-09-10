@@ -17,7 +17,7 @@ import { orpc } from "@renderer/orpc-client";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { BarChart3, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import { UsageHistoryTab } from "./usage-history-tab";
+import { UsageHistoryReport } from "./usage-history-report";
 
 const METRIC_OPTIONS = [
   { value: "cost", label: "Cost" },
@@ -133,7 +133,7 @@ export function UsagePage() {
               {summary.error.message || "Usage could not be read."}
             </p>
           ) : (
-            <UsageHistoryTab
+            <UsageHistoryReport
               metric={metric}
               summary={summary.data}
               isLoading={summary.isPending}

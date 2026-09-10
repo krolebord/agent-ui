@@ -32,17 +32,17 @@ const COST_BASIS_LABEL: Record<UsageCostBasis, string> = {
   mixed: "estimate + billed",
 };
 
-interface UsageHistoryTabProps {
+interface UsageHistoryReportProps {
   metric: "cost" | "tokens";
   summary: UsageHistorySummary | undefined;
   isLoading: boolean;
 }
 
-export function UsageHistoryTab({
+export function UsageHistoryReport({
   metric,
   summary,
   isLoading,
-}: UsageHistoryTabProps) {
+}: UsageHistoryReportProps) {
   const [breakdown, setBreakdown] = useState<Breakdown>("model");
   const view = useMemo(() => deriveUsageHistoryView(summary), [summary]);
   const days = useMemo(

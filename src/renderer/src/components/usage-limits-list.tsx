@@ -1,9 +1,8 @@
-import { useAppState } from "@renderer/components/sync-state-provider";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import {
-  buildUsageGroups,
   formatUsageAge,
+  type UsageProviderGroup,
   type UsageRow,
 } from "@renderer/lib/usage-view";
 import { orpc } from "@renderer/orpc-client";
@@ -44,13 +43,13 @@ const PROVIDER_META: Record<
   },
 };
 
-export function UsageLimitsTab({ now }: { now: number }) {
-  const entries = useAppState((state) => state.usage.entries);
-  const claudeAccounts = useAppState((state) => state.claudeAccounts.accounts);
-  const codexAccounts = useAppState((state) => state.codexAccounts.accounts);
-
-  const groups = buildUsageGroups({ entries, claudeAccounts, codexAccounts });
-
+export function UsageLimitsList({
+  groups,
+  now,
+}: {
+  groups: UsageProviderGroup[];
+  now: number;
+}) {
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
       {groups.map((group) => {
