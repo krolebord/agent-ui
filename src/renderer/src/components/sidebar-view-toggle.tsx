@@ -19,6 +19,7 @@ import {
   BarChart3,
   CalendarClock,
   FileText,
+  Gauge,
   Inbox,
   ListTree,
   PackageOpen,
@@ -43,6 +44,7 @@ const navPageIcons: Record<
   accounts: Users,
   artifacts: PackageOpen,
   usage: BarChart3,
+  limits: Gauge,
 };
 
 const pageSlotHiddenClasses: Record<"withSwitch" | "withoutSwitch", string[]> =
@@ -54,6 +56,7 @@ const pageSlotHiddenClasses: Record<"withSwitch" | "withoutSwitch", string[]> =
       "@max-[244px]:hidden",
       "@max-[276px]:hidden",
       "@max-[308px]:hidden",
+      "@max-[340px]:hidden",
     ],
     withoutSwitch: [
       "@max-[112px]:hidden",
@@ -62,6 +65,7 @@ const pageSlotHiddenClasses: Record<"withSwitch" | "withoutSwitch", string[]> =
       "@max-[208px]:hidden",
       "@max-[240px]:hidden",
       "@max-[272px]:hidden",
+      "@max-[304px]:hidden",
     ],
   };
 

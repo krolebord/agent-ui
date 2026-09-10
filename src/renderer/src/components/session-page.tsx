@@ -35,6 +35,7 @@ import { type ReactNode, useState } from "react";
 import { AccountsPage } from "./accounts-page";
 import { ArtifactsPage } from "./artifacts-page";
 import { GlobalInstructionsPage } from "./global-instructions-page";
+import { LimitsPage } from "./limits-page";
 import { ScheduledSessionsPage } from "./scheduled-sessions-page";
 import { SkillsPage } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
@@ -98,6 +99,10 @@ export function SessionPage() {
 
   if (mainView === "usage") {
     return <UsagePage />;
+  }
+
+  if (mainView === "limits") {
+    return <LimitsPage />;
   }
 
   if (!session) {

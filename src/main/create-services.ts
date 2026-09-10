@@ -78,6 +78,7 @@ import { StateOrchestrator } from "./state-orchestrator";
 import { TerminalManager } from "./terminal-manager";
 import { getTextGenerationWorkingDirectory } from "./text-generation-workspace";
 import { TitleGenerationService } from "./title-generation-service";
+import { UsageHistoryService } from "./usage-history/service";
 import {
   defineUsagePersistence,
   defineUsageState,
@@ -391,6 +392,8 @@ export async function createServices(options: CreateServicesOptions) {
   });
   usageTracker.start();
 
+  const usageHistoryService = new UsageHistoryService({ userDataPath });
+
   const scheduledSessionsState = defineScheduledSessionsState();
   persistenceService.registerAndHydrate(
     defineScheduledSessionsPersistence(scheduledSessionsState),
@@ -514,6 +517,9 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(() => scheduledSessionsService.dispose());
   shutdownDisposable.addDisposable(() => machineStatsMonitor.dispose());
   shutdownDisposable.addDisposable(() => usageTracker.dispose());
+  shutdownDisposable.addDisposable(
+    async () => await usageHistoryService.dispose(),
+  );
   shutdownDisposable.addDisposable(() => handoffsService.dispose());
   shutdownDisposable.addDisposable(() => skillsService.dispose());
   shutdownDisposable.addDisposable(() => stateService.dispose());
@@ -534,6 +540,7 @@ export async function createServices(options: CreateServicesOptions) {
     machineStatsState,
     usageState,
     usageTracker,
+    usageHistory: usageHistoryService,
     projectsState,
     projectTerminalsState,
     projectGitService,

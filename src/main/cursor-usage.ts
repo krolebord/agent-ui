@@ -215,7 +215,7 @@ async function readCursorAgentAccessTokenFromKeychain(): Promise<
   }
 }
 
-async function readCursorAccessToken(): Promise<string | null> {
+export async function readCursorAccessToken(): Promise<string | null> {
   const agentToken = await readCursorAgentAccessToken();
   if (agentToken) {
     return agentToken;

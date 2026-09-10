@@ -27,6 +27,9 @@ export const useMainViewStore = create(
     showUsage: () => {
       set({ view: "usage" });
     },
+    showLimits: () => {
+      set({ view: "limits" });
+    },
     toggleView: (view: NavPageId) => {
       set((state) => ({ view: state.view === view ? "sessions" : view }));
     },
