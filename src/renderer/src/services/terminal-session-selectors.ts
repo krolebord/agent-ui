@@ -121,20 +121,10 @@ export interface ProjectPickerOption {
   label: string;
   isWorktree: boolean;
   hidden: boolean;
-  /** Locked while a worktree delete is in flight — cannot host a new session. */
   disabled: boolean;
-  /** Selected path that is not (or no longer) a known project. */
   unlisted: boolean;
 }
 
-/**
- * Options for the new-session project picker, in the user's own project order.
- * Hidden projects stay listed: hiding a project from the tree is not a reason
- * to make it unreachable when starting a session. A selected path that is not
- * in the project list (a removed project on a scheduled session, or a folder
- * that will be added on submit) is prepended so the picker can always show
- * what is currently selected.
- */
 export function buildProjectPickerOptions(input: {
   projects: ClaudeProject[];
   selectedPath: string;
@@ -169,8 +159,6 @@ export function buildProjectPickerOptions(input: {
 export function buildProjectSessionGroups(
   state: BuildProjectSessionGroupsInput,
 ): ProjectSessionGroup[] {
-  // Settled sessions belong on the inbox shelf, not the project tree. Skip them
-  // here so the normal sidebar and Mod+Arrow session cycling stay uncluttered.
   const allSessions = Object.values(state.sessionsById)
     .filter((session) => !isSessionSettled(session))
     .sort(compareSessionsByCreatedAtDesc);

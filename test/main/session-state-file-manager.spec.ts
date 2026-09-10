@@ -62,7 +62,6 @@ describe("SessionStateFileManager", () => {
     });
 
     it("does nothing for null path", () => {
-      // Should not throw
       manager.cleanup(null);
     });
 

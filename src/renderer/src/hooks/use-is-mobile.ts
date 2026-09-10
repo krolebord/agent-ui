@@ -1,7 +1,5 @@
 import { useSyncExternalStore } from "react";
 
-// Keep in sync with Tailwind's `md` breakpoint (768px): the mobile layout
-// applies below it, `max-md:`/`md:` utilities handle the CSS-only cases.
 const MOBILE_QUERY = "(max-width: 767px)";
 
 const mediaQuery = window.matchMedia(MOBILE_QUERY);

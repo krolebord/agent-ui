@@ -67,12 +67,6 @@ function createDeferred<T>() {
   };
 }
 
-/**
- * Every git instance now carries a full copy of `process.env`, which would
- * drown call assertions. Tests only care about the variables the service sets
- * deliberately, so the mock forwards those; ambient inheritance and the locale
- * are asserted separately from `spawnedGitEnvs`.
- */
 const GIT_ENV_OVERRIDE_KEYS = ["GIT_INDEX_FILE", "GIT_TERMINAL_PROMPT"];
 
 function pickGitEnvOverrides(
@@ -113,8 +107,6 @@ describe("ProjectGitService", () => {
 
           return rawMock(projectPath, args, overrides);
         },
-        // Mirrors simple-git: an object argument *replaces* the environment,
-        // a name/value pair merges into it.
         env: (keyOrEnv: string | Record<string, string>, value?: string) => {
           if (typeof keyOrEnv === "object") {
             envVars = { ...keyOrEnv };
@@ -525,8 +517,6 @@ describe("ProjectGitService", () => {
     expect(spawnedGitEnvs.length).toBeGreaterThan(0);
     for (const env of spawnedGitEnvs) {
       expect(env.LC_ALL).toBe("C");
-      // simple-git replaces rather than extends the environment, so a missing
-      // PATH here means git would run without the user's config or binaries.
       expect(env.PATH).toBe(process.env.PATH);
     }
   });
@@ -566,8 +556,6 @@ describe("ProjectGitService", () => {
 
     const service = new ProjectGitService(defineProjectState());
 
-    // Rejecting rather than resolving to null matters: null reads as "clean
-    // worktree" and the diff pane would claim there are no changes.
     await expect(service.getUncommittedDiff("/repo-one")).rejects.toThrow(
       "staging exploded",
     );

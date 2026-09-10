@@ -1,17 +1,7 @@
 import { z } from "zod";
 
-/**
- * Assumed token lifetime when no `exp` claim is readable. Matches the
- * staleness threshold the Codex CLI applies to its own stored tokens.
- */
 export const CODEX_TOKEN_FALLBACK_LIFETIME_MS = 8 * 24 * 60 * 60_000;
 
-/**
- * Codex access tokens are JWTs whose claims carry everything we need to label
- * an account: the workspace id Codex bills against, the plan, and the email.
- * Reading them beats an extra API call, and it is how the app-server itself
- * derives account metadata in external auth mode.
- */
 const accessTokenClaimsSchema = z.object({
   exp: z.number().optional(),
   "https://api.openai.com/auth": z
@@ -28,11 +18,9 @@ const accessTokenClaimsSchema = z.object({
 });
 
 export interface CodexTokenClaims {
-  /** Workspace id, sent to the app-server as `chatgptAccountId`. */
   chatgptAccountId?: string;
   planType?: string;
   email?: string;
-  /** Unix epoch milliseconds, from the JWT `exp` claim. */
   expiresAt?: number;
 }
 

@@ -100,7 +100,6 @@ describe("DatabaseService", () => {
       value: "persisted",
       updated_at: 1,
     });
-    // Compare against the provider so adding a migration does not fail this.
     const expectedMigrations = Object.keys(
       await new AppMigrationProvider().getMigrations(),
     ).length;

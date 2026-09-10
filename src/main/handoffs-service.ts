@@ -41,8 +41,6 @@ function extractTitleFromBody(head: string): string | null {
   return null;
 }
 
-// Snippet shown per list row: skip a leading H1 (it's already the title) and
-// blank lines, then keep the first few content lines capped at 500 chars.
 function buildPreview(head: string): string {
   const lines = head.replace(/^﻿/, "").split("\n");
   let start = 0;

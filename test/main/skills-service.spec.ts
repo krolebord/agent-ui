@@ -402,8 +402,6 @@ describe("SkillsService", () => {
     await service.refresh();
     expect(state.state[skillDir]).toBeDefined();
 
-    // Within the throttle window a second refresh must not run synchronously;
-    // the deletion is only picked up by the (cancelled-on-dispose) trailing run.
     await rm(skillDir, { recursive: true, force: true });
     void service.refresh();
     expect(state.state[skillDir]).toBeDefined();

@@ -64,7 +64,6 @@ export function ArtifactsPage() {
   const { mutate: refresh } = refreshAvailability;
   const refreshedIds = useRef<Set<string>>(new Set());
 
-  // Re-check availability on mount and whenever an agent publishes something new.
   useEffect(() => {
     const ids = Object.keys(artifactsById);
     const hasNewArtifact = ids.some((id) => !refreshedIds.current.has(id));

@@ -394,11 +394,6 @@ export class SessionsServiceNew {
     return sessionId;
   }
 
-  /**
-   * Drops a session record that never made it to a running terminal, so a
-   * failed start (e.g. an account that needs a fresh login) doesn't leave a
-   * dead entry in the sidebar.
-   */
   private async discardUnstartedSession(sessionId: string) {
     await this.terminalManager.unregisterTerminal(sessionId);
     this.sessionsState.updateState((state) => {
@@ -544,9 +539,6 @@ export class SessionsServiceNew {
       return existingLiveSession;
     }
 
-    // Resolved before anything is allocated: a managed account whose token
-    // cannot be refreshed throws, and the session must not start under the
-    // default account by accident.
     let accountAuth: ClaudeAccountAuth | undefined;
     if (opts.accountId) {
       accountAuth = (await this.getAccountAuth?.(opts.accountId)) ?? undefined;
@@ -596,7 +588,6 @@ export class SessionsServiceNew {
             runtime.status,
             activityMonitor,
           );
-          // Teardown statuses are finalized by onExit for activity purposes.
           if (runtime.status === "starting" || runtime.status === "running") {
             state[opts.sessionId].lastActivityAt = Date.now();
           }
@@ -628,8 +619,6 @@ export class SessionsServiceNew {
         return;
       }
       isDisposing = true;
-      // Stop hook delivery before terminal teardown. Preserving the last state
-      // avoids turning an internal reset to `unknown` into activity.
       activityMonitor.stopMonitoring({ preserveState: true });
     };
     disposable.addDisposable(beginDispose);
@@ -688,8 +677,6 @@ export class SessionsServiceNew {
             status,
             activityMonitor,
           );
-          // Intentional stop transitions through stopping/stopped/error without
-          // counting as activity; crashes bump from onExit instead.
           if (status === "starting" || status === "running") {
             state[opts.sessionId].lastActivityAt = Date.now();
           }
@@ -702,8 +689,6 @@ export class SessionsServiceNew {
             ? "error"
             : "stopped";
           state[opts.sessionId].errorMessage = payload.errorMessage;
-          // Unexpected exits wake parked sessions. User-initiated stops
-          // (including settle) must not, or the row flashes out of Settled.
           if (!payload.stoppedByUser) {
             state[opts.sessionId].lastActivityAt = Date.now();
           }

@@ -442,8 +442,6 @@ function SortableProjectGroup({
   );
 
   const queryClient = useQueryClient();
-  // Discovery is on a long cooldown in main, so this is the escape hatch for
-  // "I just added an icon and want to see it now".
   const refreshFaviconMutation = useMutation(
     orpc.projects.refreshFavicon.mutationOptions({
       onSuccess: (_data, variables) =>
@@ -515,10 +513,6 @@ function SortableProjectGroup({
         >
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1 text-sm font-medium text-zinc-100">
-              {/* The project's own icon, with no collapsed/expanded variant:
-                  whether the sessions are showing says that already. The
-                  awaiting-input tint the folder used to carry moves to the
-                  name, since an arbitrary image can't be recolored. */}
               <ProjectFavicon
                 projectPath={group.path}
                 className={cn(

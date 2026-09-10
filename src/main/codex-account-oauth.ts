@@ -5,21 +5,16 @@ import {
 } from "./codex-account-tokens";
 import log from "./logger";
 
-// Undocumented endpoint + public client ID used by the Codex CLI's own OAuth
-// flow. Keep them in one place so breakage is a one-line fix.
 export const CODEX_OAUTH_TOKEN_ENDPOINT = "https://auth.openai.com/oauth/token";
 export const CODEX_CLI_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-/** Refresh when the access token has less than this much lifetime left. */
 const EXPIRY_MARGIN_MS = 60 * 60_000;
-/** After a transient refresh failure, don't retry until this much time passed. */
 const TRANSIENT_BACKOFF_MS = 30_000;
 
 export interface ManagedCodexOauthCredentials {
   accessToken: string;
   refreshToken: string;
   idToken?: string;
-  /** Unix epoch milliseconds. */
   expiresAt: number;
 }
 
@@ -41,28 +36,18 @@ export class CodexOauthRefreshError extends Error {
 }
 
 interface CodexAccountOAuthOptions {
-  /** Read the current credentials for an account, or null if unknown. */
   getCredentials: (
     accountId: string,
   ) => (ManagedCodexOauthCredentials & { blocked?: boolean }) | null;
-  /** Persist a rotated credential pair. */
   setCredentials: (
     accountId: string,
     credentials: ManagedCodexOauthCredentials,
   ) => void;
-  /** Mark an account as needing a fresh login (refresh token is dead). */
   onInvalidGrant: (accountId: string) => void;
   fetchFn?: typeof fetch;
   now?: () => number;
 }
 
-/**
- * Owns access-token refresh for managed Codex accounts. Refresh tokens rotate,
- * and whichever Codex client refreshes first invalidates every other copy of
- * that account's credentials, so this is the only place allowed to call the
- * refresh endpoint — and it must never be pointed at the user's default
- * `~/.codex` login, which the CLI owns.
- */
 export class CodexAccountOAuth {
   private readonly inflight = new Map<string, Promise<string>>();
   private readonly backoffUntil = new Map<string, number>();
@@ -182,8 +167,6 @@ export class CodexAccountOAuth {
 
     const rotated: ManagedCodexOauthCredentials = {
       accessToken: parsed.data.access_token,
-      // The endpoint rotates the refresh token; keep the old one only if no
-      // replacement was issued.
       refreshToken: parsed.data.refresh_token ?? credentials.refreshToken,
       idToken: parsed.data.id_token ?? credentials.idToken,
       expiresAt: this.resolveExpiry(
@@ -197,10 +180,6 @@ export class CodexAccountOAuth {
     return rotated.accessToken;
   }
 
-  /**
-   * The token's own `exp` claim is authoritative; `expires_in` is a fallback
-   * because the endpoint does not always send it.
-   */
   private resolveExpiry(accessToken: string, expiresIn?: number): number {
     const claimed = decodeCodexTokenClaims(accessToken)?.expiresAt;
     if (claimed != null) {

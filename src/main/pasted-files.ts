@@ -10,13 +10,9 @@ import {
 const PASTED_FILE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_FILE_NAME_LENGTH = 200;
 
-// Matches ASCII control characters (0x00-0x1f and 0x7f) without embedding
-// literal control bytes in the source.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the intent
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/g;
 
-// Used only to synthesize a name when the clipboard file has none (e.g. a
-// screenshot pasted straight from the OS). Real files keep their own name.
 const imageExtensionsByMimeType: Record<string, string> = {
   "image/gif": "gif",
   "image/jpeg": "jpg",
@@ -29,10 +25,6 @@ export function getPastedFilesDir() {
 }
 
 function sanitizeFileName(rawName: string | undefined, mimeType: string) {
-  // basename() drops any directory component, defeating path traversal
-  // (e.g. "../../etc/passwd" -> "passwd"). We then strip control chars and
-  // stray separators, and collapse whitespace so the pasted path stays a
-  // single unquoted token the CLI can parse.
   const cleaned = (rawName ? path.basename(rawName) : "")
     .replace(CONTROL_CHARS, "")
     .replace(/[\\/]/g, "")
@@ -87,8 +79,6 @@ export async function savePastedFile({
 
   const safeName = sanitizeFileName(fileName, mimeType);
 
-  // Each file gets its own uuid subdirectory so the original name can be
-  // preserved without collisions, and cleanup can drop the whole dir.
   const dir = path.join(getPastedFilesDir(), randomUUID());
   await mkdir(dir, { recursive: true });
   void cleanupExpiredPastedFiles();

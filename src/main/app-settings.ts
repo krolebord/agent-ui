@@ -18,7 +18,6 @@ import { defineStatePersistence } from "./persistence-orchestrator";
 export const sleepBlockModes = ["off", "working", "always"] as const;
 export type SleepBlockMode = (typeof sleepBlockModes)[number];
 
-/** Which sidebar the session list renders: the project tree or the flat inbox. */
 export const sidebarViews = ["projects", "inbox"] as const;
 export type SidebarView = (typeof sidebarViews)[number];
 

@@ -234,7 +234,6 @@ export class LocalTerminalSessionsManager {
         state.updateState((state) => {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
-          // Unexpected exits wake parked sessions; intentional stops do not.
           if (!payload.stoppedByUser) {
             state[sessionId].lastActivityAt = Date.now();
           }

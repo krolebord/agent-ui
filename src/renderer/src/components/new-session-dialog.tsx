@@ -297,7 +297,6 @@ function cursorConfigToOptions(
   };
 }
 
-/** Short-window plan usage for an account, hidden until it has been read. */
 function AccountUsagePercent({ percent }: { percent: number | null }) {
   if (percent == null) {
     return null;
@@ -368,9 +367,6 @@ export function NewSessionDialog() {
   const wasOpenRef = useRef(false);
   const isOpen = openProjectCwd !== null || editEntry !== null;
 
-  // The project the dialog was opened for is only the starting point; the picker
-  // can retarget it. Reset happens during render rather than in an effect so
-  // reopening the dialog can never paint a stale project for a frame.
   const [pickedProjectPath, setPickedProjectPath] = useState<string | null>(
     null,
   );
@@ -440,8 +436,6 @@ export function NewSessionDialog() {
 
   const persistAndClose = useCallback(() => {
     if (editScheduledSessionId) {
-      // Edited values describe one schedule, not the user's preferred
-      // defaults for new sessions — close without persisting them.
       openScheduledSessionEditor(null);
       return;
     }

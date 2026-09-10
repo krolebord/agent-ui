@@ -50,7 +50,6 @@ function useValidateActiveSession() {
   }, [activeSessionId, sessions]);
 }
 
-/** The session list, in whichever shape the user last chose. */
 function SessionListSidebar() {
   const sidebarView = useAppState((state) => state.appSettings.sidebarView);
 

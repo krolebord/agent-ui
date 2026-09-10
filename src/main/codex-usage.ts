@@ -107,9 +107,6 @@ function selectRateLimitsSnapshot(
     return null;
   }
 
-  // Newer app-server versions split the 5-hour and weekly limits into
-  // separate buckets, each carrying only a `primary` window. Merge windows
-  // from every bucket so the weekly limit isn't dropped.
   if (base.secondary) {
     return base;
   }
@@ -172,17 +169,9 @@ async function readRateLimitsFromAppServer(
   }
 }
 
-/**
- * Reads plan usage for a specific managed account when `externalAuth` is
- * given, otherwise for the default `~/.codex` login.
- */
 export async function getCodexUsage(
   options: {
     externalAuth?: CodexExternalAuthTokens;
-    /**
-     * Reads through an app-server that is already running, avoiding a spawn.
-     * Returning null falls back to starting a throwaway one.
-     */
     readRateLimits?: () => Promise<unknown | null>;
   } = {},
 ) {

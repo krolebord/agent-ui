@@ -40,7 +40,6 @@ export const useProjectCommandsDialogStore = create(
   ),
 );
 
-/** Editor row state. `sourceIndex` is absent for commands added in the dialog. */
 interface CommandDraft {
   key: string;
   sourceIndex?: number;
@@ -67,8 +66,6 @@ function toDraft(command: ResolvedProjectCommand): CommandDraft {
 
 function toWrite(draft: CommandDraft): ProjectCommandWrite {
   return {
-    // Only round-trip an id the file spells out, so derived ids don't leak
-    // into the repository on save.
     id: draft.explicitId,
     name: draft.name.trim(),
     run: draft.run.trim(),

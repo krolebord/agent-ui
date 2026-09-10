@@ -560,8 +560,6 @@ function ProjectGitHistoryPaneContent() {
   const upstreamStats = activeProject?.gitUpstreamDiffStats;
   const hasUpstream = Boolean(upstreamStats);
   const aheadCommits = upstreamStats?.aheadCommits ?? 0;
-  // Stale until something fetches: it is measured against the remote-tracking
-  // ref, so it only counts commits a previous fetch or pull already brought in.
   const behindCommits = upstreamStats?.behindCommits ?? 0;
   const projectLocked = activeProject?.interactionDisabled === true;
 
@@ -600,8 +598,6 @@ function ProjectGitHistoryPaneContent() {
         void queryClient.invalidateQueries({
           queryKey: orpc.projects.getCommitHistory.key(),
         });
-        // HEAD moved, so the working-tree diff shown elsewhere is now measured
-        // against a different base.
         void queryClient.invalidateQueries({
           queryKey: orpc.projects.getUncommittedDiff.key(),
         });
@@ -683,7 +679,6 @@ function ProjectGitHistoryPaneContent() {
         commitHash: selectedCommit?.hash ?? "0000000",
       },
       enabled: Boolean(selectedCommit),
-      // A commit's diff is immutable for a given hash
       staleTime: Number.POSITIVE_INFINITY,
     }),
   );

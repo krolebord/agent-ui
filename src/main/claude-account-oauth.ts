@@ -1,23 +1,17 @@
 import { z } from "zod";
 import log from "./logger";
 
-// Undocumented endpoint + public client ID used by the Claude CLI's own OAuth
-// flow. Both have moved before — keep them in one place so breakage is a
-// one-line fix.
 export const CLAUDE_OAUTH_TOKEN_ENDPOINT =
   "https://platform.claude.com/v1/oauth/token";
 export const CLAUDE_CODE_OAUTH_CLIENT_ID =
   "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
-/** Refresh when the access token has less than this much lifetime left. */
 const EXPIRY_MARGIN_MS = 5 * 60_000;
-/** After a transient refresh failure, don't retry until this much time passed. */
 const TRANSIENT_BACKOFF_MS = 30_000;
 
 export interface ManagedOauthCredentials {
   accessToken: string;
   refreshToken: string;
-  /** Unix epoch milliseconds. */
   expiresAt: number;
   scopes: string[];
 }
@@ -41,27 +35,18 @@ export class OauthRefreshError extends Error {
 }
 
 interface ClaudeAccountOAuthOptions {
-  /** Read the current credentials for an account, or null if unknown. */
   getCredentials: (
     accountId: string,
   ) => (ManagedOauthCredentials & { blocked?: boolean }) | null;
-  /** Persist a rotated credential pair. */
   setCredentials: (
     accountId: string,
     credentials: ManagedOauthCredentials,
   ) => void;
-  /** Mark an account as needing a fresh login (refresh token is dead). */
   onInvalidGrant: (accountId: string) => void;
   fetchFn?: typeof fetch;
   now?: () => number;
 }
 
-/**
- * Owns access-token refresh for managed accounts. The app has exclusive
- * custody of these refresh tokens (they rotate on every refresh), so this is
- * the only place that may call the refresh endpoint — and it must never be
- * pointed at the user's default `~/.claude` login, which the CLI owns.
- */
 export class ClaudeAccountOAuth {
   private readonly inflight = new Map<string, Promise<string>>();
   private readonly backoffUntil = new Map<string, number>();
@@ -175,8 +160,6 @@ export class ClaudeAccountOAuth {
 
     const rotated: ManagedOauthCredentials = {
       accessToken: parsed.data.access_token,
-      // The endpoint usually rotates the refresh token; keep the old one only
-      // if no replacement was issued.
       refreshToken: parsed.data.refresh_token ?? credentials.refreshToken,
       expiresAt: this.now() + parsed.data.expires_in * 1_000,
       scopes: credentials.scopes,

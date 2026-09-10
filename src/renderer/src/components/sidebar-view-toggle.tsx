@@ -45,17 +45,6 @@ const navPageIcons: Record<
   usage: BarChart3,
 };
 
-/**
- * Content-box widths below which each pinned page hides — container queries
- * measure the header's content box, so its traffic-light padding is already
- * excluded and the same numbers hold in the browser, where that padding is
- * dropped and the header therefore has ~56px more to spend.
- *
- * The overflow and new-session buttons cost 72px, the pinned sidebar switch
- * another 36px, and each pinned page 32px. Pages are revealed one at a time as
- * the panel widens rather than squeezing the buttons that were there first;
- * whatever stays hidden is still one click away in the overflow menu.
- */
 const pageSlotHiddenClasses: Record<"withSwitch" | "withoutSwitch", string[]> =
   {
     withSwitch: [
@@ -76,10 +65,6 @@ const pageSlotHiddenClasses: Record<"withSwitch" | "withoutSwitch", string[]> =
     ],
   };
 
-/**
- * The sidebar header's own classes. The 64px left inset only exists to clear
- * the macOS traffic lights, so the browser build spends it on pins instead.
- */
 export const sidebarHeaderClassName = cn(
   "@container flex h-9 items-center border-b border-border/70 [app-region:drag]",
   hasNativeDesktopShell ? "pl-16" : "pl-2",
@@ -95,13 +80,6 @@ function useItemPinned(item: PinnableItemId) {
   );
 }
 
-/**
- * Flips the sidebar between the project tree and the flat inbox. An icon button
- * rather than a segmented control: the header is a 36px strip of w-9 icon
- * buttons, and a two-segment control would either crowd the drag region or
- * force the strip taller. Renders nothing while unpinned, where the overflow
- * menu carries the switch instead.
- */
 export function SidebarViewToggle() {
   const sidebarView = useAppState((state) => state.appSettings.sidebarView);
   const pinned = useItemPinned("sidebarView");
@@ -133,10 +111,6 @@ export function SidebarViewToggle() {
   );
 }
 
-/**
- * True when the open page has no pinned button of its own, which is when the
- * overflow menu is the only thing that can show it is active.
- */
 export function useUnpinnedNavPageActive() {
   const mainView = useMainViewStore((state) => state.view);
   const pinnedItems = usePinnedItems();
@@ -144,10 +118,6 @@ export function useUnpinnedNavPageActive() {
   return mainView !== "sessions" && !pinnedItems.includes(mainView);
 }
 
-/**
- * Pinned pages as icon buttons in the sidebar header, so the pages you actually
- * revisit don't cost a menu round trip.
- */
 export function PinnedNavButtons() {
   const mainView = useMainViewStore((state) => state.view);
   const toggleView = useMainViewStore((state) => state.toggleView);
@@ -206,10 +176,6 @@ function PinButton({
           ? "text-foreground"
           : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-data-[highlighted]:opacity-100",
       )}
-      // The row acts on click, so the pin swallows its own click to stay put and
-      // let you pin a second item. Pointer events have to keep bubbling to the
-      // row: Radix re-fires the click on pointer up if the row never saw the
-      // pointer down.
       onClick={(event) => {
         event.stopPropagation();
         setHeaderItemPinned.mutate({ item, pinned: !pinned });
@@ -223,7 +189,6 @@ function PinButton({
   );
 }
 
-/** The projects/inbox switch as a menu row, for when it is not pinned. */
 function SidebarViewMenuItem() {
   const sidebarView = useAppState((state) => state.appSettings.sidebarView);
   const pinned = useItemPinned("sidebarView");
@@ -255,12 +220,6 @@ function SidebarViewMenuItem() {
   );
 }
 
-/**
- * The main-view entries shared by both sidebars' overflow menus, so switching
- * sidebars never costs you access to skills, schedules, accounts or settings.
- * Every entry stays listed here even when pinned, so a narrow sidebar that hides
- * pinned buttons never strands one.
- */
 export function SidebarNavMenuItems({ children }: { children?: ReactNode }) {
   const openSettingsDialog = useSettingsStore((x) => x.openSettingsDialog);
   const toggleView = useMainViewStore((state) => state.toggleView);

@@ -197,8 +197,6 @@ describe("project-favicon", () => {
     await writeProjectFile("assets/logo.png", "logo");
     const first = await getProjectFaviconDataUrl(projectDir);
 
-    // A higher-priority icon appearing is invisible until the cached file
-    // changes: the tradeoff that keeps repeat reads to a single stat.
     await writeProjectFile("favicon.svg", "<svg>new</svg>");
 
     await expect(getProjectFaviconDataUrl(projectDir)).resolves.toBe(first);

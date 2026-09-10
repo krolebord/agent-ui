@@ -16,10 +16,6 @@ export function switchSession(nextSessionId: string | null): void {
     if (prevSessionId && prevSessionId !== nextSessionId) {
       void orpc.sessions.markSeen.call({ sessionId: prevSessionId });
     }
-    // Only the session being opened counts as visited. The departing call above
-    // must not carry the flag: snoozing the session you are looking at navigates
-    // away, and spending the snooze there would undo the write that triggered
-    // the navigation.
     void orpc.sessions.markSeen.call({
       sessionId: nextSessionId,
       visiting: true,
@@ -36,8 +32,6 @@ export const useActiveSessionStore = create(
       (set) => ({
         setActiveSessionId: (activeSessionId: string | null) => {
           set({ activeSessionId });
-          // Activating a session always brings the session view back, even
-          // when a standalone page (e.g. skills) currently fills the main pane.
           if (activeSessionId) {
             useMainViewStore.getState().showSessions();
           }

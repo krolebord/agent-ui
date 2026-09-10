@@ -1,13 +1,3 @@
-/**
- * Minimal YAML-ish frontmatter handling for SKILL.md files.
- *
- * Skill frontmatter is a flat map of scalar keys (name, description,
- * disable-model-invocation, managed-by, ...). We avoid a full YAML parser and
- * instead parse `key: value` blocks, preserving unknown keys verbatim so that
- * updating a skill authored elsewhere never destroys metadata we don't know
- * about.
- */
-
 interface FrontmatterBlock {
   key: string | null;
   lines: string[];
@@ -86,7 +76,6 @@ export function getScalar(parsed: ParsedSkillMd, key: string): string | null {
   const match = firstLine.match(KEY_LINE);
   const inline = match?.[2] ?? "";
 
-  // Folded/literal block scalars (`key: >-` / `key: |`): join continuation lines.
   if (/^\s*[|>][+-]?\s*$/.test(inline)) {
     return block.lines
       .slice(1)
@@ -114,11 +103,6 @@ function formatScalar(value: string): string {
 
 export type FrontmatterUpdates = Record<string, string | boolean | null>;
 
-/**
- * Serialize a SKILL.md, applying `updates` to the frontmatter. Keys set to
- * null are removed; keys not present in the parsed input are appended.
- * Unknown existing keys are kept verbatim.
- */
 export function serializeSkillMd(
   parsed: ParsedSkillMd,
   updates: FrontmatterUpdates,

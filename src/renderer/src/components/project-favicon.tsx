@@ -4,14 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Folder } from "lucide-react";
 import { type ComponentType, useState } from "react";
 
-/**
- * Icons a project shipped, resolved in main and inlined as data URLs. Projects
- * without one fall back to the caller's icon, so a repo with a favicon reads as
- * itself in a list while everything else stays uniform.
- */
 const FAVICON_STALE_TIME_MS = 5 * 60_000;
 
-/** Already painted once, so a remount skips the fallback flash. */
 const paintedFaviconUrls = new Set<string>();
 
 export function ProjectFavicon({
@@ -57,11 +51,6 @@ function FaviconFallback({
   return <Icon className={cn("size-3.5 shrink-0", className)} />;
 }
 
-/**
- * Keeps the fallback in place until the image has decoded, and drops back to it
- * for good if the icon turns out to be undecodable — a valid `.ico` byte stream
- * is not a promise that this build of Chromium renders it.
- */
 function FaviconImage({
   dataUrl,
   className,

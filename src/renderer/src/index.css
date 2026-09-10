@@ -79,8 +79,6 @@
 body {
   @apply bg-background text-foreground antialiased;
   margin: 0;
-  /* dvh (not vh): on mobile Chrome 100vh includes the area behind the
-     collapsed URL bar, which makes the document itself scrollable. */
   height: 100dvh;
   min-width: 320px;
   overflow: hidden;
@@ -97,8 +95,6 @@ body {
   font-size: 16px !important;
 }
 
-/* Global native scrollbar styling (Chromium/Electron).
-   Radix ScrollArea hides its own native scrollbar, so these do not affect it. */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;

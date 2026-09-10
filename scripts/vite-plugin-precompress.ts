@@ -7,8 +7,6 @@ import type { Plugin } from "vite";
 const gzipAsync = promisify(gzip);
 const brotliAsync = promisify(brotliCompress);
 
-// Extensions worth compressing. Images, fonts and archives are already
-// compressed, so a second pass only wastes build time and disk.
 const COMPRESSIBLE_EXTENSIONS = new Set([
   ".css",
   ".html",
@@ -21,7 +19,6 @@ const COMPRESSIBLE_EXTENSIONS = new Set([
   ".xml",
 ]);
 
-// Below this the framing overhead outweighs anything deflate can save.
 const MIN_SIZE_BYTES = 1024;
 
 async function* walkFiles(dir: string): AsyncGenerator<string> {
@@ -36,12 +33,6 @@ async function* walkFiles(dir: string): AsyncGenerator<string> {
   }
 }
 
-/**
- * Writes `.gz` and `.br` siblings next to every compressible build asset so the
- * headless server can hand them straight to the client. Assets are
- * content-hashed and served `immutable`, so compressing once here costs nothing
- * at runtime. Quality is maxed for the same reason.
- */
 export function precompressAssets(): Plugin {
   let outDir = "";
 
@@ -78,7 +69,6 @@ export function precompressAssets(): Plugin {
           }),
         ]);
 
-        // A variant that grew is worse than no variant at all.
         if (gzipped.byteLength < source.byteLength) {
           await writeFile(`${filePath}.gz`, gzipped);
           gzipTotal += gzipped.byteLength;

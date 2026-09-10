@@ -274,7 +274,6 @@ describe("ScheduledSessionsService", () => {
       state.updateState((entries) => {
         entries["entry-1"] = makeEntry({
           schedule: { kind: "recurring", cron: "0 3 * * *" },
-          // Stale next-run from a previous app run.
           nextRunAt: BASE_TIME.getTime() - 60_000,
         });
       });

@@ -23,7 +23,6 @@ export interface ManagedClaudeAccount {
   type: "managed";
   label: string;
   email?: string;
-  /** Plan the account is on at login time, e.g. "max" or "pro". */
   planType?: string;
   createdAt: number;
   status: ClaudeAccountStatus;
@@ -38,10 +37,6 @@ interface ClaudeAccountsInternalStateShape {
   accounts: ClaudeAccountRecord[];
 }
 
-/**
- * Redacted view synced to the renderer. Tokens and refresh credentials must
- * never leave the main process; the renderer only needs display metadata.
- */
 export interface PublicClaudeAccount {
   id: string;
   type: ClaudeAccountRecord["type"];
@@ -58,9 +53,7 @@ export interface ClaudeLoginFlowState {
   loginId: string;
   terminalId: string;
   status: ClaudeLoginFlowStatus;
-  /** Set when this flow re-authenticates an existing account. */
   reloginAccountId?: string;
-  /** Set once the flow succeeded. */
   accountId?: string;
   error?: string;
 }
@@ -77,11 +70,6 @@ export type ClaudeAccountsPublicState = ReturnType<
   typeof defineClaudeAccountsPublicState
 >;
 
-/**
- * Full account records including secrets. Persisted (under the pre-existing
- * "claudeAccounts" store key) but never registered with the state
- * orchestrator, so nothing here reaches the renderer.
- */
 export function defineClaudeAccountsInternalState() {
   return defineServiceState({
     key: "claudeAccounts" as const,
@@ -89,7 +77,6 @@ export function defineClaudeAccountsInternalState() {
   });
 }
 
-/** Redacted mirror registered with the state orchestrator. Not persisted. */
 export function defineClaudeAccountsPublicState() {
   return defineServiceState({
     key: "claudeAccounts" as const,
@@ -126,8 +113,6 @@ const managedAccountSchema = z.object({
   oauth: oauthCredentialsSchema,
 });
 
-// Accounts stored before the type split have no `type` field; hydrate them as
-// setup-token accounts.
 const legacyAccountSchema = z
   .object({
     id: z.string(),
@@ -262,11 +247,6 @@ export class ClaudeAccountsService {
     });
   }
 
-  /**
-   * Store harvested login credentials. When `reloginAccountId` points at an
-   * existing managed account the new pair replaces the old one; otherwise a
-   * new account is created.
-   */
   upsertManagedAccount(input: {
     reloginAccountId?: string;
     label: string;
@@ -274,8 +254,6 @@ export class ClaudeAccountsService {
     planType?: string;
     oauth: ManagedOauthCredentials;
   }): string {
-    // Logging into an already-added account replaces its credentials instead
-    // of creating a duplicate entry.
     const targetId =
       input.reloginAccountId ??
       (input.email

@@ -51,13 +51,6 @@ interface ActiveLogin {
   checking: boolean;
 }
 
-/**
- * Runs `claude` against a throwaway CLAUDE_CONFIG_DIR so the user can log in
- * interactively, then harvests the OAuth credential pair from
- * `.credentials.json`. The CLI never runs against that dir again, which is
- * what makes app-side refresh-token rotation safe. The dir (containing a
- * credentials copy) is deleted as soon as the pair is extracted.
- */
 export class ClaudeAccountLoginService {
   private active: ActiveLogin | null = null;
 
@@ -96,7 +89,6 @@ export class ClaudeAccountLoginService {
         cwd: homedir(),
         cols: input.cols,
         rows: input.rows,
-        // A fresh config dir sends the CLI straight into onboarding/login.
         runWithShell: true,
         file: "claude",
         env: {
@@ -107,9 +99,6 @@ export class ClaudeAccountLoginService {
         },
       },
       onExit: () => {
-        // The PTY exiting before credentials appeared means the user quit or
-        // login failed. A final check catches credentials written right
-        // before exit.
         void this.checkForCredentials().then((found) => {
           if (!found) {
             this.fail("Claude exited before completing login.");
@@ -124,7 +113,6 @@ export class ClaudeAccountLoginService {
         void this.checkForCredentials();
       });
     } catch (error) {
-      // fs.watch can fail on some filesystems; polling below still covers us.
       log.warn("Claude login: fs.watch failed, relying on polling", { error });
     }
 
@@ -171,9 +159,6 @@ export class ClaudeAccountLoginService {
 
   private async checkForCredentials(): Promise<boolean> {
     const active = this.active;
-    // `checking` is set before any await: fs.watch fires in bursts alongside
-    // the poll timer, and overlapping async checks would each harvest the
-    // same credentials file and create duplicate accounts.
     if (!active || active.settled || active.checking) {
       return false;
     }
@@ -185,7 +170,6 @@ export class ClaudeAccountLoginService {
     } finally {
       active.checking = false;
     }
-    // The flow may have been cancelled or settled while reading the file.
     if (!credentials || this.active !== active || active.settled) {
       return false;
     }
@@ -217,9 +201,6 @@ export class ClaudeAccountLoginService {
     return true;
   }
 
-  // The CLI writes `oauthAccount` into `.claude.json` on its own schedule,
-  // often after `.credentials.json` appears, so a single immediate read
-  // misses the email. Poll briefly; give up rather than fail the login.
   private async waitForAccountEmail(
     configDir: string,
   ): Promise<string | undefined> {
@@ -266,7 +247,6 @@ export class ClaudeAccountLoginService {
 
   private async cleanup(active: ActiveLogin): Promise<void> {
     await this.options.terminalManager.unregisterTerminal(active.terminalId);
-    // Remove the whole per-login dir: it holds a copy of the credentials.
     await rm(path.dirname(active.configDir), {
       recursive: true,
       force: true,
@@ -280,7 +260,6 @@ export class ClaudeAccountLoginService {
 
 interface HarvestedCredentials {
   oauth: ManagedOauthCredentials;
-  /** Plan the account is on, e.g. "max" or "pro". */
   subscriptionType?: string;
 }
 
@@ -294,8 +273,6 @@ async function readHarvestedCredentials(
     return null;
   }
 
-  // The CLI may still be mid-write; unparseable content is retried by the
-  // next poll tick rather than treated as failure.
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(raw);

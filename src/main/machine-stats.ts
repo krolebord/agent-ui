@@ -222,8 +222,6 @@ function pickPrimaryFilesystem<T extends FilesystemSize>(
   const mounted = filesystems.filter((fs) => normalizeMetric(fs.size));
   if (mounted.length === 0) return null;
 
-  // On macOS the writable data volume holds the real usage; "/" is the
-  // read-only system snapshot.
   const preferredMounts =
     process.platform === "darwin"
       ? ["/System/Volumes/Data", "/"]

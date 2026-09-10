@@ -2,15 +2,6 @@ import { useTerminalFileUpload } from "@renderer/hooks/use-terminal-file-upload"
 import { orpc } from "@renderer/orpc-client";
 import { useRef } from "react";
 
-/**
- * Owns the hidden file input and the attach flow shared by the mobile key bar
- * and the desktop session header: uploads each picked file to the host and
- * pastes the resulting paths into the terminal (space-separated), the same
- * tokens a drag-drop would produce.
- *
- * Render `fileInput` somewhere in the tree and call `openFilePicker` from the
- * attach button.
- */
 export function useTerminalAttachFiles(terminalId: string) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadFile = useTerminalFileUpload(terminalId);
@@ -44,7 +35,6 @@ export function useTerminalAttachFiles(terminalId: string) {
       className="hidden"
       onChange={(event) => {
         void handleFilesSelected(event.target.files);
-        // Reset so selecting the same file again re-triggers change.
         event.target.value = "";
       }}
     />

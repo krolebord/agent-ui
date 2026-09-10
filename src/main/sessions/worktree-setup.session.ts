@@ -11,7 +11,6 @@ import {
 } from "./common";
 import type { SessionServiceState } from "./state";
 
-/** Max characters stored per command output (10 KiB). */
 export const WORKTREE_SETUP_MAX_OUTPUT_CHARS = 10 * 1024;
 
 const OUTPUT_TRUNCATED_SUFFIX = "\n… [truncated]";

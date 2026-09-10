@@ -39,9 +39,6 @@ export function defineMcpTool<Shape extends z.ZodRawShape>(tool: {
           description: tool.description,
           inputSchema: tool.inputSchema,
         },
-        // The SDK types the callback via a conditional ShapeOutput<Shape>
-        // that TypeScript cannot resolve for an unbound generic; the SDK
-        // still validates arguments against inputSchema at runtime.
         ((input: z.output<z.ZodObject<Shape>>) =>
           tool.handler(
             input,

@@ -97,8 +97,6 @@ export function SkillsPage() {
   const rescanMutation = useMutation(orpc.skills.rescan.mutationOptions());
   const { mutate: rescan } = rescanMutation;
 
-  // Skills state is pulled, not watched: refresh when the page mounts and
-  // when the app regains focus (rescans are throttled in the main process).
   useEffect(() => {
     rescan(undefined);
   }, [rescan]);

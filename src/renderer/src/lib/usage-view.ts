@@ -15,7 +15,6 @@ export interface UsageRow {
   provider: UsageProvider;
   accountId: string | null;
   label: string;
-  /** Badges describing the login itself, not its usage. */
   badges: string[];
   needsRelogin: boolean;
   entry: UsageEntry | null;
@@ -69,11 +68,6 @@ function rowsForProvider(
   return rows;
 }
 
-/**
- * Lists every login the usage tracker polls — each provider's own CLI login
- * plus its managed accounts — so the page shows a row even before the first
- * reading lands.
- */
 export function buildUsageGroups(input: {
   entries: Record<string, UsageEntry>;
   claudeAccounts: UsageAccountSummary[];
@@ -92,7 +86,6 @@ export function buildUsageGroups(input: {
   ];
 }
 
-/** Compact "updated" stamp for a reading's age. */
 export function formatUsageAge(
   fetchedAt: number | null,
   now: number = Date.now(),
@@ -119,7 +112,6 @@ export function formatUsageAge(
   return `${Math.round(hours / 24)}d ago`;
 }
 
-/** Most recent successful reading across every tracked login. */
 export function latestFetchedAt(
   entries: Record<string, UsageEntry>,
 ): number | null {

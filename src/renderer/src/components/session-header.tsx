@@ -116,8 +116,6 @@ const useSessionHeaderOpenAppStore = create(
   ),
 );
 
-// Desktop counterpart to the mobile key bar's attach button: uploads picked
-// files to the host and pastes the resulting paths into the terminal.
 function AttachFileButton({ terminalId }: { terminalId: string }) {
   const { openFilePicker, fileInput } = useTerminalAttachFiles(terminalId);
 

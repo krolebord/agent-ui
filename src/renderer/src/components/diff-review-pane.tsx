@@ -284,7 +284,6 @@ const projectDiffPaneContext = createContext<ProjectDiffStore>(null!);
 
 type ProjectDiffStore = ReturnType<typeof createProjectDiffStore>;
 
-/** Module-scoped so selection survives Diff pane unmounts (tab/session switches). */
 const projectDiffStores = new Map<string, ProjectDiffStore>();
 
 function getProjectDiffStore(cwd: string): ProjectDiffStore {
@@ -410,10 +409,6 @@ function supportsDiffEditing(file: FileDiffMetadata | null): boolean {
   );
 }
 
-/**
- * Shown in place of the pane when the diff could not be read at all. Rendering
- * the usual "No uncommitted changes" here would claim the worktree is clean.
- */
 function DiffLoadErrorState({
   message,
   isRetrying,
@@ -1049,7 +1044,6 @@ type DiffFilesSidebarProps = {
   allFilesConfirmed: boolean;
   someFilesConfirmed: boolean;
   isRefreshing: boolean;
-  /** Set when a refresh failed but a previously loaded diff is still shown. */
   refreshErrorMessage: string | null;
   canCommit: boolean;
   hasUnsavedEdits: boolean;
@@ -1778,7 +1772,6 @@ function ProjectDiffPaneContent() {
     },
   );
 
-  // No cached diff to fall back on, so the failure is all there is to show.
   if (isError && !files) {
     return (
       <DiffLoadErrorState

@@ -313,8 +313,6 @@ export class NdjsonFileWatcher<TParsed = unknown> {
 
     try {
       this.onError(error);
-    } catch {
-      // Best effort only: never allow error-report callbacks to break watcher internals.
-    }
+    } catch {}
   }
 }

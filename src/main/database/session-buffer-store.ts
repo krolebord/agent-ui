@@ -2,13 +2,8 @@ import type { Kysely } from "kysely";
 import log from "../logger";
 import type { AgentUiDatabase } from "./schema";
 
-// Keeps orphan cleanup under SQLite's bound parameter limit.
 const DELETE_CHUNK_SIZE = 500;
 
-/**
- * Terminal scrollback for stopped sessions. Failures are logged and swallowed:
- * losing scrollback must never break the state update that triggered the write.
- */
 export interface SessionBufferStore {
   get(sessionId: string): Promise<string | undefined>;
   set(sessionId: string, offlineBuffer: string): Promise<void>;
@@ -68,8 +63,6 @@ export class SqliteSessionBufferStore implements SessionBufferStore {
   }
 
   async deleteOrphans(knownSessionIds: string[]): Promise<number> {
-    // An empty list is also what a failed hydration looks like, so refuse it
-    // rather than wipe every buffer.
     if (knownSessionIds.length === 0) {
       return 0;
     }
@@ -101,7 +94,6 @@ export class SqliteSessionBufferStore implements SessionBufferStore {
   }
 }
 
-/** Fallback for managers constructed without a database, and for tests. */
 export function createInMemorySessionBufferStore(): SessionBufferStore {
   const buffers = new Map<string, string>();
 

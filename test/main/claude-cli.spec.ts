@@ -51,8 +51,6 @@ describe("buildClaudeArgs", () => {
   it("omits DISABLE_TELEMETRY when remote control is enabled", () => {
     const { env } = buildClaudeArgs(makeInput({ remoteControl: true }));
 
-    // DISABLE_TELEMETRY disables feature-flag evaluation, which Remote Control
-    // requires — otherwise the CLI silently ignores --remote-control.
     expect(env.DISABLE_TELEMETRY).toBeUndefined();
   });
 
@@ -81,7 +79,6 @@ describe("buildClaudeArgs", () => {
     );
 
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-managed");
-    // An apiKeyHelper would be sent as an x-api-key API key and rejected.
     expect(args).not.toContain("--settings");
   });
 

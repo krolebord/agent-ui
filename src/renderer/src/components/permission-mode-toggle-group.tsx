@@ -82,8 +82,6 @@ export function PermissionModeToggleGroup({
   );
 }
 
-// Codex permission modes
-
 interface CodexPermissionModeToggleGroupProps {
   label: string;
   permissionMode: CodexPermissionMode;

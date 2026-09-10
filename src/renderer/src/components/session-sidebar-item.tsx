@@ -142,8 +142,6 @@ type SessionMenuActionItem = {
   key?: string;
   label: string;
   icon?: LucideIcon;
-  /** Muted right-aligned column, for a value the label refers to but shouldn't
-      repeat (a snooze preset's wake time, say). */
   trailingLabel?: string;
   onSelect: () => void;
   disabled?: boolean;
@@ -223,11 +221,6 @@ function getSessionInitialPrompt(session: Session): string | undefined {
   return prompt || undefined;
 }
 
-/**
- * Fork / remote-control and other type-only menu items. Shared by the project
- * tree and inbox so those extras cannot drift between views. Accepts undefined
- * so callers can keep a "session missing" guard below the hook calls.
- */
 function useSwitchCodexAccountActions(
   session: Session | undefined,
 ): SessionMenuAction[] {
@@ -492,7 +485,6 @@ export function useCommonSessionMenuActions(
   ];
 }
 
-/** Shared item body so the four menu renderings below cannot drift apart. */
 function MenuActionItemContent({ item }: { item: SessionMenuActionItem }) {
   const Icon = item.icon;
   return (
@@ -765,8 +757,6 @@ export function BaseSessionSidebarItem({
   const settleMutation = useMutation(orpc.sessions.settle.mutationOptions());
   const settleable = session !== undefined && canSettleSession(session);
 
-  // Settling the open row must advance focus the same way the inbox does —
-  // otherwise the project tree hides the session and leaves you staring at it.
   const handleSettle = useCallback(() => {
     const nextSessionId =
       sessionId === activeSessionId

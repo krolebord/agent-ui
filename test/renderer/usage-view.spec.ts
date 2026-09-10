@@ -67,7 +67,6 @@ describe("buildUsageGroups", () => {
     expect(claude.rows[0].badges).toEqual(["CLI login"]);
     expect(claude.rows[1].badges).toEqual(["Max 20x"]);
     expect(claude.rows[2].badges).toEqual(["Setup token"]);
-    // Rows exist even before the tracker has published an entry.
     expect(claude.rows[1].entry?.accountId).toBe("acc-1");
     expect(claude.rows[2].entry).toBeNull();
 

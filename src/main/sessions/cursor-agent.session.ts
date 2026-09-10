@@ -554,7 +554,6 @@ export class CursorAgentSessionsManager {
         state.updateState((state) => {
           state[sessionId].status = payload.errorMessage ? "error" : "stopped";
           state[sessionId].errorMessage = payload.errorMessage;
-          // Unexpected exits wake parked sessions; intentional stops do not.
           if (!payload.stoppedByUser) {
             state[sessionId].lastActivityAt = Date.now();
           }
@@ -563,7 +562,6 @@ export class CursorAgentSessionsManager {
     });
     disposable.addDisposable(() => terminal.stop());
 
-    // Mark initial prompt as sent so subsequent resumes don't re-send it
     if (initialPrompt) {
       state.updateState((state) => {
         const session = state[sessionId];

@@ -57,7 +57,6 @@ describe("ClaudeAccountOAuth", () => {
   it("returns the stored token while it is fresh", async () => {
     const fetchFn = vi.fn();
     const { oauth } = createOAuth({
-      // Expires 10 minutes from "now" — outside the 5-minute margin.
       credentials: makeCredentials({ expiresAt: 1_000_000 + 10 * 60_000 }),
       fetchFn: fetchFn as unknown as typeof fetch,
     });
@@ -75,7 +74,6 @@ describe("ClaudeAccountOAuth", () => {
       }),
     );
     const { oauth, setCredentials, store } = createOAuth({
-      // Expires 1 minute from "now" — inside the 5-minute margin.
       credentials: makeCredentials({ expiresAt: 1_000_000 + 60_000 }),
       fetchFn: fetchFn as unknown as typeof fetch,
     });
@@ -157,7 +155,6 @@ describe("ClaudeAccountOAuth", () => {
     );
     expect(onInvalidGrant).toHaveBeenCalledWith("a1");
 
-    // Simulate the account now being flagged: refreshes are gated.
     options.credentials = makeCredentials({ expiresAt: 0 });
     const gated = createOAuth({ ...options, blocked: true });
     await expect(gated.oauth.getValidAccessToken("a1")).rejects.toThrow(

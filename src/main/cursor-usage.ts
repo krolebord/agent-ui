@@ -24,14 +24,11 @@ const CursorAuthSchema = z.object({
   accessToken: z.string().min(1),
 });
 
-// --- Raw wire schemas (api2.cursor.sh Connect/gRPC-JSON, camelCase) ---
-
 const RawPlanUsageSchema = z.object({
   totalSpend: z.number().optional(),
   includedSpend: z.number().optional(),
   bonusSpend: z.number().optional(),
   remaining: z.number().optional(),
-  // Free/individual payloads may omit `limit`; team payloads always include it.
   limit: z.number().optional(),
   totalPercentUsed: z.number().optional(),
   autoPercentUsed: z.number().optional(),
@@ -59,7 +56,6 @@ const IntegerSchema = z.preprocess((value) => {
   return value;
 }, z.number().finite());
 
-// These fields mirror Cursor Agent's bundled DashboardService protobuf.
 const RawCreditsBalanceSchema = z
   .object({
     hasCreditGrants: z.boolean().optional(),
@@ -78,8 +74,6 @@ const RawPlanInfoSchema = z
       .optional(),
   })
   .passthrough();
-
-// --- Normalized output (consumed by the renderer) ---
 
 const SpendLimitUsageSchema = z.object({
   individualLimit: z.number().nullable(),
@@ -266,7 +260,6 @@ async function fetchDashboard(
 }
 
 async function fetchCredits(accessToken: string): Promise<number | null> {
-  // Best-effort enrichment: never fails the overall usage fetch.
   let responseJson: unknown;
   try {
     responseJson = await fetchDashboard("GetCreditGrantsBalance", accessToken);
@@ -403,7 +396,6 @@ export async function getCursorUsage() {
     };
   }
 
-  // Enrichment runs in parallel and degrades gracefully on failure.
   const [membershipType, creditsBalance] = await Promise.all([
     fetchMembershipType(accessToken),
     fetchCredits(accessToken),

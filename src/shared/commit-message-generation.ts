@@ -1,6 +1,5 @@
 export const commitMessageDiffMaxLength = 25_000;
 
-/** Placeholder subject used while autogenerating a commit message. */
 export const autogenerateCommitPlaceholderSubject =
   "[agent-ui] Pending commit message";
 

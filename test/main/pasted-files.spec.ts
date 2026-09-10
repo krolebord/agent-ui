@@ -34,7 +34,6 @@ describe("savePastedFile", () => {
     });
 
     expect(path.basename(filePath)).toBe("report.pdf");
-    // <pasted-files-dir>/<uuid>/report.pdf
     expect(path.dirname(path.dirname(filePath))).toBe(getPastedFilesDir());
     expect(await readFile(filePath)).toEqual(bytes);
   });
@@ -93,7 +92,6 @@ describe("savePastedFile", () => {
 
   it("cleans up expired pasted files", async () => {
     const root = getPastedFilesDir();
-    // Seed the directory so it exists, then plant a stale entry in it.
     await savePastedFile({
       base64Data: Buffer.from("first").toString("base64"),
       fileName: "first.txt",

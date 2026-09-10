@@ -7,14 +7,6 @@ function isIdleLikeStatus(status: string): boolean {
   return status === "idle" || status === "awaiting_user_response";
 }
 
-/**
- * Cursor CLI only emits OSC 99 notifications while it thinks the terminal is
- * unfocused, and only draws an input caret while it thinks the terminal is
- * focused. This reporter keeps Cursor "unfocused" except when the user is
- * actually at a prompt (idle-like status + xterm pane focused), and writes
- * focus-out immediately on Enter so the first approval notification is not
- * lost to hook-file latency.
- */
 export class CursorFocusReporter {
   private paneFocused = false;
   private reportingEnabled = false;

@@ -5,12 +5,6 @@ import log from "electron-log/node";
 const isDev = !!process.env.VITE_DEV_SERVER_URL;
 const env = process.env.VITEST ? "test" : isDev ? "dev" : "prod";
 
-/**
- * electron-log serializes an Error to its `stack` alone, which drops
- * `error.cause` and any extra properties such as `code`. Wrapped errors then
- * log only the outermost message, hiding the actual failure. Expand errors into
- * plain objects instead, following the cause chain.
- */
 const MAX_VALUE_DEPTH = 6;
 const MAX_CAUSE_DEPTH = 5;
 
@@ -37,8 +31,6 @@ function serializeError(
     stack: error.stack,
   };
 
-  // Own enumerable properties carry the useful details on system errors
-  // (`code`, `errno`, `syscall`, `path`) and on custom error subclasses.
   for (const key of Object.keys(error)) {
     if (key === "name" || key === "message" || key === "stack") {
       continue;
@@ -89,8 +81,6 @@ function serializeValue(
     return serializeError(value, 0, seen);
   }
 
-  // Leave non-plain objects (Date, Map, Buffer, class instances) to
-  // electron-log's own transforms.
   if (
     depth >= MAX_VALUE_DEPTH ||
     (!Array.isArray(value) && !isPlainObject(value))
@@ -114,7 +104,6 @@ function serializeValue(
   return result;
 }
 
-/** Exported for tests. */
 export function expandLoggedErrors(data: unknown[]): unknown[] {
   const seen = new WeakSet<object>();
   return data.map((item) => serializeValue(item, 0, seen));

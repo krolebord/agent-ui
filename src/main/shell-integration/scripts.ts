@@ -2,14 +2,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import log from "../logger";
 
-/**
- * The managed .zshrc sources the user's real config, then installs
- * OSC 133 hooks via add-zsh-hook for shell integration.
- *
- * ZDOTDIR is temporarily overridden to point to our managed directory.
- * The script restores the original ZDOTDIR before sourcing the user's .zshrc
- * so that any ZDOTDIR-dependent logic in their config still works.
- */
 const ZSH_INTEGRATION_SCRIPT = `\
 # Agent UI shell integration — do not edit, this file is regenerated on launch.
 
@@ -92,7 +84,6 @@ export async function ensureShellIntegrationScripts(
     ZDOTDIR: zshDir,
   };
 
-  // Preserve the user's real ZDOTDIR so our .zshrc can restore it.
   if (process.env.ZDOTDIR) {
     env._AGENT_UI_ORIGINAL_ZDOTDIR = process.env.ZDOTDIR;
   }

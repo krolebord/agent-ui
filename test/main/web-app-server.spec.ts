@@ -147,7 +147,6 @@ describe("web app server", () => {
       "text/javascript; charset=utf-8",
     );
     expect(response.headers.get("vary")).toBe("accept-encoding");
-    // undici transparently decodes, so the body still matches the original.
     expect(await response.text()).toBe(assetBody);
   });
 

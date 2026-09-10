@@ -37,7 +37,6 @@ interface UsageEntryBase {
   accountId: string | null;
   status: UsageEntryStatus;
   error: string | null;
-  /** When `data` was last refreshed successfully. */
   fetchedAt: number | null;
   refreshing: boolean;
 }
@@ -60,7 +59,6 @@ export interface CursorUsageEntry extends UsageEntryBase {
 export type UsageEntry = ClaudeUsageEntry | CodexUsageEntry | CursorUsageEntry;
 
 export interface UsageStateShape {
-  /** Keyed by `usageEntryKey(provider, accountId)`. */
   entries: Record<string, UsageEntry>;
 }
 
@@ -101,11 +99,6 @@ const usagePersistenceSchema = z.object({
     .catch({}),
 });
 
-/**
- * Persisted so a restart shows the last known numbers instead of an empty
- * panel while the first refresh runs. In-flight markers are not worth
- * restoring, so they are stored as settled.
- */
 export function defineUsagePersistence(state: UsageState) {
   return defineStatePersistence({
     serviceState: state,
@@ -125,7 +118,6 @@ interface UsageTarget {
   key: string;
   provider: UsageProvider;
   accountId: string | null;
-  /** Set when the account cannot report usage at all; no fetch is attempted. */
   unsupportedReason?: string;
 }
 
@@ -183,11 +175,6 @@ function createEntry(target: UsageTarget): UsageEntry {
   }
 }
 
-/**
- * Polls plan usage for every provider login the app knows about — each managed
- * account plus each CLI's own login — and publishes it as synced state, so the
- * renderer reads usage instead of requesting it.
- */
 export class UsageTracker {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
@@ -236,15 +223,10 @@ export class UsageTracker {
     this.clearTimer();
   }
 
-  /**
-   * Refreshes every tracked entry on demand and restarts the polling interval
-   * from now. A cycle already under way is left to finish on its own.
-   */
   async refreshAll(): Promise<void> {
     await this.runCycle();
   }
 
-  /** Refreshes one entry on demand, e.g. from the panel's refresh button. */
   async refresh(key: string): Promise<UsageRefreshResult> {
     const target = this.collectTargets().find((entry) => entry.key === key);
     if (!target) {
@@ -256,11 +238,6 @@ export class UsageTracker {
     return await this.refreshTarget(target);
   }
 
-  /**
-   * Account changes only add, remove, or unblock entries — the accounts state
-   * also churns on every token refresh, so untouched entries keep their data
-   * and their place in the polling cycle.
-   */
   private readonly handleAccountsUpdate = (): void => {
     if (this.disposed) {
       return;
@@ -280,8 +257,6 @@ export class UsageTracker {
       const targets = this.collectTargets();
       this.syncEntries(targets);
 
-      // Sequential on purpose: a Codex refresh may have to spawn an
-      // app-server, and doing several of those at once spikes CPU.
       for (const target of targets) {
         if (this.disposed) {
           return;
@@ -369,10 +344,6 @@ export class UsageTracker {
     return targets;
   }
 
-  /**
-   * Reconciles the entry map with the accounts that exist now and returns the
-   * targets that need an immediate fetch.
-   */
   private syncEntries(targets: UsageTarget[]): UsageTarget[] {
     const wantedKeys = new Set(targets.map((target) => target.key));
     const existingEntries = this.options.state.state.entries;
@@ -434,11 +405,9 @@ export class UsageTracker {
           entry.status = "ok";
           entry.error = null;
           entry.fetchedAt = Date.now();
-          // The payload comes from the fetcher for this entry's own provider.
           entry.data = result.data as never;
           return;
         }
-        // Previous numbers are kept: a stale reading beats an empty panel.
         entry.status = "error";
         entry.error = result.message;
       });
@@ -486,8 +455,6 @@ export class UsageTracker {
       return { ok: false, message: SETUP_TOKEN_MESSAGE };
     }
 
-    // An explicit account bypasses the global API-billing env guard: the
-    // account's own credentials decide, not the host environment.
     let accessToken: string;
     try {
       accessToken =
@@ -514,8 +481,6 @@ export class UsageTracker {
       return toFetchResult(await getCodexUsage({ readRateLimits }));
     }
 
-    // A dead refresh token should read as "usage unavailable" rather than
-    // failing the whole panel.
     let externalAuth: CodexExternalAuthTokens;
     try {
       externalAuth =

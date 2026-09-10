@@ -32,8 +32,6 @@ export function LiveTerminalSurface({
 
   useEffect(() => {
     attachKey;
-    // Keep the last painted output on screen while offline; the server replays
-    // the full scrollback once we re-attach.
     if (connectionStatus !== "connected") {
       return;
     }
@@ -60,7 +58,6 @@ export function LiveTerminalSurface({
           if (message.includes("closed or aborted")) {
             return;
           }
-          // A dropped connection re-attaches on its own — no need to alarm.
           if (getConnectionState().status !== "connected") {
             return;
           }

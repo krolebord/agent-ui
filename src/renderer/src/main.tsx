@@ -16,7 +16,6 @@ const queryClient = new QueryClient({
     mutations: {
       onError: (error) => {
         const message = error.message || "An unexpected error occurred";
-        // Expected while the transport is reconnecting; connection UI covers it.
         if (message.includes("WebSocket is not open")) {
           return;
         }
@@ -25,7 +24,6 @@ const queryClient = new QueryClient({
     },
   },
 });
-// Query caches can hold data that changed while we were offline.
 let lastConnectedEpoch = getConnectionState().epoch;
 subscribeToConnectionState(() => {
   const { status, epoch } = getConnectionState();

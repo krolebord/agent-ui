@@ -15,8 +15,6 @@ vi.mock("../../src/main/logger", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-// Disable fs.watch so the harvest is driven only by the explicit
-// checkForCredentials calls below, keeping the race deterministic.
 vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs")>();
   return {

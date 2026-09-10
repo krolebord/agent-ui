@@ -9,8 +9,6 @@ import type {
   ScheduleSpec,
 } from "./state";
 
-// Ticks are capped so a machine waking from sleep re-checks due schedules
-// quickly instead of trusting a long-running setTimeout.
 const MAX_TICK_DELAY_MS = 30_000;
 
 export type ScheduledSessionRunner = (
@@ -34,11 +32,7 @@ export interface CreateScheduledSessionInput {
   name?: string;
   schedule: ScheduleSpec;
   config: ScheduledSessionConfig;
-  /** Defaults to "user". Agent-created entries spawn sessions whose MCP
-   * token cannot schedule further sessions. */
   createdBy?: "user" | "agent";
-  /** Defaults to true. Agent-created entries start disabled so the user
-   * approves them before anything runs. */
   enabled?: boolean;
 }
 
@@ -47,9 +41,6 @@ export interface UpdateScheduledSessionInput {
   name?: string;
   schedule: ScheduleSpec;
   config: ScheduledSessionConfig;
-  /** Defaults to "user". A user edit re-arms the schedule; an agent edit
-   * disables it and flags it for re-approval, so approved content can never
-   * be swapped out from under the user. */
   editedBy?: "user" | "agent";
 }
 
@@ -104,9 +95,6 @@ export class ScheduledSessionsService {
   start(): void {
     const now = this.now();
 
-    // Repair next-run times on boot. One-time schedules keep their original
-    // time so a missed run fires immediately (catch-up); recurring schedules
-    // skip missed occurrences and resume from the next one.
     this.state.updateState((entries) => {
       for (const entry of Object.values(entries)) {
         if (!entry.enabled) {
@@ -139,8 +127,6 @@ export class ScheduledSessionsService {
   create(input: CreateScheduledSessionInput): ScheduledSession {
     const now = this.now();
     const enabled = input.enabled ?? true;
-    // A disabled entry may carry a past one-time schedule: it fires as a
-    // catch-up run the moment the user enables (approves) it.
     assertScheduleIsRunnable(input.schedule, now, {
       allowPastOnce: !enabled,
     });
@@ -171,10 +157,6 @@ export class ScheduledSessionsService {
     if (!existing) {
       throw new Error(`Scheduled session ${input.id} not found`);
     }
-    // A user edit re-arms the schedule, so a completed one-off moved to a new
-    // time runs again instead of staying disabled. An agent edit is only a
-    // proposal: the entry is disabled until the user re-approves it, and may
-    // carry a past one-time schedule that fires as a catch-up on approval.
     const enabled = input.editedBy !== "agent";
     assertScheduleIsRunnable(input.schedule, now, {
       allowPastOnce: !enabled,
@@ -309,8 +291,6 @@ export class ScheduledSessionsService {
     const now = this.now();
     const config = entry.config;
 
-    // Advance the schedule before running so a slow or failing run can't
-    // cause the same occurrence to fire twice.
     this.state.updateState((entries) => {
       const draft = entries[id];
       if (!draft) {

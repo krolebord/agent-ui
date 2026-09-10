@@ -93,7 +93,6 @@ describe("codex accounts persistence", () => {
             chatgptAccountId: "workspace-1",
             createdAt: 100,
             status: "ok",
-            // Missing the refresh token, so the record cannot be refreshed.
             oauth: { accessToken: "access-1", expiresAt: 1 },
           },
         ],
@@ -187,7 +186,6 @@ describe("CodexAccountsService", () => {
     expect(secondId).toBe(firstId);
     expect(internalState.state.accounts).toHaveLength(1);
     expect(service.getAccount(firstId)).toMatchObject({
-      // The user's chosen label survives a repeat login.
       label: "Personal",
       planType: "team",
       oauth: { accessToken: "access-2", refreshToken: "refresh-2" },

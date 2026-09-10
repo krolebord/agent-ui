@@ -89,8 +89,6 @@ export const terminalsRouter = {
           signal,
         );
 
-      // Live terminals replay from the running PTY, stopped ones from the
-      // scrollback stored when they exited.
       const replay = isLive
         ? snapshot
         : await context.sessionBuffers.get(input.terminalId);
@@ -117,8 +115,6 @@ export const terminalsRouter = {
     .input(
       z.object({
         terminalId: z.string(),
-        // Base64 is ~4/3 of the decoded size; savePastedFile enforces the
-        // exact byte limit after decoding.
         base64Data: z
           .string()
           .min(1)
@@ -223,7 +219,6 @@ export class TerminalManager {
         return existing.runtime;
       }
 
-      // A same-ID restart is serialized behind the authoritative exit cleanup.
       await (existing.stopPromise ?? existing.completion.promise);
     }
 
@@ -359,8 +354,6 @@ export class TerminalManager {
 
     liveTerminal.state = "stopping";
     liveTerminal.stopPromise = liveTerminal.terminal.stop().finally(() => {
-      // TerminalSession normally removes the entry through its awaited onExit
-      // callback. Keep this fallback for a runtime that completes without one.
       if (this.liveTerminals.get(liveTerminal.terminalId) === liveTerminal) {
         this.liveTerminals.delete(liveTerminal.terminalId);
       }

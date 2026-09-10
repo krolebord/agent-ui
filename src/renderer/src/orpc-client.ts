@@ -29,8 +29,6 @@ function createORPCLink() {
     window.postMessage("start-orpc-client", "*", [serverPort]);
     clientPort.start();
 
-    // The message port lives as long as the window, so it is connected once
-    // and never drops.
     setConnectionStatus("connected");
 
     return new MessagePortRPCLink({
@@ -43,9 +41,6 @@ function createORPCLink() {
     minReconnectionDelay: BROWSER_WS_MIN_RECONNECTION_DELAY_MS,
   });
 
-  // partysocket reconnects on its own; subscribers re-attach their streams and
-  // reload the state snapshot when the epoch bumps. Wake/online only nudges
-  // when the socket is already down, so a live tab is not torn down.
   websocket.addEventListener("open", () => {
     setConnectionStatus("connected");
   });

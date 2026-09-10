@@ -103,8 +103,6 @@ export function UsagePanel() {
   );
   const codexAccountLabel = codexAccount?.label ?? null;
 
-  // Usage is tracked in the main process for every account, so the panel reads
-  // the entry for the session's account instead of requesting a fetch.
   const claudeKey = usageEntryKey("claude", claudeAccountId);
   const codexKey = usageEntryKey("codex", codexAccountId);
   const cursorKey = usageEntryKey("cursor", null);

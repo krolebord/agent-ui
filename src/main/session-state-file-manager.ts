@@ -26,8 +26,6 @@ export class SessionStateFileManager {
 
     try {
       unlinkSync(stateFilePath);
-    } catch {
-      // Ignore missing-file and cleanup errors.
-    }
+    } catch {}
   }
 }

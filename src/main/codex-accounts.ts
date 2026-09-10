@@ -16,9 +16,7 @@ export interface ManagedCodexAccount {
   type: "managed";
   label: string;
   email?: string;
-  /** Plan the account is on at login time, e.g. "team" or "plus". */
   planType?: string;
-  /** Workspace Codex bills against; sent as `chatgptAccountId` at login. */
   chatgptAccountId: string;
   createdAt: number;
   status: CodexAccountStatus;
@@ -31,10 +29,6 @@ interface CodexAccountsInternalStateShape {
   accounts: CodexAccountRecord[];
 }
 
-/**
- * Redacted view synced to the renderer. Tokens must never leave the main
- * process; the renderer only needs display metadata.
- */
 export interface PublicCodexAccount {
   id: string;
   type: CodexAccountRecord["type"];
@@ -51,9 +45,7 @@ export interface CodexLoginFlowState {
   loginId: string;
   terminalId: string;
   status: CodexLoginFlowStatus;
-  /** Set when this flow re-authenticates an existing account. */
   reloginAccountId?: string;
-  /** Set once the flow succeeded. */
   accountId?: string;
   error?: string;
 }
@@ -70,10 +62,6 @@ export type CodexAccountsPublicState = ReturnType<
   typeof defineCodexAccountsPublicState
 >;
 
-/**
- * Full account records including secrets. Persisted but never registered with
- * the state orchestrator, so nothing here reaches the renderer.
- */
 export function defineCodexAccountsInternalState() {
   return defineServiceState({
     key: "codexAccounts" as const,
@@ -81,7 +69,6 @@ export function defineCodexAccountsInternalState() {
   });
 }
 
-/** Redacted mirror registered with the state orchestrator. Not persisted. */
 export function defineCodexAccountsPublicState() {
   return defineServiceState({
     key: "codexAccounts" as const,
@@ -211,11 +198,6 @@ export class CodexAccountsService {
     });
   }
 
-  /**
-   * Store harvested login credentials. When `reloginAccountId` points at an
-   * existing account the new pair replaces the old one; otherwise a new
-   * account is created.
-   */
   upsertManagedAccount(input: {
     reloginAccountId?: string;
     label: string;
@@ -224,10 +206,6 @@ export class CodexAccountsService {
     chatgptAccountId: string;
     oauth: ManagedCodexOauthCredentials;
   }): string {
-    // Logging into an already-added account replaces its credentials instead
-    // of creating a duplicate entry. Match on the workspace too: the same
-    // login can be added once per workspace, and those are separate accounts
-    // as far as rate limits go.
     const targetId =
       input.reloginAccountId ??
       this.internalState.state.accounts.find(
@@ -302,10 +280,6 @@ export class CodexAccountsService {
     return await this.oauth.getValidAccessToken(accountId, options);
   }
 
-  /**
-   * Refreshes if needed, then returns the payload for
-   * `account/login/start { type: "chatgptAuthTokens" }`.
-   */
   async getExternalAuth(
     accountId: string,
     options: { minRemainingMs?: number } = {},

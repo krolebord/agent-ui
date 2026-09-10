@@ -109,7 +109,6 @@ function createTracker(overrides: Partial<UsageTrackerOptions> = {}) {
   const claudePublicState = defineClaudeAccountsPublicState();
   const codexPublicState = defineCodexAccountsPublicState();
 
-  // Mirrors the internal record the service would hold for each public one.
   const getAccount = (id: string): ClaudeAccountRecord | null => {
     const account = claudePublicState.state.accounts.find(
       (entry) => entry.id === id,

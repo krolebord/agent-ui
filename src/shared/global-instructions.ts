@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-/** Slots stored in sqlite (common + per-harness overrides). */
 export const globalInstructionSlotSchema = z.enum([
   "common",
   "claude",
@@ -8,7 +7,6 @@ export const globalInstructionSlotSchema = z.enum([
 ]);
 export type GlobalInstructionSlot = z.infer<typeof globalInstructionSlotSchema>;
 
-/** Harnesses that receive a composed file on disk. */
 export const globalInstructionHarnessSchema = z.enum(["claude", "codex"]);
 export type GlobalInstructionHarness = z.infer<
   typeof globalInstructionHarnessSchema
@@ -16,11 +14,8 @@ export type GlobalInstructionHarness = z.infer<
 
 export const globalInstructionHarnessInfoSchema = z.object({
   target: globalInstructionHarnessSchema,
-  /** Display path shown in the UI (tilde-prefixed when under home). */
   displayPath: z.string(),
-  /** Absolute filesystem path written on save. */
   absolutePath: z.string(),
-  /** Parent directory of absolutePath (for reveal-in-finder). */
   directoryPath: z.string(),
   lastPushedAt: z.number().nullable(),
 });
@@ -52,7 +47,6 @@ export type GlobalInstructionsSaveInput = z.infer<
   typeof globalInstructionsSaveInputSchema
 >;
 
-/** Compose common + harness override into the file body written on disk. */
 export function composeInstructionFile(
   common: string,
   override: string,

@@ -103,9 +103,6 @@ async function upsertManagedUserHooksConfig(
     }
   }
 
-  // Strip our managed script from every hook first so removed managed hooks
-  // (e.g. afterAgentResponse) do not keep firing from a stale user config.
-  // Also match the legacy path under cursor-hooks/config/hooks/.
   const managedHooksRoot = path.dirname(managedScriptPath);
   for (const [hookName, hookEntries] of Object.entries(nextHooks)) {
     nextHooks[hookName] = hookEntries.filter((entry) => {

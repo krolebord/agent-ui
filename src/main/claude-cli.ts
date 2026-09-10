@@ -7,16 +7,7 @@ import type {
 import { buildClaudeMcpConfig } from "./mcp/client-config";
 
 export interface ClaudeAccountAuth {
-  /**
-   * `setup-token` tokens are long-lived; `managed` tokens are refreshed to a
-   * fresh access token right before spawn.
-   */
   type: "setup-token" | "managed";
-  /**
-   * OAuth token, delivered through `CLAUDE_CODE_OAUTH_TOKEN`. An `apiKeyHelper`
-   * cannot be used here: the CLI sends helper output as an `x-api-key` API key
-   * rather than an OAuth bearer token, and the API rejects it.
-   */
   token: string;
 }
 
@@ -122,8 +113,6 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): {
     DISABLE_ERROR_REPORTING: "1",
   };
 
-  // Remote Control depends on feature-flag evaluation, which DISABLE_TELEMETRY
-  // turns off — leaving it set makes the CLI silently ignore --remote-control.
   if (!input.remoteControl) {
     env.DISABLE_TELEMETRY = "1";
   }
@@ -137,8 +126,6 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): {
   }
 
   if (input.accountAuth) {
-    // Snapshotted into the env at spawn: the CLI cannot refresh a token it was
-    // handed this way, so a session outliving the token needs a restart.
     env.CLAUDE_CODE_OAUTH_TOKEN = input.accountAuth.token;
   }
 

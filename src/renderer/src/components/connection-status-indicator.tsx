@@ -1,9 +1,5 @@
 import { useConnectionState } from "@renderer/hooks/use-connection-state";
 
-/**
- * Shown while the browser client is offline. The socket reconnects on its own,
- * after which state and terminals re-attach without a page reload.
- */
 export function ConnectionStatusIndicator() {
   const { status } = useConnectionState();
 

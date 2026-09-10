@@ -73,10 +73,7 @@ export function parseCodexTextGenerationOutput(output: string): string | null {
       if (event.success && event.data.item.text.trim()) {
         lastMessage = event.data.item.text.trim();
       }
-    } catch {
-      // Codex JSON mode should emit JSONL, but an unrelated warning must not
-      // turn a valid agent message elsewhere in the stream into a failure.
-    }
+    } catch {}
   }
 
   return lastMessage;

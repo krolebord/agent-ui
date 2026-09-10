@@ -44,31 +44,23 @@ const SKILLS_REFRESH_THROTTLE_MS = 3_000;
 const AGENTS_SKILLS_SEGMENTS = [".agents", "skills"] as const;
 const CLAUDE_SKILLS_SEGMENTS = [".claude", "skills"] as const;
 
-// Codex ignores the disable-model-invocation frontmatter field; its
-// documented control for user-invoke-only skills is this policy file.
 export const OPENAI_POLICY_FILE = path.join("agents", "openai.yaml");
 export const OPENAI_POLICY_CONTENTS = `policy:
   allow_implicit_invocation: false
 `;
 
 interface SkillsRoot {
-  /** "global" or the project path. */
   id: string;
   scope: SkillScope;
-  /** Canonical skills dir (.agents/skills). */
   agentsSkillsDir: string;
-  /** Claude Code skills dir (.claude/skills) that receives symlinks. */
   claudeSkillsDir: string;
-  /** Project roots use relative symlinks to keep repos portable. */
   relativeLinks: boolean;
 }
 
 export interface SkillsServiceOptions {
   state: SkillsServiceState;
   projectsState: ProjectState;
-  /** userData/managed-skills — sources of code-defined (builtin) skills. */
   builtinSkillsRoot: string | null;
-  /** Overridable for tests. */
   homeDir?: string;
 }
 
@@ -96,12 +88,6 @@ export class SkillsService {
   private unsubscribeProjects: (() => void) | null = null;
   private disposed = false;
 
-  /**
-   * There is no filesystem watching — skills state is pulled, like git
-   * status: at startup, before a session spawns (`ensureFreshForPath`), on
-   * app focus / dialog open / manual refresh (`refresh`, throttled), and
-   * after every mutation.
-   */
   private readonly refreshRunner = withThrottledAsyncRunner(
     () => this.rescanAll(),
     SKILLS_REFRESH_THROTTLE_MS,
@@ -205,24 +191,10 @@ export class SkillsService {
     this.knownRootIds = rootIds;
   }
 
-  // ---------------------------------------------------------------------
-  // Refresh triggers
-
-  /**
-   * Throttled full rescan for UI-driven triggers (app focus, skills dialog,
-   * manual refresh button). Rapid calls coalesce; a trailing run guarantees
-   * the last call is eventually served with fresh data.
-   */
   refresh(): Promise<void> {
     return this.refreshRunner.schedule();
   }
 
-  /**
-   * Deterministic pre-spawn sync: rescans the global root and the project
-   * root containing `cwd` so .claude/skills links are consistent at the only
-   * moment a CLI reads them. Unthrottled — it's a couple of readdirs — and
-   * never throws: a failed scan must not block starting a session.
-   */
   async ensureFreshForPath(cwd: string | null | undefined): Promise<void> {
     const roots: SkillsRoot[] = [this.globalRoot()];
     if (cwd) {
@@ -242,11 +214,6 @@ export class SkillsService {
     );
   }
 
-  /**
-   * Skills visible to a session running at `cwd`: global skills plus the
-   * containing project's skills. Rescans the relevant roots first so results
-   * reflect what is on disk right now.
-   */
   async listSkillsForPath(cwd: string | null): Promise<SkillEntry[]> {
     await this.ensureFreshForPath(cwd);
     const entries = Object.values(this.state.state).filter((entry) => {
@@ -280,9 +247,6 @@ export class SkillsService {
     }
     this.knownRootIds = rootIds;
   }
-
-  // ---------------------------------------------------------------------
-  // Scanning
 
   async rescanRoot(root: SkillsRoot): Promise<void> {
     const entries = await this.scanRoot(root);
@@ -391,9 +355,7 @@ export class SkillsService {
             managedBy = "builtin";
           }
         }
-      } catch {
-        // Treat as a regular skill if the link can't be inspected.
-      }
+      } catch {}
     }
 
     let hasExtraFiles = false;
@@ -402,9 +364,7 @@ export class SkillsService {
       hasExtraFiles = files.some(
         (name) => name !== "SKILL.md" && name !== "agents",
       );
-    } catch {
-      // Directory disappeared mid-scan; SKILL.md read above already passed.
-    }
+    } catch {}
 
     return {
       name: dirent.name,
@@ -418,9 +378,6 @@ export class SkillsService {
       updatedAt: stats.mtimeMs,
     };
   }
-
-  // ---------------------------------------------------------------------
-  // Symlink sync (.agents/skills -> .claude/skills)
 
   private async syncLinks(
     root: SkillsRoot,
@@ -457,8 +414,6 @@ export class SkillsService {
     try {
       const stats = await lstat(linkPath);
       if (!stats.isSymbolicLink()) {
-        // A real directory/file with this name exists in .claude/skills.
-        // Never delete user content — leave it and let it win.
         log.warn("Skipping skill link: non-symlink already exists", {
           linkPath,
         });
@@ -469,8 +424,6 @@ export class SkillsService {
       const resolvedExisting = path.resolve(root.claudeSkillsDir, existing);
       const resolvedTarget = path.resolve(root.claudeSkillsDir, target);
       if (resolvedExisting === resolvedTarget) return;
-      // Only replace links that point into this root's .agents/skills —
-      // anything else is a user-managed link we shouldn't touch.
       if (!isInside(root.agentsSkillsDir, resolvedExisting)) {
         log.warn("Skipping skill link: foreign symlink already exists", {
           linkPath,
@@ -487,7 +440,6 @@ export class SkillsService {
     await symlink(target, linkPath, "dir");
   }
 
-  /** Remove dangling symlinks in .claude/skills that point into .agents/skills. */
   private async pruneClaudeLinks(root: SkillsRoot): Promise<void> {
     let dirents: Dirent[];
     try {
@@ -512,9 +464,6 @@ export class SkillsService {
       }
     }
   }
-
-  // ---------------------------------------------------------------------
-  // Mutations
 
   async createSkill(input: {
     scope: SkillScope;
@@ -620,8 +569,6 @@ export class SkillsService {
     }
     try {
       const existing = await readFile(policyPath, "utf8");
-      // Only remove the file if it's the one we generate — a hand-written
-      // agents/openai.yaml may contain other configuration.
       if (existing.includes("allow_implicit_invocation")) {
         await unlink(policyPath);
       }
@@ -630,9 +577,6 @@ export class SkillsService {
     }
   }
 }
-
-// -------------------------------------------------------------------------
-// oRPC router
 
 export const skillsRouter = {
   create: procedure

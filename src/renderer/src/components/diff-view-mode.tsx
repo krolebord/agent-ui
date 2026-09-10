@@ -36,8 +36,6 @@ export const useDiffViewModeStore = createDiffViewModeStore(
   "split",
 );
 
-// Split diffs don't fit narrow screens, so mobile keeps its own preference
-// defaulting to unified.
 export const useMobileDiffViewModeStore = createDiffViewModeStore(
   MOBILE_STORAGE_KEY,
   "unified",

@@ -14,8 +14,6 @@ vi.mock("../../src/main/logger", () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-// Disable fs.watch so the harvest is driven only by the explicit
-// checkForCredentials calls below, keeping the race deterministic.
 vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs")>();
   return {
@@ -100,8 +98,6 @@ describe("ClaudeAccountLoginService", () => {
     await service.begin({});
     await writeCredentials("me@example.com");
 
-    // fs.watch fires in bursts alongside the poll timer; concurrent checks
-    // must not each harvest the file.
     const results = await Promise.all([check(), check(), check(), check()]);
 
     expect(results.filter(Boolean)).toHaveLength(1);

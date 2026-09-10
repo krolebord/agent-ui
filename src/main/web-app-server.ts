@@ -155,7 +155,6 @@ function redirectToVite(
   res.end();
 }
 
-// Ordered by preference: brotli wins on ratio, gzip is the universal fallback.
 const encodedVariants = [
   { extension: ".br", token: "br" },
   { extension: ".gz", token: "gzip" },
@@ -173,8 +172,6 @@ function acceptsEncoding(header: string | undefined, token: string) {
   });
 }
 
-// Finds a `.br`/`.gz` sibling from the precompress plugin, or null when the
-// client rejects every encoding or the build produced none.
 async function resolvePrecompressed(
   filePath: string,
   acceptEncoding: string | undefined,
@@ -285,9 +282,6 @@ export async function startWebAppServer(options: WebAppServerOptions) {
   });
   const wss = new WebSocketServer({
     noServer: true,
-    // Only scrollback replays and state-sync snapshots are large enough to
-    // benefit; small steady-state PTY chunks and Immer patches skip the
-    // threshold. No context takeover keeps each connection's zlib memory bounded.
     perMessageDeflate: {
       threshold: 1024,
       zlibDeflateOptions: { level: 4, memLevel: 7 },

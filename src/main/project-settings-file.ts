@@ -13,7 +13,6 @@ import log from "./logger";
 const SETTINGS_DIR = ".agent-ui";
 const SETTINGS_FILE = "settings.jsonc";
 
-/** Project-relative directory holding all checked-in Agent UI configuration. */
 export const PROJECT_SETTINGS_DIR = SETTINGS_DIR;
 
 export const PROJECT_SETTINGS_RELATIVE_PATH = `${SETTINGS_DIR}/${SETTINGS_FILE}`;
@@ -22,21 +21,8 @@ const FORMATTING_OPTIONS = { tabSize: 2, insertSpaces: true } as const;
 
 export const projectSettingsFileSchema = z.object({
   worktreeSetupCommands: z.string().optional().catch(undefined),
-  /**
-   * Left as `unknown` in the schema so a single malformed preset is dropped by
-   * the normalizer instead of invalidating every other key in the file.
-   */
   commands: z.unknown().transform(normalizeProjectCommands).optional(),
-  /**
-   * Project-relative path to the icon shown for this project, checked before
-   * the conventional favicon locations. Read-only for us: nothing in the app
-   * writes it, so a repository can check it in and keep it.
-   */
   iconPath: z.string().trim().min(1).optional().catch(undefined),
-  /**
-   * Set to `false` to keep `package.json` scripts out of the commands menu.
-   * On by default, and read-only for us like `iconPath`.
-   */
   discoverCommands: z.boolean().optional().catch(undefined),
 });
 
@@ -152,10 +138,6 @@ export async function writeProjectSettingsFile(
   await writeFile(filePath, content, "utf-8");
 }
 
-/**
- * Presets are edited outside the app — by hand or by an agent — so every
- * consumer reads them fresh instead of trusting a cached copy.
- */
 export async function readProjectCommands(
   projectPath: string,
 ): Promise<ResolvedProjectCommand[]> {
@@ -176,7 +158,6 @@ function serializeCommand(command: ProjectCommandWrite) {
   return serialized;
 }
 
-/** Key order is irrelevant for equality here; only the values decide a rewrite. */
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value) ?? "undefined";
@@ -207,12 +188,6 @@ function editSettings(
   return applyEdits(content, edits);
 }
 
-/**
- * Rewrites the `commands` array with per-entry edits rather than replacing the
- * whole value, so comments and formatting on untouched presets survive. Entries
- * carry the index they were read from; new ones are appended. Reordering is not
- * expressible this way and is rejected — the dialog doesn't offer it.
- */
 export async function writeProjectCommands(
   projectPath: string,
   commands: ProjectCommandWrite[],
@@ -269,17 +244,13 @@ export async function writeProjectCommands(
     );
   }
 
-  // No existing entries to preserve means no comments to lose: write the array
-  // in one go, which also creates the key when the file doesn't have it yet.
   if (existing.length === 0) {
     const value =
       commands.length > 0 ? commands.map(serializeCommand) : undefined;
     content = editSettings(content, ["commands"], value);
   } else if (commands.length === 0 && rawCommands.length === existing.length) {
-    // Everything is gone and nothing unparseable is hiding in the array.
     content = editSettings(content, ["commands"], undefined);
   } else {
-    // Field edits first: they leave indexes alone, which deletions do not.
     for (const command of kept) {
       const sourceIndex = command.sourceIndex as number;
       const raw = rawCommands[sourceIndex] as Record<string, unknown>;

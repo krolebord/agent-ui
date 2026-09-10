@@ -45,10 +45,6 @@ function asHarness(tracker: CodexAppServerTracker): TrackerHarness {
   return tracker as unknown as TrackerHarness;
 }
 
-/**
- * Stands in for the app-server socket so messages can be driven both ways
- * without a real connection.
- */
 function attachFakeSocket(tracker: CodexAppServerTracker) {
   const send = vi.fn<(data: string) => void>();
   asHarness(tracker).ws = { send };
@@ -252,8 +248,6 @@ describe("CodexAppServerTracker external auth", () => {
         settled = true;
       },
     );
-    // Deliberately reuses the id of our own in-flight call: server-initiated
-    // requests live in a separate id space.
     expect(socket.sent()[0]).toMatchObject({ id: 1 });
 
     socket.receive({
@@ -345,10 +339,6 @@ describe("CodexAppServerTracker external auth", () => {
 });
 
 describe("CodexAppServerTracker handshake", () => {
-  /**
-   * Drives `start()` against a stubbed global WebSocket and returns the
-   * `initialize` params the tracker sent.
-   */
   async function readInitializeParams(tracker: CodexAppServerTracker) {
     const send = vi.fn<(data: string) => void>();
     const listeners = new Map<string, (event: unknown) => void>();
@@ -396,7 +386,6 @@ describe("CodexAppServerTracker handshake", () => {
 
     const params = await readInitializeParams(tracker);
 
-    // `account/login/start.chatgptAuthTokens` is rejected without this.
     expect(params.capabilities.experimentalApi).toBe(true);
   });
 

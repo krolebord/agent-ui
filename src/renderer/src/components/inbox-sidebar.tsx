@@ -91,16 +91,9 @@ import {
 } from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
 
-// History shouldn't dominate the sidebar and the common lookups are recent, so
-// the settled tail pages instead of rendering whole.
 const SETTLED_INITIAL_COUNT = 10;
 const SETTLED_PAGE_COUNT = 25;
 
-/**
- * Short row labels. The icon and color come straight from the tree sidebar's
- * `statusIndicatorMeta` so a session reads the same in both views; only the text
- * is shortened to survive a narrow row.
- */
 const INBOX_STATUS_LABEL: Record<Exclude<InboxStatus, "ready">, string> = {
   approval: "Approval",
   input: "Needs you",
@@ -108,15 +101,6 @@ const INBOX_STATUS_LABEL: Record<Exclude<InboxStatus, "ready">, string> = {
   failed: "Failed",
 };
 
-/**
- * Branch and diff line for a card row. The project is looked up here rather than
- * threaded down with `projectLabel` because only this one variant needs it, and
- * the state slice is a stable object reference between patches.
- *
- * Git state is per-folder, so two sessions sharing a cwd read the same numbers —
- * correct for the worktree-per-session flow this mostly serves, and no more
- * wrong than the project tree already is for the rest.
- */
 function InboxRowGitLine({
   projectPath,
   dimmed,
@@ -139,8 +123,6 @@ function InboxRowGitLine({
   const deletedLines = project.gitDiffStats?.deletedLines || undefined;
 
   return (
-    // Stays visible on hover, unlike the status cluster above it, so the action
-    // buttons never cover the branch.
     <span
       className={cn(
         "mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-[10px]",
@@ -169,8 +151,6 @@ function InboxRowGitLine({
         {project.gitBranch}
       </span>
       {addedLines || deletedLines ? (
-        // Right-aligned so the churn numbers line up down the list instead of
-        // drifting with branch name length.
         <span
           className="ml-auto shrink-0 font-mono"
           title={`${addedLines ?? 0} added, ${deletedLines ?? 0} deleted (uncommitted)`}
@@ -196,12 +176,6 @@ function InboxRowGitLine({
   );
 }
 
-/**
- * Relative label for an arbitrary session timestamp. Settled rows read "how long
- * ago did this get parked", which is a different anchor than the tree's last
- * activity, so the timestamp is swapped in before formatting rather than
- * duplicating the formatter.
- */
 function relativeLabelAt(session: Session, timestamp: number): string {
   return getSessionLastActivityLabel({ ...session, lastActivityAt: timestamp });
 }
@@ -217,10 +191,6 @@ function InboxStatusOrTime({
 }) {
   const status = resolveInboxStatus(session);
   if (status === "ready") {
-    // A session that wakes into a real status already announces its return
-    // through that label, so the marker is only needed for the quiet case: the
-    // sort is static, so a timer-woken idle row would otherwise slide back in
-    // with nothing at all to distinguish it.
     if (woke) {
       return (
         <span className="inline-flex items-center gap-1 text-xs font-medium text-zinc-100">
@@ -248,21 +218,11 @@ function InboxStatusOrTime({
         className={cn("size-3 shrink-0", meta.animate && "animate-spin")}
         aria-hidden="true"
       />
-      {/* <output> carries an implicit live region, so a status change is
-          announced without the icon or the row having to be re-read. */}
       <output>{INBOX_STATUS_LABEL[status]}</output>
     </span>
   );
 }
 
-/**
- * Rendered as a sibling of the row button, never a child: the row itself is a
- * native <button>, so a nested button would be invalid markup. On a fine
- * pointer the wrapper positions these over the time/status slot, which fades
- * out on hover; on a coarse pointer there is no hover to reveal them, so they
- * are always visible, grow to a 32px target and the row reserves width for them
- * instead of letting them overlap.
- */
 const ROW_ICON_BUTTON_CLASS =
   "pointer-events-auto inline-flex h-full cursor-pointer items-center rounded-md px-1.5 text-zinc-400 opacity-0 transition hover:text-zinc-100 focus-visible:opacity-100 disabled:cursor-default disabled:opacity-40 group-hover/inbox-row:opacity-100 pointer-coarse:size-8 pointer-coarse:justify-center pointer-coarse:px-0 pointer-coarse:opacity-100";
 
@@ -296,15 +256,6 @@ function RowIconButton({
   );
 }
 
-/**
- * Snooze needs a menu rather than a single click, so its hover button owns a
- * dropdown. `data-[state=open]` keeps the trigger lit while the menu is open:
- * without it the anchor fades out the moment the pointer leaves the row for the
- * menu portal, since visibility is driven by the row's `group-hover`.
- *
- * Hidden on coarse pointers, where the row only has space for two permanent
- * buttons and the `⋯` menu carries the same presets.
- */
 function RowSnoozeButton({
   presets,
   onSnooze,
@@ -347,11 +298,6 @@ function RowSnoozeButton({
   );
 }
 
-/**
- * Touch has no right-click, so the row's context menu is unreachable without a
- * visible trigger. Mirrors the project tree's coarse-pointer session menu: same
- * actions, same 32px button, hidden wherever a real context menu exists.
- */
 function RowMenuButton({ actions }: { actions: SessionMenuAction[] }) {
   return (
     <DropdownMenu>
@@ -403,14 +349,10 @@ function InboxRow({
   const isSnoozed = variant === "snoozed";
   const isSettled = variant === "settled";
   const isShelfRow = isSnoozed || isSettled;
-  // Only meaningful on an active row: a shelf row is by definition still parked.
   const woke = !isShelfRow && sessionWokeFromSnooze(session, now);
   const needsAttention = inboxRowNeedsAttention(session) || woke;
   const settleable = canSettleSession(session);
   const snoozeable = canSnoozeSession(session);
-  // Recomputed per render rather than memoized: the boundaries move with the
-  // clock, and a stale "This evening" would resolve to a time the router
-  // rejects.
   const snoozePresets = resolveSnoozePresets(now);
 
   const open = useCallback(() => {
@@ -418,10 +360,6 @@ function InboxRow({
     useMobileNavStore.getState().closeSidebar();
   }, [session.sessionId]);
 
-  // Three tiers. "Live but quiet" and "not running at all" are both `ready` in
-  // the status model — that axis describes what the agent is doing, not whether
-  // a process exists — so aliveness is carried by the font color instead, using
-  // the same zinc-500/zinc-300 split the project tree already uses.
   const rowClassName = cn(
     "w-full cursor-pointer select-none rounded-md px-2.5 text-left transition",
     isActive
@@ -433,13 +371,7 @@ function InboxRow({
           : "text-zinc-300 hover:bg-white/8 hover:text-zinc-100",
   );
 
-  // One action list, two renderings: the right-click context menu and, on touch,
-  // the row's `⋯` button. Snooze first, then settle (status-dependent), then
-  // start/stop (always available for a session), matching the row button order.
   const menuActions: SessionMenuAction[] = [
-    // A snoozed row keeps both: waking is the primary action, but re-snoozing
-    // to a later time without a round trip through the active list is the
-    // natural follow-up when you look and decide it can still wait.
     ...(isSnoozed
       ? ([
           {
@@ -544,14 +476,9 @@ function InboxRow({
               onClick={open}
               className={cn(
                 rowClassName,
-                // Coarse: taller row, and width reserved for the always-visible
-                // buttons so they never sit on the timestamp (wake/un-settle +
-                // menu).
                 "flex h-8 items-center gap-2 pointer-coarse:h-11 pointer-coarse:pr-[4.75rem]",
               )}
             >
-              {/* No project line to lean on here, so the icon is the only thing
-                  saying which project this parked session came from. */}
               <ProjectFavicon
                 projectPath={session.startupConfig.cwd}
                 className={cn(
@@ -564,14 +491,9 @@ function InboxRow({
               <span className="min-w-0 flex-1 truncate text-sm">
                 {session.title}
               </span>
-              {/* The fade only exists to clear room for the hover-revealed
-                  buttons, so it is scoped to pointers that can hover — on touch
-                  the timestamp has its own reserved space and stays put. */}
               <span className="ml-auto flex shrink-0 items-center gap-1.5 transition pointer-fine:group-hover/inbox-row:opacity-0">
                 <span
                   className="min-w-8 text-right text-xs tabular-nums text-zinc-500"
-                  // The countdown is coarse ("in 2d"), so the exact wake time
-                  // stays available without spending row width on it.
                   title={
                     isSnoozed
                       ? `Wakes ${snoozeWakeDescription(
@@ -631,18 +553,11 @@ function InboxRow({
               "py-2 pointer-coarse:py-2.5 pointer-coarse:pr-[4.75rem]",
             )}
           >
-            {/* Phrasing content only: the row is a <button>, so the lines are
-                spans made block/flex rather than divs. */}
             <span className="flex h-4 min-w-0 items-center gap-1.5">
-              {/* The line names the project, so it leads with the project's own
-                  icon; the agent type moved beside the timestamp, where the
-                  project tree's session rows already keep it. */}
               <ProjectFavicon
                 projectPath={session.startupConfig.cwd}
                 className={cn(
                   "size-3.5",
-                  // Steps down with the title so the project line stays
-                  // secondary rather than matching a greyed-out title.
                   session.status === "stopped"
                     ? "text-zinc-600"
                     : "text-zinc-500",
@@ -658,8 +573,6 @@ function InboxRow({
               >
                 {projectLabel}
               </span>
-              {/* Status is the point of this view, so on touch it keeps its own
-                  space rather than being traded away for the action buttons. */}
               <span className="ml-auto flex shrink-0 items-center gap-1.5 transition pointer-fine:group-hover/inbox-row:opacity-0">
                 <span className="flex min-w-8 justify-end">
                   <InboxStatusOrTime
@@ -704,16 +617,7 @@ function InboxRow({
         </ContextMenuTrigger>
         {menu}
       </ContextMenu>
-      {/* Pinned to the status line on a fine pointer, where it replaces the
-          status text on hover; centred over the whole card on touch, where the
-          buttons are permanent. */}
       <span className="pointer-events-none absolute right-1 top-2 flex h-4 items-center pointer-coarse:top-0 pointer-coarse:bottom-0 pointer-coarse:h-auto pointer-coarse:gap-0.5">
-        {/* Snooze and settle are the two "not now" verbs, so they group; the
-            three buttons together reach a little past where the status text sat
-            and clip the project label on hover, which is an acceptable trade
-            for keeping snooze one click away. Start/stop stays next to the
-            menu. On touch start/stop stays hidden — the two slots go to
-            Settle and the menu, which carries start/stop anyway. */}
         {snoozeable ? (
           <RowSnoozeButton
             presets={snoozePresets}
@@ -806,8 +710,6 @@ export function InboxSidebar() {
     orpc.sessions.unsnooze.mutationOptions(),
   );
 
-  // Scoping filters the flat list without making the header depend on the
-  // number or length of project names. Project management stays in the tree.
   const [projectScopePath, setProjectScopePath] = useState<string | null>(null);
 
   const projectLabelByPath = useMemo(
@@ -822,8 +724,6 @@ export function InboxSidebar() {
   );
 
   const scopedSessions = useMemo(() => {
-    // Legacy local-terminal sessions are hidden here for the same reason the
-    // tree renders null for them: they are pruned on boot and have no row.
     const all = Object.values(sessions).filter(
       (session) => session.type !== "local-terminal",
     );
@@ -835,10 +735,6 @@ export function InboxSidebar() {
     );
   }, [projectScopePath, sessions]);
 
-  // A snooze expiring is the only thing in the inbox that changes the list
-  // without a state patch to react to, so it needs a clock. The tick is bumped
-  // exactly at the next wake boundary (armed below, once the partition knows
-  // where that is) rather than polled on an interval.
   const [wakeTick, setWakeTick] = useState(0);
 
   const { active, snoozed, settled, now } = useMemo(() => {
@@ -852,11 +748,6 @@ export function InboxSidebar() {
     if (nextWakeAt === null) {
       return;
     }
-    // setTimeout delays are signed 32-bit, so a far-future wake would overflow
-    // and fire immediately, turning the re-arm into a tight loop. Clamped, the
-    // timer simply re-arms every ~24.8 days until the wake is in range. The
-    // small margin past the boundary keeps the re-render on the awake side of
-    // the comparison.
     const delayMs = Math.min(
       Math.max(0, nextWakeAt - Date.now()) + 50,
       2_147_483_647,
@@ -867,8 +758,6 @@ export function InboxSidebar() {
     return () => window.clearTimeout(timer);
   }, [now, snoozed]);
 
-  // Paging resets when the scope changes so a filter flip never inherits a deep
-  // page state.
   const [settledVisibleCount, setSettledVisibleCount] = useState(
     SETTLED_INITIAL_COUNT,
   );
@@ -881,14 +770,10 @@ export function InboxSidebar() {
   const [settledExpanded, setSettledExpanded] = useState(false);
   const [snoozedExpanded, setSnoozedExpanded] = useState(false);
 
-  // The snoozed shelf doesn't page: it drains on its own as wake times pass, so
-  // it stays short in a way the settled shelf never does.
   const visibleSnoozed = useMemo(() => {
     if (snoozedExpanded) {
       return snoozed;
     }
-    // Same exception as the settled shelf: the open session must never vanish
-    // behind a collapsed header.
     const openSnoozed = snoozed.find(
       (session) => session.sessionId === activeSessionId,
     );
@@ -897,7 +782,6 @@ export function InboxSidebar() {
 
   const visibleSettled = useMemo(() => {
     if (!settledExpanded) {
-      // The open session must never vanish behind a collapsed shelf.
       const openSettled = settled.find(
         (session) => session.sessionId === activeSessionId,
       );
@@ -907,8 +791,6 @@ export function InboxSidebar() {
       return settled;
     }
     const visible = settled.slice(0, settledVisibleCount);
-    // Same exception for a session paged out of the tail: navigating into it
-    // must keep its row, highlight and un-settle affordance reachable.
     const openSettled = settled
       .slice(settledVisibleCount)
       .find((session) => session.sessionId === activeSessionId);
@@ -919,9 +801,6 @@ export function InboxSidebar() {
 
   const handleSettle = useCallback(
     (sessionId: string) => {
-      // Parking the session you are looking at moves you forward, so settling
-      // from the inbox drains it without leaving you on a hidden row. The plan
-      // is taken before the mutation mutates the partition.
       const nextSessionId =
         sessionId === activeSessionId
           ? resolveNextActiveSessionId({
@@ -949,8 +828,6 @@ export function InboxSidebar() {
 
   const handleSnooze = useCallback(
     (sessionId: string, snoozedUntil: number) => {
-      // Same forward navigation as settle: parking the row you are looking at
-      // must not leave you sitting on a hidden session.
       const nextSessionId =
         sessionId === activeSessionId
           ? resolveNextActiveSessionId({
@@ -988,11 +865,6 @@ export function InboxSidebar() {
         : "All projects"
       : labelForPath(projectScopePath);
 
-  // New sessions follow the session you are looking at, matching Mod+N. The
-  // fallbacks only matter before anything is selected: the scoped project, then
-  // the first project, then there is nothing to create in. A project whose
-  // interaction is locked is skipped rather than opening a dialog that would
-  // immediately close itself.
   const newSessionCwd =
     [
       activeSessionId === null
@@ -1037,8 +909,6 @@ export function InboxSidebar() {
             disabled={newSessionCwd === null}
             onClick={() => setOpenNewSessionDialogCwd(newSessionCwd)}
             aria-label="New session"
-            // The dialog's project picker can retarget this, but naming the
-            // default up front saves opening it just to check.
             title={
               newSessionCwd === null
                 ? "New session"
@@ -1050,9 +920,6 @@ export function InboxSidebar() {
         </div>
       </div>
 
-      {/* Always rendered, even with no projects at all: this menu is the only
-          place project concerns live in the inbox, so hiding it would hide the
-          way to add the first one. */}
       <div className="border-b border-border/70 px-1.5 py-1.5">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1061,8 +928,6 @@ export function InboxSidebar() {
               className="h-7 w-full justify-start gap-1.5 px-1.5 text-xs text-zinc-300 pointer-coarse:h-10 pointer-coarse:px-2 pointer-coarse:text-sm"
               aria-label="Filter sessions by project"
             >
-              {/* Scoped to one project, the trigger is the only place its
-                  identity shows, so it carries that project's icon. */}
               {projectScopePath === null ? (
                 <Folder className="size-3.5 shrink-0" />
               ) : (
@@ -1128,8 +993,6 @@ export function InboxSidebar() {
             />
           ))}
 
-          {/* Snoozed sits between the inbox and Settled: it is "coming back",
-              which belongs nearer the live list than history does. */}
           {snoozed.length > 0 ? (
             <ShelfHeader
               label="Snoozed"

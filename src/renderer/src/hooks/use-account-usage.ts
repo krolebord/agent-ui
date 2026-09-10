@@ -7,11 +7,6 @@ import type { ExtractState } from "zustand";
 export type UsageEntry =
   ExtractState<SyncStateStore>["usage"]["entries"][string];
 
-/**
- * Utilization of the shortest rate-limit window an entry reports: Claude's
- * five-hour bucket, and Codex's shortest window — usually five hours, but the
- * app-server decides which windows it hands out.
- */
 export function shortWindowUsagePercent(
   entry: UsageEntry | undefined,
 ): number | null {
@@ -44,11 +39,6 @@ export function shortWindowUsagePercent(
   }
 }
 
-/**
- * Reads the tracked short-window utilization for a provider's accounts. A null
- * account id means the provider CLI's own login, and a null result means usage
- * has not been read yet.
- */
 export function useAccountUsagePercent(provider: "claude" | "codex") {
   const entries = useAppState((state) => state.usage.entries);
 

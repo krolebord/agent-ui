@@ -109,8 +109,6 @@ export function DiffReviewCommitDialog() {
       },
     )
       .then(() => {
-        // Auto-generated messages amend the commit after `committed`, which
-        // changes the hash — refresh history again once the run finishes.
         invalidateHistory();
       })
       .catch(() => {

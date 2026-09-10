@@ -888,7 +888,6 @@ describe("CodexSessionsManager account selection", () => {
       chatgptAccountId: "workspace-for-account-a",
       chatgptPlanType: "team",
     });
-    // The TUI must not exist before the app-server knows which account to use.
     expect(
       tracker.loginWithExternalAuth.mock.invocationCallOrder[0],
     ).toBeLessThan(terminalSessionSpies.start.mock.invocationCallOrder[0]);
@@ -964,8 +963,6 @@ describe("CodexSessionsManager account selection", () => {
     ).resolves.toEqual({ appliedToLiveSession: false });
 
     expect(state[sessionId]?.startupConfig.accountId).toBeUndefined();
-    // Clearing external auth would need account/logout, which deletes the
-    // user's own auth.json from the shared CODEX_HOME.
     expect(tracker.loginWithExternalAuth).not.toHaveBeenCalled();
   });
 

@@ -48,16 +48,15 @@ describe("ShellIntegrationMonitor", () => {
 
     it("does not fire callback when state unchanged", () => {
       const { monitor, onChange } = createMonitor();
-      // Already idle, receiving A should not fire
       monitor.processChunk(OSC_A);
       expect(onChange).not.toHaveBeenCalled();
     });
 
     it("handles full command lifecycle: A → C → A", () => {
       const { monitor, onChange } = createMonitor();
-      monitor.processChunk(OSC_A); // initial prompt
-      monitor.processChunk(OSC_C); // command starts
-      monitor.processChunk(OSC_A); // command ends, back at prompt
+      monitor.processChunk(OSC_A);
+      monitor.processChunk(OSC_C);
+      monitor.processChunk(OSC_A);
 
       expect(onChange).toHaveBeenCalledTimes(2);
       expect(onChange).toHaveBeenNthCalledWith(1, "running");
@@ -110,7 +109,6 @@ describe("ShellIntegrationMonitor", () => {
 
     it("passes through non-OSC-133 escape sequences unchanged", () => {
       const { monitor } = createMonitor();
-      // ANSI color codes should pass through
       const input = `${ESC}[32mgreen${ESC}[0m`;
       expect(monitor.processChunk(input)).toBe(input);
     });
@@ -119,7 +117,6 @@ describe("ShellIntegrationMonitor", () => {
   describe("split-chunk handling", () => {
     it("handles sequence split across two chunks", () => {
       const { monitor, onChange } = createMonitor();
-      // Split "\x1b]133;C\x07" between "]133;" and "C\x07"
       const part1 = `before${ESC}]133;`;
       const part2 = `C${BEL}after`;
 
@@ -156,16 +153,13 @@ describe("ShellIntegrationMonitor", () => {
 
     it("flushes pending buffer if it exceeds max size", () => {
       const { monitor } = createMonitor();
-      // Create a fake ESC sequence that never terminates and is too long
       const longPayload = `${ESC}]133;${"x".repeat(70)}`;
       const result = monitor.processChunk(longPayload);
-      // Should pass through since it exceeded the 64-byte limit
       expect(result).toBe(longPayload);
     });
 
     it("handles ST terminator split across chunks", () => {
       const { monitor, onChange } = createMonitor();
-      // Split "\x1b]133;C\x1b\\" where \x1b\\ is the ST
       const part1 = `${ESC}]133;C${ESC}`;
       const part2 = "\\rest";
 

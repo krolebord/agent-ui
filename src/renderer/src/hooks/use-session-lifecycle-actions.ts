@@ -4,14 +4,6 @@ import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { orpc } from "@renderer/orpc-client";
 import { useMutation } from "@tanstack/react-query";
 
-/**
- * Start/stop/delete for every session type, in one place so both the project
- * tree and the inbox drive sessions identically. Type-specific extras that are
- * not lifecycle (fork, Claude's remote-control toggle) live in
- * `useTypeSpecificSessionMenuActions`.
- */
-
-/** Stops a live session, whatever its type. Also used for bulk stop. */
 export async function stopSession(session: Session): Promise<void> {
   switch (session.type) {
     case "claude-local-terminal":
@@ -46,11 +38,6 @@ export async function stopSession(session: Session): Promise<void> {
   }
 }
 
-/**
- * Resumes a stopped session. Terminal-backed types need the current terminal
- * size so the PTY comes back at the right dimensions. Worktree setup has no
- * resume path — it runs once and is cancelled or kept.
- */
 async function resumeSession(session: Session): Promise<void> {
   const { cols, rows } = getTerminalSize();
   switch (session.type) {
@@ -125,7 +112,6 @@ async function deleteSession(session: Session): Promise<void> {
   }
 }
 
-/** Worktree setup runs once, so it is cancellable but never resumable. */
 export function sessionCanResume(session: Session): boolean {
   return session.type !== "worktree-setup" && session.status === "stopped";
 }
@@ -144,11 +130,8 @@ function navigateAwayIfActive(sessionId: string) {
 }
 
 export interface SessionLifecycleActions {
-  /** Null when this session cannot be resumed right now. */
   resume: (() => void) | null;
-  /** Null when there is nothing to stop right now. */
   stop: (() => void) | null;
-  /** Worktree setup cancels rather than stops. */
   stopLabel: string;
   remove: () => void;
   isResumePending: boolean;
@@ -156,10 +139,6 @@ export interface SessionLifecycleActions {
   isRemovePending: boolean;
 }
 
-/**
- * Accepts undefined so callers can keep their "session missing" guard below the
- * hook calls, where React requires it to stay.
- */
 export function useSessionLifecycleActions(
   session: Session | undefined,
 ): SessionLifecycleActions {

@@ -18,18 +18,12 @@ import {
 import type React from "react";
 import { useRef, useState } from "react";
 
-// Codex's TUI speaks the Kitty keyboard protocol, where Shift+Enter is encoded
-// as CSI 13 ; 2 u (13 = Enter keycode, 2 = shift modifier). Claude and plain
-// shells instead treat a trailing backslash as a soft newline, so a bare "\\"
-// is the right sequence for them.
 const shiftEnterData = (sessionType: string | undefined): string =>
   sessionType === "codex-local-terminal" ? "\x1b[13;2u" : "\\";
 
 type TerminalKey = {
   label: string;
   data: string;
-  // When present, the key renders as an icon button; `label` is used as the
-  // accessible name instead of visible text.
   icon?: LucideIcon;
 };
 
@@ -49,8 +43,6 @@ const terminalKeys = (sessionType: string | undefined): TerminalKey[] => [
   { label: "Right", data: "\x1b[C", icon: ArrowRight },
 ];
 
-// Max distance (px) a pointer may travel between down and up before the
-// gesture is treated as a scroll rather than a tap.
 const TAP_MOVE_THRESHOLD = 10;
 
 export function TerminalKeyBar({
@@ -63,8 +55,6 @@ export function TerminalKeyBar({
   const [inputOpen, setInputOpen] = useState(false);
   const [inputText, setInputText] = useState("");
   const { openFilePicker, fileInput } = useTerminalAttachFiles(terminalId);
-  // Tracks the pointer-down position and pending action so we can tell taps
-  // apart from scrolls of the key bar.
   const pending = useRef<{
     id: number;
     x: number;
@@ -76,10 +66,6 @@ export function TerminalKeyBar({
     void orpc.terminals.writeToTerminal.call({ terminalId, data });
   };
 
-  // preventDefault on pointerdown keeps focus (and the mobile keyboard) on the
-  // terminal instead of moving it to the button. Capturing the pointer routes
-  // the matching pointerup back to this element even if the finger drifts, and
-  // we only run the action if it didn't move far enough to count as a scroll.
   const handlePointerDown = (
     event: React.PointerEvent<HTMLButtonElement>,
     action: () => void,
@@ -132,11 +118,6 @@ export function TerminalKeyBar({
             submitInput();
           }}
         >
-          {/* Activated via pointer events, not onClick: this button occupies the
-              same spot as the "open input" button, so the ghost click that the
-              browser dispatches right after the opening tap would land here and
-              immediately close the form again. Ghost clicks carry no pointerdown,
-              so the pointer-tap pattern is immune. */}
           <Button
             type="button"
             variant="outline"
@@ -161,7 +142,6 @@ export function TerminalKeyBar({
               setInputText(event.target.value);
             }}
             rows={1}
-            // Cap at 3 lines (24px line height + vertical padding), then scroll.
             className="max-h-[5.5rem] min-h-9 flex-1 resize-none overflow-y-auto py-1.5"
           />
           <Button

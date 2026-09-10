@@ -1,17 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 
-/** Per-request context recovered from the token in a session's MCP URL. */
 export interface McpRequestContext {
-  /** Agent UI session that owns this MCP endpoint. */
   sessionId?: string | null;
-  /** Working directory of the CLI session that made the request. */
   cwd: string | null;
-  /**
-   * Whether the session may create scheduled sessions via MCP tools. False
-   * for sessions that were themselves started from an agent-created schedule,
-   * so agents can't chain session creation.
-   */
   canScheduleSessions: boolean;
 }
 
@@ -21,13 +13,6 @@ const payloadSchema = z.object({
   canScheduleSessions: z.boolean(),
 });
 
-/**
- * Signs and verifies the per-session tokens embedded in MCP URLs. The token
- * carries the session's cwd so MCP tools can resolve project scope without a
- * stateful transport; the HMAC keeps other local processes from claiming an
- * arbitrary cwd. The secret is per-process random — sessions never outlive
- * the app process, so it doesn't need to be persisted.
- */
 export class McpSessionTokens {
   private readonly secret = randomBytes(32);
 

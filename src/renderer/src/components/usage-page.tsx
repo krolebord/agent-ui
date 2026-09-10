@@ -50,7 +50,6 @@ const PROVIDER_META: Record<
   },
 };
 
-/** Re-renders on a timer so the "updated" stamps stay honest. */
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
 

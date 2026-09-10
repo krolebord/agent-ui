@@ -25,11 +25,6 @@ interface ProjectPickerProps {
   id?: string;
 }
 
-/**
- * Inline project switcher. The trigger is deliberately text-sized so it can sit
- * in a sentence next to a label; the selected path is expected to be shown by
- * the caller, so rows here stay one line each.
- */
 export function ProjectPicker({
   value,
   onChange,
@@ -111,8 +106,6 @@ export function ProjectPicker({
                       option.path === value ? "opacity-100" : "opacity-0",
                     )}
                   />
-                  {/* Falls back to a folder rather than nothing so the labels
-                      stay in one column whether a project has an icon or not. */}
                   <ProjectFavicon
                     projectPath={option.path}
                     className="size-3.5"

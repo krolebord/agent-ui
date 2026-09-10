@@ -21,10 +21,6 @@ type SyncStateUpdateEvent = {
   patch: Parameters<typeof applyPatches>[1];
 };
 
-/**
- * Subscribes before snapshotting so no update slips through the gap between
- * the two calls; the version gate then drops whatever the snapshot covers.
- */
 async function bootstrapStateStream() {
   const updatesStream = await orpc.stateSync.subscribeToStateUpdates.call();
   const snapshot = await orpc.stateSync.getFullStateSnapshot.call();
@@ -43,8 +39,6 @@ export async function createSyncStateStore() {
   const store = createStore<SyncStateSnapshot>(() => bootstrap.snapshot.state);
 
   const applySnapshot = (snapshot: SyncStateBootstrapSnapshot) => {
-    // Main regenerates appVersion each launch; a change means the process
-    // restarted underneath us — hard-reload rather than soft re-bootstrap.
     if (snapshot.appVersion !== appVersion) {
       window.location.reload();
       return false;
@@ -64,7 +58,6 @@ export async function createSyncStateStore() {
   ) => {
     updateQueue = updateQueue
       .then(async () => {
-        // Events from a stream we already replaced are stale by definition.
         if (generation !== streamGeneration) {
           return;
         }
@@ -78,9 +71,7 @@ export async function createSyncStateStore() {
             store.setState(applyPatches(store.getState(), event.patch), true);
             currentVersion = event.version;
             return;
-          } catch {
-            // If patch application fails, local state drifted and we must re-bootstrap.
-          }
+          } catch {}
         }
 
         await resyncState();
@@ -103,7 +94,6 @@ export async function createSyncStateStore() {
         if (generation !== streamGeneration) {
           return;
         }
-        // The stream dies with the connection; reconnecting re-opens it.
         console.warn("State sync stream ended", error);
       },
     });
@@ -111,10 +101,6 @@ export async function createSyncStateStore() {
 
   consumeStream(streamGeneration, bootstrap.updatesStream);
 
-  /**
-   * Re-opens the update stream and reloads the full snapshot so the store is
-   * consistent with main again — the graceful equivalent of a page reload.
-   */
   const reopenStateStream = async () => {
     const generation = ++streamGeneration;
     const { updatesStream, snapshot } = await bootstrapStateStream();

@@ -18,11 +18,6 @@ export type TerminalExitPayload = {
   exitCode: number | null;
   signal?: number;
   errorMessage?: string;
-  /**
-   * True when this exit is the result of `stop()` (settle, Stop button, etc.).
-   * False when the process died on its own. Callers use this to decide whether
-   * the exit counts as fresh activity for inbox settle/snooze.
-   */
   stoppedByUser: boolean;
 };
 
@@ -149,7 +144,6 @@ export function createTerminalSession(events: TerminalSessionOpts) {
 
     const stoppedByUser = stopping;
     finalizationPromise = (async () => {
-      // Stop accepting input as soon as the authoritative PTY exit arrives.
       pty = null;
       await disposable.dispose();
       changeSessionStatus(status);
@@ -163,7 +157,6 @@ export function createTerminalSession(events: TerminalSessionOpts) {
       } catch (error) {
         log.error("Error handling terminal exit", error);
       } finally {
-        // `stop()` resolves only after downstream snapshot/map cleanup finishes.
         exitCompletion.resolve(undefined);
       }
     })();

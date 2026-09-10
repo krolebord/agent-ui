@@ -1,7 +1,3 @@
-/**
- * Builds a JWT-shaped Codex access token. Only the payload matters: nothing in
- * the app verifies the signature, it just reads the claims.
- */
 export function makeCodexAccessToken(
   claims: {
     expSeconds?: number;

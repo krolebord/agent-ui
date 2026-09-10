@@ -1,19 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 
-// xterm.js has no built-in touch scrolling. This translates vertical touch
-// pans into scroll actions: direct scrollLines() for normal-buffer scrollback
-// (see dispatchLines for why wheel events don't work there), and synthetic
-// line-mode WheelEvents dispatched at xterm's screen element otherwise, so
-// xterm's own wheel routing produces arrow-key sequences in the alternate
-// buffer (how Claude CLI scrolls its transcript) and wheel mouse reporting
-// when an app enables mouse tracking.
-//
-// Integer line-mode deltas are used instead of pixel deltas because xterm
-// damps small pixel deltas (×0.3 under 50px, tuned for physical mice), which
-// would make touch panning feel sluggish.
-
 const MOMENTUM_DECAY_PER_MS = 0.9955;
-const MIN_FLING_VELOCITY = 0.05; // lines per ms
+const MIN_FLING_VELOCITY = 0.05;
 const VELOCITY_SAMPLE_WINDOW_MS = 100;
 
 export function attachTouchScroll(
@@ -32,15 +20,10 @@ export function attachTouchScroll(
     if (screen instanceof HTMLElement && screen.clientHeight > 0) {
       return screen.clientHeight / terminal.rows;
     }
-    return 17; // ~13px monospace line; only hit before first render
+    return 17;
   };
 
   const dispatchLines = (lines: number) => {
-    // Normal-buffer scrollback can't be driven by synthetic wheel events:
-    // xterm 6's viewport reads Chromium's legacy wheelDeltaY (which Chromium
-    // derives as -deltaY, ignoring deltaMode), so a line-mode delta collapses
-    // to under a pixel of scroll. Scroll the buffer directly instead. When an
-    // app enables mouse tracking, keep the wheel path so it gets reported.
     if (
       terminal.buffer.active.type === "normal" &&
       terminal.modes.mouseTrackingMode === "none"
@@ -120,8 +103,6 @@ export function attachTouchScroll(
       return;
     }
 
-    // Finger up (negative dy) reveals content below → positive wheel delta,
-    // matching native touch scrolling direction.
     const dy = lastY - touch.clientY;
     lastY = touch.clientY;
 

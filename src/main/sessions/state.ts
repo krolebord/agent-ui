@@ -16,13 +16,6 @@ const sessionSchema = z.discriminatedUnion("type", [
 ]);
 export type Session = z.infer<typeof sessionSchema>;
 
-/**
- * Fields the runtime owns, so a restart must never resurrect them: `status` is
- * derived from the PTY (or from the setup runner) whenever a session is live,
- * and the two messages belong to the process that produced them. Omitting them
- * from the persisted schema is what keeps them out of the store, since Zod
- * objects drop unknown keys and the orchestrator writes the parse result.
- */
 const runtimeSessionFields = {
   status: true,
   warningMessage: true,
@@ -41,12 +34,6 @@ type PersistedSession = z.infer<typeof persistedSessionSchema>;
 const WORKTREE_SETUP_INTERRUPTED_MESSAGE =
   "Setup was interrupted when the app quit.";
 
-/**
- * No session survives a restart, so hydrated ones start stopped. Worktree setup
- * needs a verdict instead of a reset: its steps are persisted, and the runner
- * executing them died with the app, so the session and whichever step it was
- * part-way through are failures rather than work still in progress.
- */
 function hydrateSession(persisted: PersistedSession): Session {
   if (persisted.type === "worktree-setup") {
     return {

@@ -53,8 +53,6 @@ function createOAuth(options: {
       setCredentials(accountId, credentials);
     },
     onInvalidGrant: (accountId) => {
-      // Mirror the service wiring: an invalid grant flags the account, which
-      // is what gates every later attempt.
       store.blocked = true;
       onInvalidGrant(accountId);
     },
@@ -77,7 +75,6 @@ describe("CodexAccountOAuth", () => {
   it("returns the stored token while it has more runway than the margin", async () => {
     const fetchFn = vi.fn();
     const { oauth } = createOAuth({
-      // Expires 2 hours from "now" — outside the 1-hour margin.
       credentials: makeCredentials({ expiresAt: NOW + 2 * HOUR_MS }),
       fetchFn: fetchFn as unknown as typeof fetch,
     });
@@ -96,7 +93,6 @@ describe("CodexAccountOAuth", () => {
       }),
     );
     const { oauth, setCredentials, store } = createOAuth({
-      // Expires 30 minutes from "now" — inside the 1-hour margin.
       credentials: makeCredentials({ expiresAt: NOW + 30 * 60_000 }),
       fetchFn: fetchFn as unknown as typeof fetch,
     });

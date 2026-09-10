@@ -85,7 +85,6 @@ export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
     configOverrides: z.string().optional(),
     mcpEnabled: z.boolean().optional().catch(undefined),
     mcpCanScheduleSessions: z.boolean().optional().catch(undefined),
-    /** Managed Codex account this session runs under; default login if unset. */
     accountId: z.string().optional().catch(undefined),
   }),
 });
@@ -268,7 +267,6 @@ interface CodexSessionsManagerOptions {
   titleGeneration?: TitleGenerationService;
   getMcpServerUrl?: (context: McpRequestContext) => string | null;
   sessionBuffers?: SessionBufferStore;
-  /** Resolves a managed account to a fresh external-auth payload. */
   getExternalAuth?: (accountId: string) => Promise<CodexExternalAuthTokens>;
 }
 
@@ -531,10 +529,6 @@ export class CodexSessionsManager {
     return sessionId;
   }
 
-  /**
-   * A managed account that cannot produce a token fails the session start
-   * rather than quietly falling back to the user's default `~/.codex` login.
-   */
   private async resolveExternalAuth(
     accountId: string,
   ): Promise<CodexExternalAuthTokens> {
@@ -544,13 +538,6 @@ export class CodexSessionsManager {
     return await this.getExternalAuth(accountId);
   }
 
-  /**
-   * Refreshes whichever account the session is on *now*, since it can be
-   * switched while the app-server is running. The spawn-time id is the
-   * fallback for a session switched back to the default account: external auth
-   * cannot be cleared from a running app-server, so it still holds that
-   * account's tokens and those are the ones to refresh.
-   */
   private async resolveSessionExternalAuth(
     sessionId: string,
     spawnAccountId: string,
@@ -563,12 +550,6 @@ export class CodexSessionsManager {
     return await this.resolveExternalAuth(accountId);
   }
 
-  /**
-   * Reads rate limits through the app-server of a live session on `accountId`,
-   * so usage polling does not have to spawn one. Returns null when no live
-   * session is on that account, or when the read fails and the caller should
-   * fall back to its own app-server.
-   */
   async readLiveAccountRateLimits(
     accountId: string | undefined,
   ): Promise<unknown | null> {
@@ -585,15 +566,6 @@ export class CodexSessionsManager {
     return null;
   }
 
-  /**
-   * Repoints a session at another account. Codex treats a repeat external
-   * login as the documented way to update auth, so a running session switches
-   * without a restart and its next turn bills the new account.
-   *
-   * Switching back to the default account only takes effect on the next start:
-   * clearing external auth needs `account/logout`, which would delete the
-   * user's own `auth.json` from the shared CODEX_HOME.
-   */
   async setSessionAccount(input: {
     sessionId: string;
     accountId?: string;
@@ -602,8 +574,6 @@ export class CodexSessionsManager {
     this.getSessionState(sessionId);
 
     const tracker = this.liveSessions.get(sessionId)?.tracker;
-    // Resolved before the state write so a dead account leaves the session
-    // pointing at the one that still works.
     const auth =
       tracker && accountId
         ? await this.resolveExternalAuth(accountId)
@@ -842,7 +812,6 @@ export class CodexSessionsManager {
     setSessionStatus("starting");
     setSessionErrorMessage(undefined);
 
-    // Determine if we need plan mode (deferred prompt)
     const isPlanMode = initialPrompt?.startsWith("/plan ");
     let shouldSwitchToPlanMode = isPlanMode;
     const deferredPrompt =
@@ -957,9 +926,6 @@ export class CodexSessionsManager {
       });
       await tracker.start();
 
-      // Before the TUI is spawned, so every thread this app-server runs is
-      // already on the right account. Codex keeps these tokens in memory, so
-      // the user's own `auth.json` is left alone.
       if (accountId) {
         await tracker.loginWithExternalAuth(
           await this.resolveExternalAuth(accountId),
@@ -1032,7 +998,6 @@ export class CodexSessionsManager {
           const errorMessage = payload.errorMessage ?? runtimeErrorMessage;
           session.status = errorMessage ? "error" : "stopped";
           session.errorMessage = errorMessage;
-          // Unexpected exits wake parked sessions; intentional stops do not.
           if (!payload.stoppedByUser) {
             session.lastActivityAt = Date.now();
           }

@@ -87,8 +87,6 @@ describe("ensureManagedCursorStateHooks", () => {
       "cursor-hooks",
       "emit-state.mjs",
     );
-    // Use a different runtime than what detectHookRuntime may return,
-    // to verify that stale commands are replaced on runtime change.
     const staleCommand = `node "${managedScriptPath}"`;
 
     const userHooksPath = path.join(homePath, ".cursor", "hooks.json");

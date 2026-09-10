@@ -101,7 +101,6 @@ describe("readProjectScripts", () => {
         prebuild: "rm -rf dist",
         build: "vite build",
         postbuild: "echo done",
-        // Nothing named "flight", so this one stands on its own.
         preflight: "node check.js",
       },
     });

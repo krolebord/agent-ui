@@ -175,7 +175,6 @@ describe("ClaudeAccountsService", () => {
       status: "ok",
       email: "new@example.com",
       oauth: newOauth,
-      // The user's chosen label survives re-login.
       label: "Personal",
     });
   });
@@ -206,7 +205,6 @@ describe("ClaudeAccountsService", () => {
       oauth: { refreshToken: "refresh-2" },
     });
 
-    // Different email still creates a separate account.
     const otherId = service.upsertManagedAccount({
       label: "Work",
       email: "other@example.com",

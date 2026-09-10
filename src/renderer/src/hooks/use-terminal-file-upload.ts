@@ -19,11 +19,6 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-/**
- * Uploads a file to the host (it can't travel through the PTY stream) and
- * returns the absolute path to paste into the terminal, or null on failure.
- * Shared by clipboard paste and the mobile attach button.
- */
 export function useTerminalFileUpload(terminalId: string) {
   return useCallback(
     async (file: File): Promise<string | null> => {

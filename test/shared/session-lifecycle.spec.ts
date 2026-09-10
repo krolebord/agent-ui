@@ -26,7 +26,6 @@ function session(
   };
 }
 
-/** A settled session: parked after its last activity. */
 function settled(
   overrides: Partial<InboxLifecycleSession> & { sessionId: string },
 ): InboxLifecycleSession {
@@ -38,10 +37,8 @@ function settled(
   });
 }
 
-/** NOW sits between the snooze (2_000) and the wake time (10_000). */
 const NOW = 5_000;
 
-/** A snoozed session: parked at 2_000, due to wake at 10_000. */
 function snoozed(
   overrides: Partial<InboxLifecycleSession> & { sessionId: string },
 ): InboxLifecycleSession {
@@ -96,12 +93,10 @@ describe("canSettleSession", () => {
   });
 
   it("allows finished, failed, resting, and stopping sessions", () => {
-    // Settling an unread finished session counts as acknowledging it.
     expect(canSettleSession({ status: "awaiting_user_response" })).toBe(true);
     expect(canSettleSession({ status: "error" })).toBe(true);
     expect(canSettleSession({ status: "idle" })).toBe(true);
     expect(canSettleSession({ status: "stopped" })).toBe(true);
-    // Stopping is intentional teardown (often settle itself), not live work.
     expect(canSettleSession({ status: "stopping" })).toBe(true);
   });
 });
@@ -156,8 +151,6 @@ describe("isSessionSettled", () => {
   });
 
   it("keeps a settle-driven stop parked through the stopping window", () => {
-    // Stopping is treated like stopped for settle, and intentional stops do
-    // not bump lastActivityAt, so the timestamp check still holds.
     expect(
       isSessionSettled(
         settled({
@@ -239,8 +232,6 @@ describe("isSessionSnoozed", () => {
   });
 
   it("stays snoozed while the session is still working", () => {
-    // Teardown after snooze briefly leaves status as working (`stopping`);
-    // in motion is not a conclusion, so activity bumps must not undo the park.
     expect(
       isSessionSnoozed(
         snoozed({ sessionId: "a", status: "running", lastActivityAt: 4_000 }),
@@ -302,8 +293,6 @@ describe("sessionRaisedHandWhileSnoozed", () => {
   });
 
   it("needs no timestamp to wake blocked-on-you work", () => {
-    // Deliberately independent of lastActivityAt: a write site that forgets to
-    // bump it must not be able to bury a session that is waiting on the user.
     expect(
       sessionRaisedHandWhileSnoozed(
         snoozed({

@@ -19,20 +19,11 @@ function createMcpServer(services: Services, context: McpRequestContext) {
   return server;
 }
 
-// Stateless: each HTTP request gets a fresh server + transport pair, torn
-// down when the response closes. No session state survives between requests,
-// so there is nothing to clean up or re-sync. Switch to a stateful transport
-// (sessionIdGenerator + session map) only if we need server-initiated
-// notifications.
 export async function handleMcpHttpRequest(
   req: IncomingMessage,
   res: ServerResponse,
   services: Services,
 ) {
-  // A missing/invalid token still serves the request, just without a session
-  // context — tools that need the cwd degrade to global-only behavior, and
-  // session-creating tools are blocked since the caller can't be tied back
-  // to a session we started.
   const requestUrl = new URL(req.url ?? "/", "http://agent-ui.local");
   const context = services.mcpSessionTokens.verify(
     requestUrl.searchParams.get("token"),

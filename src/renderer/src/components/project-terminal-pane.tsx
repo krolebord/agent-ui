@@ -75,11 +75,6 @@ function getTerminalStatusMeta(status: string) {
   }
 }
 
-/**
- * Lists the project's command presets, then the scripts discovered in its
- * `package.json`. The list is fetched when the menu opens rather than cached:
- * both sources are edited outside the app.
- */
 function ProjectCommandsMenu({
   cwd,
   disabled,
@@ -312,7 +307,6 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
       return;
     }
 
-    // Nothing to revive: terminals are only created on explicit request.
     if (!activeTerminalId) {
       return;
     }

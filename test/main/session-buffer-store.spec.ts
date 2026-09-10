@@ -31,8 +31,6 @@ describe("session buffer stores", () => {
     return new SqliteSessionBufferStore(database.db);
   }
 
-  // Hold both implementations to the same contract; drift between them would
-  // only show up in production.
   const implementations: Array<[string, () => Promise<SessionBufferStore>]> = [
     ["SqliteSessionBufferStore", () => createSqliteStore()],
     [

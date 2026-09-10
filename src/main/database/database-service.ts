@@ -27,8 +27,6 @@ export class DatabaseService {
     await mkdir(userDataPath, { recursive: true });
 
     const databasePath = path.join(userDataPath, DATABASE_FILENAME);
-    // Pre-create with a restrictive mode. SQLite derives WAL/SHM sidecar
-    // permissions from the database file, avoiding a world-readable window.
     const databaseFile = await open(databasePath, "a", 0o600);
     try {
       await databaseFile.chmod(0o600);
@@ -60,8 +58,6 @@ export class DatabaseService {
         });
       }
 
-      // The database can contain prompts, terminal output, and credentials in
-      // future migrations. Do not rely on the process umask for its mode.
       await chmod(databasePath, 0o600);
 
       return new DatabaseService(databasePath, db);

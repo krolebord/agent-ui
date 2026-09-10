@@ -31,7 +31,6 @@ export const sessionsRouter = {
     .input(
       z.object({
         sessionId: z.string(),
-        /** True only when the session is being opened, as opposed to left. */
         visiting: z.boolean().optional(),
       }),
     )
@@ -44,14 +43,6 @@ export const sessionsRouter = {
         if (session.status === "awaiting_user_response") {
           session.status = "idle";
         }
-        // Opening a session spends its snooze: looking at a row is engaging with
-        // it, so the return ticket is used up. This is also what clears the
-        // "Woke" marker — the marker is just a lingering snoozedUntil, so no
-        // separate last-visited bookkeeping is needed.
-        //
-        // Gated on `visiting` because a switch also marks the session being left
-        // behind, and snoozing the open session navigates away: clearing there
-        // would undo the snooze that caused the navigation.
         if (input.visiting) {
           delete session.snoozedUntil;
           delete session.snoozedAt;
@@ -72,10 +63,6 @@ export const sessionsRouter = {
     .input(z.object({ sessionId: z.string() }))
     .handler(async ({ input, context }) => {
       const session = context.sessions.state.state[input.sessionId];
-      // Silent no-op rather than an error: the row hides the affordance
-      // already, so reaching here means a raced click on work that became
-      // blocked, and the derived state the caller re-renders from is right
-      // either way.
       if (!session || !canSettleSession(session)) {
         return;
       }
@@ -89,23 +76,16 @@ export const sessionsRouter = {
         }
         current.settledOverride = "settled";
         current.settledAt = Date.now();
-        // Parking a finished session acknowledges it, exactly like markSeen —
-        // otherwise the unread flag would bounce it straight back out.
         if (current.status === "awaiting_user_response") {
           current.status = "idle";
         }
         didSettle = true;
       });
 
-      // The session may have become busy or entered approval between the
-      // snapshot above and this update. Do not stop work we failed to park.
       if (!didSettle) {
         return;
       }
 
-      // Settling frees the live process. Stop after the marker is written so
-      // the row is already parked. Intentional stops do not bump
-      // lastActivityAt, so teardown cannot un-settle the row.
       switch (sessionType) {
         case "claude-local-terminal":
           await context.sessionsService.stopLiveSession(input.sessionId);
@@ -151,9 +131,6 @@ export const sessionsRouter = {
         }
         delete current.settledOverride;
         delete current.settledAt;
-        // Active sort is newest-created first and does not move on ordinary
-        // activity. Unsettle is a lifecycle transition, so re-stamp createdAt
-        // (and lastActivityAt) to put the row at the top.
         const now = Date.now();
         current.createdAt = now;
         current.lastActivityAt = now;
@@ -164,8 +141,6 @@ export const sessionsRouter = {
         return;
       }
 
-      // Inverse of settle: bringing a row back also starts it. Worktree setup
-      // has no resume path — it runs once.
       switch (sessionType) {
         case "claude-local-terminal":
           await call(
@@ -223,9 +198,6 @@ export const sessionsRouter = {
     .input(z.object({ sessionId: z.string(), snoozedUntil: z.number() }))
     .handler(async ({ input, context }) => {
       const session = context.sessions.state.state[input.sessionId];
-      // Same silent no-op as settle for a raced click, plus a guard on the
-      // wake time: a past or non-finite one would persist snooze fields on a
-      // session that never hides, leaving a permanent "Woke" marker.
       if (!session || !canSnoozeSession(session)) {
         return;
       }
@@ -249,14 +221,9 @@ export const sessionsRouter = {
         }
         current.snoozedUntil = input.snoozedUntil;
         current.snoozedAt = Date.now();
-        // Acknowledges the session exactly as settle does — otherwise the
-        // unread flag would raise its hand and wake the row immediately.
         if (current.status === "awaiting_user_response") {
           current.status = "idle";
         }
-        // Snooze and settle are alternatives, not layers. Like settle, free the
-        // live process after parking so a snoozed row is not still burning
-        // tokens in the background.
         delete current.settledOverride;
         delete current.settledAt;
         didSnooze = true;
@@ -266,9 +233,6 @@ export const sessionsRouter = {
         return;
       }
 
-      // Stop after the marker is written so the row is already parked.
-      // Intentional stops do not bump lastActivityAt, so teardown cannot wake
-      // the snooze early.
       switch (sessionType) {
         case "claude-local-terminal":
           await context.sessionsService.stopLiveSession(input.sessionId);

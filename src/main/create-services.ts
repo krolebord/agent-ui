@@ -86,14 +86,9 @@ import {
 
 const STORAGE_SCHEMA_VERSION = 3;
 
-// Sessions started by the scheduler have no attached renderer yet; the
-// terminal is resized to the real viewport once a client attaches.
 const SCHEDULED_SESSION_COLS = 120;
 const SCHEDULED_SESSION_ROWS = 30;
 
-// Managed-account sessions get their access token snapshotted into the env at
-// spawn, so refresh anything with less than this much lifetime left rather
-// than handing a session a token that dies minutes later.
 const SPAWN_TOKEN_MIN_REMAINING_MS = 30 * 60_000;
 
 interface CreateServicesOptions {
@@ -203,7 +198,6 @@ export async function createServices(options: CreateServicesOptions) {
     userDataPath,
   );
 
-  // Created before the session managers, which write buffers through it.
   const databaseService = await DatabaseService.create(userDataPath);
   const sessionBuffers = new SqliteSessionBufferStore(databaseService.db);
   const globalInstructionsService = new GlobalInstructionsService({
@@ -243,8 +237,6 @@ export async function createServices(options: CreateServicesOptions) {
     if (account.type === "setup-token") {
       return { type: "setup-token", token: account.token };
     }
-    // Refresh eagerly so the session starts with the longest runway the
-    // account can give it; the CLI cannot refresh the env-provided token.
     const token = await claudeAccountsService.getValidAccessToken(accountId, {
       minRemainingMs: SPAWN_TOKEN_MIN_REMAINING_MS,
     });
@@ -261,8 +253,6 @@ export async function createServices(options: CreateServicesOptions) {
     publicState: codexAccountsPublicState,
   });
 
-  // Codex keeps the access token in memory for the life of the app-server, and
-  // asks us for a new one on 401, so a short margin is enough here.
   const getCodexExternalAuth = async (accountId: string) =>
     await codexAccountsService.getExternalAuth(accountId);
 
@@ -294,7 +284,6 @@ export async function createServices(options: CreateServicesOptions) {
   );
   machineStatsMonitor.start();
 
-  // Hydrate worktree setup commands from .agent-ui/settings.jsonc files
   const projectPaths = projectsState.state.map((p) => p.path);
   if (projectPaths.length > 0) {
     const fileSettings = await readProjectSettingsForAll(projectPaths);
@@ -326,8 +315,6 @@ export async function createServices(options: CreateServicesOptions) {
   );
   removeLegacyLocalTerminalSessions(sessionsState);
 
-  // Awaited so it cannot outlive startup and mistake a buffer from a freshly
-  // started session for an orphan.
   const droppedBuffers = await sessionBuffers.deleteOrphans(
     Object.keys(sessionsState.state),
   );
@@ -412,8 +399,6 @@ export async function createServices(options: CreateServicesOptions) {
     state: scheduledSessionsState,
     runSession: async (config, meta) => {
       await skillsService.ensureFreshForPath(config.cwd);
-      // Sessions spawned from agent-created schedules must not be able to
-      // schedule further sessions, or agents could chain spawns unattended.
       const mcpCanScheduleSessions = meta.createdBy !== "agent";
       switch (config.type) {
         case "claude": {
@@ -536,8 +521,6 @@ export async function createServices(options: CreateServicesOptions) {
 
   const shutdown = async () => {
     await shutdownDisposable.dispose();
-    // Keep the database alive until every service has finished its shutdown
-    // work. Database-backed services added later can safely flush first.
     await databaseService.close();
   };
 

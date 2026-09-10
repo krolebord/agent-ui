@@ -25,18 +25,12 @@ interface TerminalPaneProps {
   className?: string;
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
-  /**
-   * Called when the user pastes a file. Should persist the file and return
-   * an absolute file path to paste into the terminal, or null to ignore the
-   * paste.
-   */
   onPasteFile?: (file: File) => Promise<string | null>;
   readOnly?: boolean;
   trackGlobalSize?: boolean;
   ref: React.RefObject<TerminalPaneHandle | null>;
 }
 
-// atob yields Latin-1 code units, so reinterpret the bytes as UTF-8.
 function decodeBase64Utf8(base64: string): string {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -46,9 +40,6 @@ function decodeBase64Utf8(base64: string): string {
   return new TextDecoder().decode(bytes);
 }
 
-// Routes OSC 52 clipboard writes (e.g. Claude Code's own copy) to the client
-// clipboard. Payload is "<selection>;<data>"; "<data>" is base64 or "?" (a read
-// query we don't answer).
 function handleOsc52(payload: string): boolean {
   const separator = payload.indexOf(";");
   if (separator === -1) {
@@ -72,8 +63,6 @@ function getPastedFile(clipboardData: DataTransfer | null): File | null {
     return null;
   }
 
-  // If the clipboard also carries plain text (e.g. copied spreadsheet
-  // cells or a file path), let the normal text paste win.
   if (clipboardData.getData("text/plain")) {
     return null;
   }
@@ -151,7 +140,6 @@ export function TerminalPane({
     }
 
     const terminal = new Terminal({
-      // Required for terminal.parser.registerOscHandler below.
       allowProposedApi: true,
       convertEol: true,
       cursorBlink: true,
@@ -225,17 +213,10 @@ export function TerminalPane({
         return false;
       }
 
-      // Copy/paste keyboard shortcuts for the browser client.
-      // On macOS the primary modifier is Cmd; on Windows/Linux it is Ctrl.
       if (event.type === "keydown") {
         const key = event.key.toLowerCase();
         const primaryModifier = isMacPlatform ? event.metaKey : event.ctrlKey;
 
-        // Copy the current selection.
-        //   macOS:        Cmd+C
-        //   Windows/Linux: Ctrl+Shift+C, or Ctrl+C when text is selected.
-        // Plain Ctrl+C with no selection falls through so it still sends
-        // SIGINT to the process.
         if (key === "c" && primaryModifier) {
           const selection = terminal.getSelection();
           const wantsCopy =
@@ -247,20 +228,11 @@ export function TerminalPane({
           }
         }
 
-        // Paste from the clipboard.
-        //   macOS:        Cmd+V
-        //   Windows/Linux: Ctrl+V or Ctrl+Shift+V
-        // Returning false lets the browser dispatch its native paste event,
-        // which the existing text and image paste handlers consume (so image
-        // paste keeps working too).
         if (key === "v" && primaryModifier) {
           return false;
         }
       }
 
-      // Let app-level Cmd/Ctrl shortcuts pass through to the document
-      // so @tanstack/hotkeys can handle them (xterm would otherwise
-      // call stopPropagation and swallow the event).
       if (event.type === "keydown" && (event.metaKey || event.ctrlKey)) {
         const key = event.key.toLowerCase();
         if (key === "backspace" || key === "n" || key === "j") {
@@ -271,9 +243,6 @@ export function TerminalPane({
       return true;
     });
 
-    // Capture-phase so this runs before xterm's own paste handler, which
-    // only understands text. Files are persisted host-side (they can't
-    // travel through the PTY stream) and their file path is pasted instead.
     const onPaste = (event: ClipboardEvent) => {
       const pasteFile = onPasteFileRef.current;
       if (!pasteFile || terminal.options.disableStdin) {
@@ -336,7 +305,6 @@ export function TerminalPane({
     return () => {
       detachTouchScroll();
       container.removeEventListener("paste", onPaste, true);
-      // Blur while onData is still attached so DECSET 1004 focus-out reaches the PTY.
       terminal.blur();
       onDataDisposable.dispose();
       onResizeDisposable.dispose();

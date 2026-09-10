@@ -31,15 +31,7 @@ export const projectTerminalInstanceSchema = z.object({
   createdAt: z.number().default(Date.now()),
   status: sessionStatusSchema.catch("stopped"),
   errorMessage: z.string().optional(),
-  /**
-   * Set when the tab was opened from a command: a `.agent-ui` preset, or a
-   * discovered `package.json` script under a `script:` id.
-   */
   commandId: z.string().optional().catch(undefined),
-  /**
-   * Absolute directory the PTY was spawned in. Only differs from the workspace
-   * cwd when a preset declares its own `cwd`.
-   */
   launchCwd: z.string().optional().catch(undefined),
 });
 export type ProjectTerminalInstanceData = z.infer<
@@ -64,12 +56,6 @@ type WorkspaceShape<TTerminal> = Omit<
   terminals: Record<string, TTerminal>;
 };
 
-/**
- * Fields the PTY owns, so a restart must never resurrect them: the shell behind
- * a `running` status and any error it reported both died with the app. Omitting
- * them from the persisted schema is what keeps them out of the store, since Zod
- * objects drop unknown keys and the orchestrator writes the parse result.
- */
 const runtimeTerminalFields = {
   status: true,
   errorMessage: true,
@@ -88,10 +74,6 @@ const persistedProjectTerminalWorkspaceSchema =
       .catch({}),
   });
 
-/**
- * Generic over the terminal shape so the persisted records — which carry no
- * runtime fields — can reuse it.
- */
 function normalizeWorkspace<TTerminal extends { terminalId: string }>(
   workspace: WorkspaceShape<TTerminal>,
 ): WorkspaceShape<TTerminal> {
@@ -156,7 +138,6 @@ const persistedProjectTerminalStateSchema = z
     return normalized;
   });
 
-/** No PTY survives a restart, so every hydrated terminal starts stopped. */
 function hydrateWorkspace(
   workspace: WorkspaceShape<PersistedProjectTerminalInstance>,
 ): ProjectTerminalWorkspaceData {
@@ -202,7 +183,6 @@ interface LiveProjectTerminal {
   terminalId: string;
   terminal: ManagedTerminalRuntime;
   shellMonitor: ShellIntegrationMonitor;
-  /** Command text waiting for the shell to reach a prompt. */
   pendingInput: string | null;
   pendingInputTimer: ReturnType<typeof setTimeout> | null;
   promptSeen: boolean;
@@ -218,25 +198,11 @@ interface StartLiveTerminalOptions {
   env?: Record<string, string>;
 }
 
-/**
- * How long to wait for an OSC 133 prompt marker before typing anyway. Shells
- * without our integration (fish, plain sh) never send one, and typing early is
- * better than never running the command.
- */
 const PROMPT_WAIT_TIMEOUT_MS = 1500;
 
-/**
- * The precmd marker arrives just before the shell paints its prompt. Typing in
- * that gap echoes the command above the prompt and then again inside it, so
- * hold back briefly and let the prompt land first.
- */
 const PROMPT_PAINT_DELAY_MS = 120;
 const RERUN_INTERRUPT_TIMEOUT_MS = 3000;
 
-/**
- * Resolves a preset's project-relative `cwd`, refusing anything that escapes
- * the project the preset was read from.
- */
 function resolveCommandCwd(projectPath: string, relativePath?: string): string {
   if (!relativePath) {
     return projectPath;
@@ -401,10 +367,6 @@ export class ProjectTerminalsManager {
     private readonly state: ProjectTerminalsState,
     private readonly shellIntegrationEnv: Record<string, string> = {},
     private readonly terminalManager: TerminalManager = new TerminalManager(),
-    /**
-     * Maps a worktree cwd back to its main checkout, which is what command
-     * presets see as `$PROJECT_ROOT`.
-     */
     private readonly resolveProjectRoot: (
       cwd: string,
     ) => string | undefined = () => undefined,
@@ -418,11 +380,6 @@ export class ProjectTerminalsManager {
     }
   }
 
-  /**
-   * Revives the previously selected terminal of a project. Terminals are only
-   * ever created explicitly by the user, so a project without a workspace (or
-   * one whose terminals were all closed) stays empty here.
-   */
   async ensureWorkspace({
     cwd,
     cols,
@@ -498,12 +455,6 @@ export class ProjectTerminalsManager {
     return { terminalId };
   }
 
-  /**
-   * Opens (or focuses) a terminal running a command preset or a discovered
-   * script. Either way it is resolved from disk here rather than trusted from
-   * the renderer, so a stale dropdown can never launch something the project no
-   * longer defines.
-   */
   async runCommand({
     cwd,
     commandId,
@@ -546,8 +497,6 @@ export class ProjectTerminalsManager {
         env,
       });
 
-      // Something is already running in that shell — a dev server, most
-      // likely. Focus it instead of stacking a second copy on top.
       const live = this.liveTerminals.get(existingTerminalId);
       if (live?.shellMonitor.getState() === "running") {
         return { terminalId: existingTerminalId, started: false };
@@ -570,10 +519,6 @@ export class ProjectTerminalsManager {
     return { terminalId, started: true };
   }
 
-  /**
-   * Re-runs the preset behind an existing tab. A shell that is busy gets an
-   * interrupt first, which is what makes this a restart for dev servers.
-   */
   async rerunCommand({
     cwd,
     terminalId,
@@ -734,15 +679,6 @@ export class ProjectTerminalsManager {
     );
   }
 
-  /**
-   * Reads the preset from the worktree's own settings file, falling back to the
-   * main checkout for worktrees that predate the file being added. Discovered
-   * `package.json` scripts are consulted only after the file, so a preset that
-   * spells out a `script:` id shadows the script it names.
-   *
-   * There is no root fallback for scripts: they describe the checkout they were
-   * found in, and a worktree always carries its own manifest.
-   */
   private async resolveCommand(
     cwd: string,
     commandId: string,
@@ -784,11 +720,6 @@ export class ProjectTerminalsManager {
     };
   }
 
-  /**
-   * Types a command into the shell rather than launching it as the PTY program:
-   * interrupting it then leaves a usable shell in the right directory instead of
-   * closing the tab.
-   */
   private queueCommandInput(terminalId: string, run: string) {
     const live = this.liveTerminals.get(terminalId);
     if (!live) {
@@ -797,8 +728,6 @@ export class ProjectTerminalsManager {
 
     live.pendingInput = `${run}\n`;
 
-    // A shell already sitting at a prompt won't announce another one, so there
-    // is nothing to wait for beyond the paint delay.
     this.scheduleFlush(
       terminalId,
       live.promptSeen && live.shellMonitor.getState() === "idle"
@@ -944,7 +873,6 @@ export class ProjectTerminalsManager {
       },
     });
 
-    // A synchronous spawn failure can complete before startTerminal resolves.
     if (this.terminalManager.getRuntime(terminalId) !== terminal) {
       return;
     }

@@ -46,14 +46,8 @@ interface JsonRpcNotification {
   params?: Record<string, unknown>;
 }
 
-/**
- * Sent by the app-server when an external-auth access token is rejected. We
- * answer with a fresh one and Codex retries the request; the app-server gives
- * us 10s and fails the turn if we don't.
- */
 const CHATGPT_AUTH_TOKENS_REFRESH_METHOD = "account/chatgptAuthTokens/refresh";
 
-/** JSON-RPC reserved codes, for answers to server-initiated requests. */
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
 const JSON_RPC_INTERNAL_ERROR = -32603;
 
@@ -87,7 +81,6 @@ export interface CodexAppServerTrackerOptions {
   ) => void;
   onSubagentUpdate?: (update: CodexAppServerSubagentUpdate) => void;
   onError?: (errorMessage: string) => void;
-  /** Supplies a fresh access token when the app-server asks for one. */
   onChatgptAuthTokensRefresh?: () => Promise<CodexExternalAuthTokens>;
 }
 
@@ -297,11 +290,6 @@ export class CodexAppServerTracker {
         version: "0.0.0",
       },
       capabilities: {
-        // `account/login/start.chatgptAuthTokens` is gated behind this
-        // capability, so managed-account connections have to opt in. Opting in
-        // also stops the app-server from suppressing experimental
-        // notifications and stripping unstable fields on this connection, so
-        // connections that run on the user's own `auth.json` stay opted out.
         experimentalApi: this.onChatgptAuthTokensRefresh != null,
         optOutNotificationMethods: [
           "item/started",
@@ -364,15 +352,6 @@ export class CodexAppServerTracker {
     return await this.call("account/rateLimits/read", {});
   }
 
-  /**
-   * Points the app-server at a specific account for the rest of its life.
-   * Codex keeps these tokens in memory only, so this leaves the user's own
-   * `auth.json` untouched and overrides it for every thread this app-server
-   * runs, including the ones the TUI starts over `--remote`.
-   *
-   * Never pair this with `account/logout`: that deletes `auth.json` from the
-   * shared CODEX_HOME and logs the user out of their own CLI.
-   */
   async loginWithExternalAuth(auth: CodexExternalAuthTokens): Promise<void> {
     await this.call("account/login/start", {
       type: "chatgptAuthTokens",
@@ -416,10 +395,6 @@ export class CodexAppServerTracker {
     this.ws?.send(JSON.stringify({ id, error: { code, message } }));
   }
 
-  /**
-   * The app-server blocks on server-initiated requests, so every one of them
-   * gets an answer even when we don't implement it.
-   */
   private async handleServerRequest(request: JsonRpcRequest) {
     if (request.method !== CHATGPT_AUTH_TOKENS_REFRESH_METHOD) {
       this.respondError(
@@ -472,8 +447,6 @@ export class CodexAppServerTracker {
       return;
     }
 
-    // Server-initiated requests carry both an id and a method; responses to
-    // our own calls only carry an id.
     if ("id" in message && "method" in message) {
       void this.handleServerRequest(message);
       return;

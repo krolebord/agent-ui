@@ -30,7 +30,6 @@ type SyncStateValuesSnapshot<StateMap extends SyncStateMap> = {
 };
 
 export type SyncStateSnapshot<StateMap extends SyncStateMap> = {
-  /** Random UUID generated once per main-process launch; clients reload on change. */
   appVersion: string;
   version: number;
   state: SyncStateValuesSnapshot<StateMap>;
@@ -56,7 +55,6 @@ export const stateSyncRouter = {
 export class StateOrchestrator<State extends SyncStateMap> {
   private readonly states = new Map<string, RegisteredState>();
   private stateVersion = 0;
-  /** Identifies this main-process launch so renderers can detect a restart. */
   readonly appVersion = randomUUID();
   readonly eventPublisher = new EventPublisher<{
     "state-update": SyncStateUpdateEvent;

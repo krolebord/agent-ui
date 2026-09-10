@@ -16,7 +16,6 @@ import { OPENAI_POLICY_CONTENTS, OPENAI_POLICY_FILE } from "./skills-service";
 
 interface ManagedSkill {
   name: string;
-  /** Relative path within the skill dir -> file contents. */
   files: Record<string, string>;
 }
 
@@ -29,8 +28,6 @@ function buildSkills(ctx: ManagedSkillContext): ManagedSkill[] {
     {
       name: "agent-ui",
       files: {
-        // Keep this reference skill user-invokable: it is useful when asked
-        // for, but should not compete with task-specific project guidance.
         [OPENAI_POLICY_FILE]: OPENAI_POLICY_CONTENTS,
         "SKILL.md": `---
 name: agent-ui
@@ -98,8 +95,6 @@ The directory and its settings may be checked into the repository so everyone us
     {
       name: "agent-ui-handoff",
       files: {
-        // disable-model-invocation only covers Claude Code; the openai.yaml
-        // policy file is what keeps Codex from auto-invoking the skill.
         [OPENAI_POLICY_FILE]: OPENAI_POLICY_CONTENTS,
         "SKILL.md": `---
 name: agent-ui-handoff
@@ -194,8 +189,6 @@ async function ensureSymlink(
       if (existing === target) return;
       await unlink(linkPath);
     } else {
-      // A real file/directory exists where the link should go. It isn't
-      // ours — leave it alone rather than destroy user content.
       const message = `Not overwriting existing path with managed skill link: ${linkPath}`;
       log.warn(message);
       warnings.push(message);
@@ -216,8 +209,6 @@ async function writeSkillSource(
   skill: ManagedSkill,
 ): Promise<string> {
   const dir = path.join(managedSkillsRoot, skill.name);
-  // Sources live under userData and are fully app-owned; a clean rewrite
-  // keeps them exactly matching the definition (no stale extra files).
   await rm(dir, { recursive: true, force: true });
   for (const [relPath, contents] of Object.entries(skill.files)) {
     const filePath = path.join(dir, relPath);
@@ -277,18 +268,6 @@ async function pruneStaleSources(
   }
 }
 
-/**
- * Installs code-defined (builtin) skills.
- *
- * Sources are written to <userData>/managed-skills/<name> (their contents
- * embed machine-specific paths) and symlinked into ~/.agents/skills — the
- * canonical skills directory. From there the SkillsService picks them up
- * like any other skill and links them into ~/.claude/skills.
- *
- * Also removes legacy links this app used to create in ~/.codex/skills,
- * ~/.cursor/skills and the managed Claude plugin's skills dir (Codex and
- * Cursor read .agents/skills and .claude/skills directly now).
- */
 export async function ensureManagedSkills(
   userDataPath: string,
   claudePluginRoot: string | null,
@@ -329,7 +308,6 @@ export async function ensureManagedSkills(
   await pruneStaleSources(managedSkillsRoot, validNames);
   await pruneManagedLinks(agentsSkillsDir, validNames, managedSkillsRoot);
 
-  // Legacy destinations — remove every link that points at our sources.
   const legacyDirs = [
     path.join(home, ".codex", "skills"),
     path.join(home, ".cursor", "skills"),

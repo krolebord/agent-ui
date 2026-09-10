@@ -73,7 +73,6 @@ import { createSyncStateStore } from "../../src/renderer/src/services/state-sync
 describe("createSyncStateStore", () => {
   const openStores: Array<() => void> = [];
 
-  /** Stores keep a connection listener alive until unsubscribed. */
   async function createTrackedStore() {
     const result = await createSyncStateStore();
     openStores.push(result.unsubscribe);
@@ -227,10 +226,8 @@ describe("createSyncStateStore", () => {
       expect(store.getState()).toEqual({ count: 7 });
     });
     expect(orpcSpies.subscribeToStateUpdates).toHaveBeenCalledTimes(2);
-    // The dead stream is released when the fresh one takes over.
     expect(streamSpies.unsubscribe).toHaveBeenCalledTimes(1);
 
-    // Updates from the stale stream must not corrupt the fresh snapshot.
     streamSpies.emit(firstStream, {
       version: 2,
       patch: [{ op: "replace", path: ["count"], value: 2 }],

@@ -1,4 +1,3 @@
-/** Turns provider plan identifiers ("max_20x", "pro-plus") into display text. */
 export function formatPlanType(
   planType: string | null | undefined,
 ): string | null {

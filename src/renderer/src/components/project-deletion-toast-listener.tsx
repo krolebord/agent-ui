@@ -3,9 +3,6 @@ import { orpc } from "@renderer/orpc-client";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
-/**
- * Surfaces main-process worktree deletion outcomes (branch warning / errors) via synced state.
- */
 export function ProjectDeletionToastListener() {
   const projects = useAppState((s) => s.projects);
   const shownKeysRef = useRef(new Set<string>());

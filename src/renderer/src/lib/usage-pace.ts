@@ -1,9 +1,7 @@
-/** Hide pace until enough of the window has elapsed to be meaningful. */
 export const MIN_USAGE_PACE_ELAPSED_PERCENT = 3;
 
 export type UsagePace = {
   elapsedPercent: number;
-  /** Elapsed percent minus used percent. Positive is reserve; negative is deficit. */
   deltaPercent: number;
 };
 
@@ -69,7 +67,6 @@ export function formatUsagePaceDelta(deltaPercent: number): string {
   return `${rounded}%`;
 }
 
-/** Cursor billing-cycle fields are millisecond (or second) epoch strings. */
 export function parseEpochMillis(
   value: string | null | undefined,
 ): number | null {

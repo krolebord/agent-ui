@@ -1,16 +1,7 @@
-/**
- * Tracks the health of the transport backing the oRPC client so the app can
- * recover from a dropped connection by re-bootstrapping state instead of
- * reloading the window.
- */
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
 export type ConnectionState = {
   status: ConnectionStatus;
-  /**
-   * Incremented on every successful (re)connect. Consumers that hold live
-   * subscriptions can use it as an effect dependency to re-attach.
-   */
   epoch: number;
 };
 

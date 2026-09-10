@@ -26,16 +26,6 @@ const GIT_PROJECT_REFRESH_THROTTLE_MS = 3_000;
 const SCRATCH_INDEX_PREFIX = "agent-ui-scratch-index-";
 const gitIndexPathCache = new Map<string, string>();
 
-/**
- * Every git invocation runs under `LC_ALL=C` so output and error messages stay
- * in the C locale: several call sites match on English git text
- * (`formatGitPushError`, `isDirtyWorktreeRemovalError`, and simple-git's own
- * "not a git repository" detection), which a translated git would break.
- *
- * simple-git's `.env()` *replaces* the child environment rather than extending
- * it, so `process.env` has to be spread in explicitly — otherwise git runs
- * without PATH or HOME and silently stops reading the user's global config.
- */
 function createGit(
   projectPath: string,
   extraEnv?: Record<string, string>,
@@ -50,7 +40,6 @@ function createGit(
 const GIT_LOG_FIELD_SEPARATOR = "\x1f";
 const GIT_LOG_RECORD_SEPARATOR = "\x1e";
 const GIT_LOG_HISTORY_FORMAT = `${["%H", "%P", "%an", "%ae", "%aI", "%D", "%s", "%b"].join("%x1f")}%x1e`;
-// 40 hex chars for SHA-1, 64 for SHA-256 repos; prefixes allowed for cursors
 const GIT_COMMIT_HASH_PATTERN = /^[0-9a-f]{4,64}$/i;
 
 function assertValidCommitHash(hash: string): void {
@@ -59,11 +48,6 @@ function assertValidCommitHash(hash: string): void {
   }
 }
 
-/**
- * Rewrites raw simple-git / git CLI push output into a short toast-friendly
- * message. Known failure modes get actionable copy; everything else prefers a
- * single `error:` / `fatal:` / `remote:` line over the full multi-line dump.
- */
 export function formatGitPushError(raw: string): string {
   const text = raw.trim();
   if (!text) {
@@ -115,11 +99,6 @@ export function formatGitPushError(raw: string): string {
   return "Git push failed.";
 }
 
-/**
- * Same idea as `formatGitPushError`, for the fetch/fast-forward side. `pull
- * --ff-only` fails cleanly (the worktree is left untouched), so every case here
- * is something the user resolves before trying again.
- */
 export function formatGitPullError(raw: string): string {
   const text = raw.trim();
   if (!text) {
@@ -239,12 +218,6 @@ function parseRevListHashes(output: string): Set<string> {
   );
 }
 
-/**
- * Hashes of commits not yet published. Prefers `@{upstream}..HEAD`; when no
- * upstream is configured, falls back to commits on HEAD that aren't on any
- * origin ref (the same range a first-time "Publish branch" would push).
- * Returns null only when neither range can be resolved.
- */
 async function resolveUnpushedCommitHashes(
   git: ReturnType<typeof simpleGit>,
 ): Promise<Set<string> | null> {
@@ -266,11 +239,6 @@ async function resolveUnpushedCommitHashes(
   }
 }
 
-/**
- * Subjects of commits that would be published by the next push. With an
- * upstream, that's `@{upstream}..HEAD`; when first publishing to origin, it's
- * everything on HEAD that isn't already on any origin ref.
- */
 async function resolveUnpushedCommitSubjects(
   git: ReturnType<typeof simpleGit>,
   hasUpstream: boolean,
@@ -286,12 +254,6 @@ async function resolveUnpushedCommitSubjects(
     .filter(Boolean);
 }
 
-/**
- * Blocks publishing the temporary autogenerate subject if message generation
- * failed (or an amend never finished) and the placeholder is still on HEAD.
- * If the unpushed range can't be resolved, skip the check — the push itself
- * will surface a clearer git error.
- */
 async function assertNoAutogeneratePlaceholderInUnpushedCommits(
   git: ReturnType<typeof simpleGit>,
   hasUpstream: boolean,
@@ -407,12 +369,6 @@ async function isExistingNonEmptyPath(targetPath: string): Promise<boolean> {
   }
 }
 
-/**
- * `git worktree add` only materializes tracked files, so a project that ignores
- * `.agent-ui` (or only commits part of it) would give the new worktree none of
- * its settings, icon, or skills. Copy the directory across without overwriting:
- * whatever the checkout already produced is the committed version and wins.
- */
 async function copyProjectSettingsDirectory(
   sourcePath: string,
   destinationPath: string,
@@ -429,8 +385,6 @@ async function copyProjectSettingsDirectory(
       return;
     }
 
-    // The worktree already exists at this point, so a partial copy is reported
-    // rather than failing creation.
     log.warn(
       `Failed to copy ${PROJECT_SETTINGS_DIR} from ${sourcePath} to ${destinationPath}:`,
       error,
@@ -488,10 +442,6 @@ async function resolveDiffBaseRef(
   }
 }
 
-/**
- * Name of the current branch's configured upstream (e.g. `origin/main`), or
- * null when none is configured / HEAD is detached.
- */
 async function resolveUpstreamBranchName(
   git: ReturnType<typeof simpleGit>,
 ): Promise<string | null> {
@@ -637,15 +587,9 @@ async function withTemporaryIndex<T>(
   }
 }
 
-/**
- * Fire-and-forget: the caller does not need the file gone before it returns,
- * and the UUID name means a leftover can never collide with a later run.
- */
 function removeScratchIndex(scratchIndexPath: string): void {
   void Promise.all([
     rm(scratchIndexPath, { force: true }),
-    // git writes `<index>.lock` while staging and normally removes it itself;
-    // clean up after a crashed `add` so nothing is left behind in the git dir.
     rm(`${scratchIndexPath}.lock`, { force: true }),
   ]).catch((error) => {
     log.warn("Failed to remove scratch git index", { scratchIndexPath, error });
@@ -678,13 +622,6 @@ async function resolveGitIndexPath(
   return resolvedGitIndexPath;
 }
 
-/**
- * Copies the repository index to a uniquely named scratch file inside the same
- * git dir, and returns its path. Keeping the scratch index next to the real one
- * (rather than in the OS temp dir) means staging into it cannot be broken by a
- * full or quota-limited `/tmp`, and it is guaranteed to be on the same
- * filesystem as the repository.
- */
 async function createScratchIndexCopy(
   git: ReturnType<typeof simpleGit>,
   projectPath: string,
@@ -706,8 +643,6 @@ async function createScratchIndexCopy(
     }
   }
 
-  // ENOENT means either a stale cached git dir or a repository whose index has
-  // not been written yet; re-resolve before deciding which it was.
   gitIndexPathCache.delete(projectPath);
   const resolvedGitIndexPath = await resolveGitIndexPath(git, projectPath, {
     bypassCache: true,
@@ -987,12 +922,6 @@ export class ProjectGitService {
     return this.getChangesDiff(projectPath, uniquePaths);
   }
 
-  /**
-   * Throws on failure rather than returning null: a null result means "clean
-   * worktree" to callers, so swallowing an error here renders in the diff pane
-   * as "no uncommitted changes" — indistinguishable from the user's work having
-   * disappeared.
-   */
   private async getChangesDiff(
     projectPath: string,
     paths?: string[],
@@ -1036,12 +965,6 @@ export class ProjectGitService {
     }
   }
 
-  /**
-   * Stages and commits working-tree changes for the given paths only. Other
-   * staged changes stay staged and are not included in this commit (git
-   * pathspec commit semantics). Paths must be staged first so untracked files
-   * are included — `git commit <path>` alone only works for tracked files.
-   */
   async commitSelectedChanges(
     projectPath: string,
     input: {
@@ -1085,11 +1008,6 @@ export class ProjectGitService {
     await this.refreshProject(projectPath);
   }
 
-  /**
-   * Lists commits reachable from HEAD (or from the cursor commit), newest
-   * first. Cursor-based: a page continues from the cursor commit itself, so
-   * results stay stable even when new commits land on top.
-   */
   async getCommitHistory(
     projectPath: string,
     input: {
@@ -1146,12 +1064,6 @@ export class ProjectGitService {
     };
   }
 
-  /**
-   * Pushes the current branch to its upstream, or publishes it to origin
-   * (`--set-upstream`) when no upstream is configured. Terminal credential
-   * prompts are disabled so a missing credential fails fast instead of
-   * hanging the main process.
-   */
   async pushToRemote(projectPath: string): Promise<void> {
     const git = createGit(projectPath, { GIT_TERMINAL_PROMPT: "0" });
     const isRepo = await git.checkIsRepo();
@@ -1186,12 +1098,6 @@ export class ProjectGitService {
     await this.refreshProject(projectPath);
   }
 
-  /**
-   * Fast-forwards the current branch onto its upstream. `--ff-only` is what
-   * makes this safe to trigger from the UI: a diverged branch or a local edit
-   * in the way aborts the pull with the worktree untouched, instead of leaving
-   * a half-finished merge or rebase there is no way to resolve here.
-   */
   async pullFromRemote(projectPath: string): Promise<PullFromRemoteResult> {
     const git = createGit(projectPath, { GIT_TERMINAL_PROMPT: "0" });
     const isRepo = await git.checkIsRepo();
@@ -1231,10 +1137,6 @@ export class ProjectGitService {
     return { upstreamBranch, pulledCommits };
   }
 
-  /**
-   * Diff of a single commit against its first parent (so merge commits show
-   * their effective changes); root commits diff against the empty tree.
-   */
   async getCommitDiff(
     projectPath: string,
     commitHash: string,
@@ -1327,12 +1229,6 @@ export class ProjectGitService {
     await this.refreshProject(projectPath);
   }
 
-  /**
-   * Moves HEAD back one commit with `--soft`, so the undone commit's files
-   * stay in the index and show up again in the uncommitted diff. Refuses
-   * detached HEAD, the root commit, merge commits, and anything already
-   * published to the upstream (or to origin when no upstream is set).
-   */
   async undoLastCommit(projectPath: string): Promise<void> {
     const git = createGit(projectPath);
     const isRepo = await git.checkIsRepo();
@@ -1385,11 +1281,6 @@ export class ProjectGitService {
     await this.refreshProject(projectPath);
   }
 
-  /**
-   * Discards working-tree changes for the given paths. Untracked (new) files
-   * are deleted from disk; tracked files that were modified or deleted are
-   * restored from HEAD. This is irreversible.
-   */
   async discardChanges(projectPath: string, paths: string[]): Promise<void> {
     const git = createGit(projectPath);
     const isRepo = await git.checkIsRepo();
@@ -1608,10 +1499,6 @@ export class ProjectGitService {
     }
   }
 
-  /**
-   * When not forcing removal, checks the worktree is clean (porcelain status).
-   * Returns `requiresForce` if the user must enable force delete.
-   */
   async preflightDeleteWorktreeFolder(input: {
     path: string;
     deleteFolder: boolean;
@@ -1643,10 +1530,6 @@ export class ProjectGitService {
     return null;
   }
 
-  /**
-   * Removes the Git worktree folder and optionally deletes the local branch.
-   * Call only after `preflightDeleteWorktreeFolder` passes (or `forceDeleteFolder` is true).
-   */
   async performDeleteWorktreeFolderAndBranch(input: {
     path: string;
     deleteFolder: boolean;

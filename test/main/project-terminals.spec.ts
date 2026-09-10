@@ -197,9 +197,7 @@ describe("ProjectTerminalsManager command presets", () => {
   let projectDir: string;
   let managers: ProjectTerminalsManager[];
 
-  /** OSC 133 precmd marker: what the shell integration emits at each prompt. */
   const PROMPT_MARKER = "\u001b]133;A\u0007";
-  /** OSC 133 preexec marker: emitted immediately before a command runs. */
   const RUNNING_MARKER = "\u001b]133;C\u0007";
 
   const writeCommands = async (commands: string) => {
@@ -211,7 +209,6 @@ describe("ProjectTerminalsManager command presets", () => {
     );
   };
 
-  /** Emits a prompt marker and waits out the paint delay before the flush. */
   const emitPrompt = async (callbackIndex = 0) => {
     terminalSessionSpies.callbacks[callbackIndex]?.onData({
       chunk: PROMPT_MARKER,
@@ -258,7 +255,6 @@ describe("ProjectTerminalsManager command presets", () => {
     const terminal = state[projectDir]?.terminals[terminalId];
     expect(terminal?.title).toBe("Dev server");
     expect(terminal?.commandId).toBe("dev-server");
-    // Nothing is typed until the shell says it is ready for input.
     expect(terminalSessionSpies.write).not.toHaveBeenCalled();
 
     await emitPrompt();

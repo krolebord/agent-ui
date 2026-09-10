@@ -19,11 +19,6 @@ function registerFatalErrorLogging() {
   });
 }
 
-// Some terminals forward Ctrl+C to the whole foreground process group, so a
-// single keypress can deliver more than one signal to this process. Ignore
-// duplicate signals that arrive within this window so one Ctrl+C performs a
-// full graceful shutdown; a deliberate second press after the window forces an
-// immediate exit.
 const FORCE_EXIT_GRACE_MS = 1000;
 
 function registerSignalHandlers(runtime: AppRuntime) {

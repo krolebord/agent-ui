@@ -27,8 +27,6 @@ export class CursorSessionLogFileManager {
 
     try {
       unlinkSync(logFilePath);
-    } catch {
-      // Ignore missing-file and cleanup errors.
-    }
+    } catch {}
   }
 }

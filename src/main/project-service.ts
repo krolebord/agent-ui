@@ -76,12 +76,6 @@ function normalizeProjectPath(pathValue: string): string {
 
 const projectCommitLocks = new Map<string, Promise<void>>();
 
-/**
- * Serializes commit pipelines per project. The auto-message flow amends HEAD
- * after generation, so a second commit landing in between would get its
- * message overwritten by the first commit's generated one (and concurrent
- * `git commit` calls can collide on index.lock).
- */
 export async function acquireProjectCommitLock(
   projectPath: string,
 ): Promise<() => void> {
@@ -204,18 +198,6 @@ function getFileDiffSourceSignature(file: FileDiffMetadata): string {
   return file.hunks.map((hunk) => hunk.hunkSpecs ?? "").join("\n");
 }
 
-/**
- * Stamps every diff with a content-derived `cacheKey` before it reaches the
- * renderer.
- *
- * `@pierre/diffs` caches syntax-highlight ASTs in one app-wide LRU keyed solely
- * by `cacheKey`, and when we leave it unset the library falls back to the file
- * path. Every revision of a file then collides on one entry, so a refreshed
- * diff gets paired with the previous revision's AST — stale highlighting when
- * the content shrank, and a "deletionLine and additionLine are null" throw out
- * of `DiffHunksRenderer` once it grew past the cached line count. The blob pair
- * ties the entry to the exact content it was highlighted from.
- */
 export function assignDiffCacheKeys(
   files: FileDiffMetadata[],
   scope: string,
@@ -470,12 +452,6 @@ export async function refreshTrackedProject(
   return { path: normalizedPath };
 }
 
-/**
- * Pushes behind the per-project commit lock so a push requested while the
- * auto-message flow is still generating waits for the pending amend instead
- * of publishing the placeholder commit (which the amend would then rewrite,
- * leaving the branch diverged from the remote it just pushed to).
- */
 export async function pushProjectToRemote(
   path: string,
   context: {
@@ -492,10 +468,6 @@ export async function pushProjectToRemote(
   }
 }
 
-/**
- * Pulls behind the same per-project commit lock as pushing, so a fast-forward
- * cannot land between the placeholder commit and the amend that rewrites it.
- */
 export async function pullProjectFromRemote(
   path: string,
   context: {
@@ -512,10 +484,6 @@ export async function pullProjectFromRemote(
   }
 }
 
-/**
- * Undoes HEAD behind the same per-project commit lock as commit/push/pull, so
- * a toast Undo cannot race the autogenerate amend that rewrites that commit.
- */
 export async function undoLastCommit(
   path: string,
   context: {
@@ -558,11 +526,6 @@ interface CommitSelectedChangesGitService {
   ): Promise<void>;
 }
 
-/**
- * Commits selected paths with a placeholder, then amends in a generated
- * message. Generation starts from the uncommitted selected-file diff so it
- * overlaps the git commit instead of waiting for it.
- */
 export async function* commitSelectedChangesWithGeneratedMessage(input: {
   path: string;
   filePaths: string[];
@@ -700,8 +663,6 @@ export const projectsRouter = {
     .handler(async ({ input }) => ({
       dataUrl: await getProjectFaviconDataUrl(normalizeProjectPath(input.path)),
     })),
-  // Clearing is all this does: the renderer refetches `getFavicon` behind it,
-  // and that request is what pays for the rescan.
   refreshFavicon: procedure
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input }) => {
@@ -716,8 +677,6 @@ export const projectsRouter = {
           context,
         );
       } catch (error) {
-        // oRPC rewrites a plain Error's message to "Internal server error" on
-        // the way to the renderer; restating it keeps the real cause visible.
         const message =
           error instanceof Error && error.message.trim()
             ? error.message
@@ -833,8 +792,6 @@ export const projectsRouter = {
       try {
         await pushProjectToRemote(path, context);
       } catch (error) {
-        // oRPC rewrites a plain Error's message to "Internal server error" on
-        // the way to the renderer, which would drop the git-specific copy.
         throw new ORPCError("BAD_REQUEST", {
           message:
             error instanceof Error && error.message.trim()
@@ -1024,8 +981,6 @@ export const projectsRouter = {
 
       await writeProjectSettingsFile(path, { worktreeSetupCommands });
     }),
-  // Read straight from disk on every call: the file is checked into the repo
-  // and edited outside the app, so a cached copy would go stale unnoticed.
   listCommands: procedure
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input }) => {

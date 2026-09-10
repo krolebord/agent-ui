@@ -10,7 +10,6 @@ export const claudeActivityStateSchema = z.enum([
 
 export type ClaudeActivityState = z.infer<typeof claudeActivityStateSchema>;
 
-/** An alias (`opus`, `sonnet[1m]`) or a concrete id (`claude-opus-5`). */
 export const claudeModelSchema = z.string().trim().min(1);
 
 export type ClaudeModel = z.infer<typeof claudeModelSchema>;
@@ -55,17 +54,13 @@ export interface GitHistoryCommit {
   body: string;
   authorName: string;
   authorEmail: string;
-  /** Author date in strict ISO 8601 (`git log --format=%aI`) */
   authorDate: string;
-  /** Ref decorations for this commit, e.g. "HEAD -> main", "tag: v1.0.0" */
   refs: string[];
-  /** True when the commit is not reachable from the configured upstream */
   unpushed: boolean;
 }
 
 export interface GitHistoryPage {
   commits: GitHistoryCommit[];
-  /** Hash of the last returned commit; pass back as cursor to fetch older commits */
   nextCursor: string | null;
 }
 
@@ -86,9 +81,7 @@ export interface ClaudeProject {
   gitUpstreamDiffStats?: GitUpstreamDiffStats;
   worktreeOriginPath?: string;
   worktreeSetupCommands?: string;
-  /** Ephemeral: UI + main reject mutations while a worktree delete is in flight */
   interactionDisabled?: boolean;
-  /** Ephemeral: one-shot toast payload for renderer (not persisted) */
   deletionToast?: ProjectDeletionToast;
 }
 

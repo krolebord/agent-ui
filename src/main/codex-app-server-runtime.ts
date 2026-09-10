@@ -61,9 +61,7 @@ async function waitForReady(readyUrl: string, process: ChildProcess) {
       if (response.ok) {
         return;
       }
-    } catch {
-      // Poll until the server is ready or times out.
-    }
+    } catch {}
 
     await sleep(READY_POLL_INTERVAL_MS);
   }

@@ -20,19 +20,13 @@ export const skillScopeSchema = z.discriminatedUnion("type", [
 export type SkillScope = z.infer<typeof skillScopeSchema>;
 
 export interface SkillEntry {
-  /** Directory name — also the invocation name (/name). */
   name: string;
   scope: SkillScope;
   description: string;
-  /** Markdown body of SKILL.md (without frontmatter). */
   body: string;
-  /** disable-model-invocation: true in frontmatter. */
   userInvokeOnly: boolean;
-  /** Set when frontmatter has managed-by: agent-ui / agent-ui-builtin. */
   managedBy: "app" | "builtin" | null;
-  /** Canonical skill directory inside .agents/skills. */
   dirPath: string;
-  /** Has files beyond SKILL.md and agents/openai.yaml (scripts, references, ...). */
   hasExtraFiles: boolean;
   updatedAt: number;
 }

@@ -48,8 +48,6 @@ describe("ensureManagedSkills", () => {
     expect(contents).toContain("managed-by: agent-ui-builtin");
     expect(contents).toContain(result.handoffsDir);
 
-    // Codex ignores disable-model-invocation, so the policy file must ship
-    // alongside SKILL.md to keep the skill user-invoke-only there.
     expect(
       await readFile(path.join(source, "agents", "openai.yaml"), "utf8"),
     ).toContain("allow_implicit_invocation: false");
@@ -104,7 +102,6 @@ describe("ensureManagedSkills", () => {
     for (const dir of legacyDirs) {
       await mkdir(dir, { recursive: true });
       await symlink(source, path.join(dir, "agent-ui-handoff"), "dir");
-      // A user's own link should survive.
       await symlink(tempDir, path.join(dir, "user-link"), "dir");
     }
 

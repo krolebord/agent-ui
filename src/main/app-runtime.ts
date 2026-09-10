@@ -79,9 +79,6 @@ export async function startAppRuntime(
       host: options.host,
       disposeSignal: disposeController.signal,
       mcpSessionTokens,
-      // Sessions only spawn once the UI is reachable, so by the time this
-      // getter runs the web server URL (with its actual bound port) is set.
-      // The token ties the request back to the session's cwd.
       getMcpServerUrl: (context) =>
         webAppServer
           ? `${webAppServer.url}${MCP_PATH}?token=${mcpSessionTokens.sign(context)}`
