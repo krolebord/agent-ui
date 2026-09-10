@@ -14,6 +14,7 @@ interface CodexModelPickerProps {
   onChange: (value: string) => void;
   recentModels?: string[];
   disabled?: boolean;
+  triggerClassName?: string;
 }
 
 export function addRecentCodexModel(
@@ -30,6 +31,7 @@ export function CodexModelPicker({
   onChange,
   recentModels = [],
   disabled,
+  triggerClassName,
 }: CodexModelPickerProps) {
   const options: SearchableModelOption[] = [
     { label: "Codex default", value: CODEX_DEFAULT_MODEL_VALUE },
@@ -45,6 +47,7 @@ export function CodexModelPicker({
       excludeFromRecents={[CODEX_DEFAULT_MODEL_VALUE]}
       onChange={onChange}
       disabled={disabled}
+      triggerClassName={triggerClassName}
     />
   );
 }

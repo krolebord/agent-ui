@@ -22,6 +22,7 @@ interface ClaudeModelPickerProps {
   recentModels?: string[];
   includeDefault?: boolean;
   disabled?: boolean;
+  triggerClassName?: string;
 }
 
 export function addRecentClaudeModel(
@@ -38,6 +39,7 @@ export function ClaudeModelPicker({
   recentModels = [],
   includeDefault = false,
   disabled,
+  triggerClassName,
 }: ClaudeModelPickerProps) {
   const options = includeDefault
     ? [
@@ -55,6 +57,7 @@ export function ClaudeModelPicker({
       excludeFromRecents={[CLAUDE_DEFAULT_MODEL_VALUE]}
       onChange={onChange}
       disabled={disabled}
+      triggerClassName={triggerClassName}
     />
   );
 }

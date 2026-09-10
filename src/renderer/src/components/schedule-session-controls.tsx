@@ -22,6 +22,7 @@ import {
   type ScheduleDraft,
 } from "@renderer/lib/schedule-draft";
 import { CalendarClock } from "lucide-react";
+import type { ReactNode } from "react";
 
 export {
   buildScheduleSpec,
@@ -222,12 +223,14 @@ export function SessionFormFooter({
   scheduleDraft,
   setScheduleDraft,
   mode = "create",
+  hints,
 }: {
   isPending: boolean;
   onClose: () => void;
   scheduleDraft: ScheduleDraft | null;
   setScheduleDraft: (draft: ScheduleDraft | null) => void;
   mode?: "create" | "edit";
+  hints?: ReactNode;
 }) {
   const isScheduling = scheduleDraft !== null;
   const isEditing = mode === "edit";
@@ -255,6 +258,11 @@ export function SessionFormFooter({
       ) : null}
 
       <DialogFooter>
+        {hints ? (
+          <div className="text-muted-foreground hidden items-center gap-3 text-[11px] sm:mr-auto sm:flex">
+            {hints}
+          </div>
+        ) : null}
         <Button
           type="button"
           variant="outline"

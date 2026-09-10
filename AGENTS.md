@@ -1,59 +1,67 @@
 ## Commands
 
 ```bash
-pnpm dev              # Start dev server with hot reload
-pnpm build            # TypeScript check + Vite build
-pnpm test             # Run all tests (Vitest)
-pnpm exec vitest run test/main/session-service.spec.ts  # Run single test file
-pnpm exec vitest --watch   # Watch mode
-pnpm format           # Lint and format with Biome
-pnpm typecheck        # TypeScript validation only
-pnpm app:dist:mac     # Build and package macOS DMG/ZIP
+pnpm dev              # Vite + Electron (macOS only)
+pnpm build            # tsc --noEmit + Vite build
+pnpm typecheck
+pnpm format           # biome check --write .
+pnpm test             # Vitest
+pnpm build:headless && pnpm start:headless   # Node server, macOS + Linux
+pnpm test:headless    # boots the real headless bundle; not part of pnpm test
+pnpm exec vitest run test/main/session-service.spec.ts
 ```
 
-## Architecture
+Packaging and model-extraction scripts are in `package.json`.
 
-Electron app for managing Claude CLI sessions. Three process layers: **main** (Node/Electron), **preload** (secure bridge), **renderer** (React).
+Electron is macOS-only (`src/main/index.ts` throws elsewhere), so on Linux run headless. Headless binds `127.0.0.1` from port 3420 upward; `AGENT_UI_WEB_PORT` and `AGENT_UI_DATA_DIR` override. Typecheck and build use the native TypeScript 7 compiler.
 
-### IPC: oRPC over MessageChannel
+## Hosts
 
-Instead of Electron's built-in IPC, the app uses **oRPC** (`@orpc/server` + `@orpc/client`) over a `MessageChannel` port pair. The preload script forwards the server port from renderer to main — no Node APIs are exposed to the renderer.
+`startAppRuntime()` (`app-runtime.ts`) owns the Node side for both entry points, Electron (`main/index.ts`) and headless (`headless/index.ts`). It takes an `AppHost` carrying the data paths and an optional `desktop` for dialogs and "open in app". Headless passes `desktop: null`, so code in `src/main/` has to tolerate that unless `tsconfig.headless.json` excludes it. The headless smoke test asserts the bundle never imports `electron`.
 
-- **Main**: `src/main/orpc.ts` defines typed procedures with a `Services` context. `src/main/orpc-router.ts` composes sub-routers from service modules (sessions, projects, fs, stateSync).
-- **Renderer**: `src/renderer/src/orpc-client.ts` creates the client and wraps it with `createTanstackQueryUtils` for TanStack Query integration.
-- Calling RPCs: `orpc.sessions.localClaude.startSession.call({ ... })`. Event streams use `consumeEventIterator`.
+## RPC
 
-### State Sync: Immer patches → Event streams → Zustand
+`orpc-router.ts` composes one router. `procedure` from `orpc.ts` pins `Services` as the handler context. The same router is served over two transports: MessagePort in Electron, where preload forwards the port and the renderer gets no Node APIs, and a WebSocket at `/rpc` for browsers. `orpc-client.ts` picks by user agent. Streaming procedures are async generators, consumed with `consumeEventIterator`.
 
-State flows from main to renderer via JSON Patches:
+For a new endpoint, export a router from the service module and mount it in `orpc-router.ts`. The same HTTP server also serves `/mcp`, artifact downloads, and the static renderer.
 
-1. `defineServiceState()` (`src/shared/service-state.ts`) creates Immer-based state containers that emit typed patch events on update.
-2. `StateOrchestrator` (`src/main/state-orchestrator.ts`) aggregates service states, scopes patches by service key, tracks versions, and exposes an async iterator for subscribers.
-3. `state-sync-client.ts` (renderer) bootstraps by fetching a full snapshot, then applies incremental patches to a Zustand store with version gating and re-sync fallback.
-4. Components consume state via `useAppState(selector)` from the `SyncStateProvider` context.
+## State sync
 
-### Persistence
+`defineServiceState()` (`shared/service-state.ts`) wraps state in Immer and emits patches. `StateOrchestrator` scopes each patch by state key and versions it; the renderer applies patch N+1 or falls back to re-fetching the snapshot, and reloads when the process `appVersion` changes. Components read it with `useAppState(selector)`.
 
-`PersistenceOrchestrator` registers `ServiceState` instances with Zod schemas, debounces writes (100ms default) to `electron-store`, and hydrates state on boot.
+State reaches the renderer only if it is in the `serviceStates` map in `create-services.ts`.
 
-### Services Lifecycle
+## Persistence
 
-`create-services.ts` initializes all services (plugin, session state file manager, persistence, project/session states, state orchestrator) and returns a services object with a `shutdown()` hook. Shutdown flushes pending persistence and aborts subscriptions via `disposeSignal`.
+JSON through `conf` (not electron-store) at `<userData>/agent-ui.json`. Register a `ServiceState` plus a Zod schema with `PersistenceOrchestrator`; it hydrates by shallow-merging over defaults and debounces writes by 100ms. Persisted data that fails validation reports to `onError` and leaves defaults in place instead of throwing.
 
-### Sessions
+SQLite at `<userData>/agent-ui.sqlite3` through better-sqlite3 and Kysely. Types live in `database/schema.ts`, numbered migrations in `database/migrations/` run on boot. It holds terminal scrollback for stopped sessions, global instructions, and app metadata.
 
-Sessions use a discriminated union (`type` field) to support multiple session types. Shared schema and state live in `src/main/sessions/`. Current types: `claude-local-terminal` (Claude CLI) and `local-terminal` (plain shell). The oRPC router nests per-type sub-routers under `sessions.localClaude` and `sessions.localTerminal`.
+## Sessions
 
-### Terminal
+`sessions/state.ts` holds a `type`-discriminated union in a flat record. Each type owns a module exporting its schema, a manager for the live processes, and a router: `session-service.ts` for Claude, `sessions/*.session.ts` for Codex, Cursor Agent, plain terminals, and worktree setup.
 
-xterm.js in the renderer with `node-pty` spawning in main. `TerminalSession` wraps PTY with input/output handling, buffered output, and activity monitoring.
+Operations that span types (`settle`, `snooze`, `moveSessionToProject`) live on `sessionsRouter` and switch on `session.type` with a `never` check, so adding a type breaks the build everywhere it needs handling.
 
-## Key Conventions
+## Agent integrations
 
-- **Biome** for linting/formatting (no ESLint). 2-space indents.
-- **Zod 4** for runtime validation schemas (`src/shared/claude-schemas.ts`).
-- **Path aliases**: `@renderer` → `src/renderer/src`, `@shared` → `src/shared`.
-- **shadcn/ui** components in `src/renderer/src/components/ui/`.
-- **Tailwind CSS 4** for styling (via Vite plugin).
-- Tests live in `test/` mirroring `src/` structure. Tests use `vi.hoisted()` for module-level mocks.
-- **Lefthook** for git pre-commit hooks.
+Session state comes from hooks and state files rather than scraping terminal output: a managed Claude plugin that writes NDJSON, merged Cursor hook config, the Codex app server, and generated zsh scripts that emit OSC 133 for plain terminals. Follow that when adding an integration instead of parsing PTY text.
+
+Model lists in `shared/*-models.ts` are generated. Edit `scripts/extract-*-models.sh`, not the output.
+
+## Conventions
+
+- Biome for lint and format, 2-space indents, no ESLint.
+- Zod 4 for anything that crosses a process or hits disk.
+- The `@main`, `@renderer`, `@shared` aliases are declared in `tsconfig.json`, `vitest.config.ts`, and three Vite configs, so a new one means editing all five.
+- Tailwind 4, shadcn primitives in `components/ui/`.
+- Use `createDisposable` for teardown and register it in `create-services.ts` so shutdown covers it.
+- Lefthook pre-commit runs Biome on staged files plus a full typecheck.
+
+## Tests
+
+`test/` mirrors `src/`. No DOM environment is configured, so renderer tests cover pure logic instead of rendering. Module-level mocks use `vi.hoisted()`. Managers take injectable dependencies such as an in-memory buffer store or a fake `TerminalManager`; follow that when adding a service.
+
+## Agent rules:
+
+- Don't do end-to-end verification, don't run app in dev mode, don't try to open it in browser or through `agent-browser` cli

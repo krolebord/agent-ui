@@ -27,6 +27,7 @@ interface CursorModelPickerProps {
   recentModels?: string[];
   includeAuto?: boolean;
   disabled?: boolean;
+  triggerClassName?: string;
 }
 
 export function addRecentCursorModel(
@@ -53,6 +54,7 @@ export function CursorModelPicker({
   recentModels = [],
   includeAuto = false,
   disabled,
+  triggerClassName,
 }: CursorModelPickerProps) {
   const [search, setSearch] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -87,7 +89,7 @@ export function CursorModelPicker({
           type="button"
           variant="outline"
           disabled={disabled}
-          className="w-full justify-between font-normal"
+          className={cn("w-full justify-between font-normal", triggerClassName)}
         >
           <span className="min-w-0 truncate">
             {modelsByValue.get(value)?.displayLabel ?? value}

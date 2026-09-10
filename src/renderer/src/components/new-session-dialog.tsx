@@ -18,10 +18,6 @@ import {
   HandoffPicker,
   useHandoffSelection,
 } from "@renderer/components/handoff-picker";
-import {
-  CodexPermissionModeToggleGroup,
-  PermissionModeToggleGroup,
-} from "@renderer/components/permission-mode-toggle-group";
 import { ProjectPicker } from "@renderer/components/project-picker";
 import {
   buildScheduleSpec,
@@ -29,6 +25,13 @@ import {
   SessionFormFooter,
   scheduleSpecToDraft,
 } from "@renderer/components/schedule-session-controls";
+import {
+  optionPillClassName,
+  type SessionOption,
+  SessionOptionSelect,
+  SessionOptionToggle,
+} from "@renderer/components/session-option-select";
+import { SessionPromptBox } from "@renderer/components/session-prompt-box";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -43,17 +46,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@renderer/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@renderer/components/ui/dropdown-menu";
 import { Input } from "@renderer/components/ui/input";
 import { Kbd } from "@renderer/components/ui/kbd";
 import { Label } from "@renderer/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@renderer/components/ui/select";
-import { Switch } from "@renderer/components/ui/switch";
 import { Textarea } from "@renderer/components/ui/textarea";
 import {
   ToggleGroup,
@@ -63,15 +65,15 @@ import { useAccountUsagePercent } from "@renderer/hooks/use-account-usage";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
-import { isCoarsePointer } from "@renderer/lib/pointer";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { claudeCatalogModels } from "@shared/claude-models";
-import type { ClaudeEffort } from "@shared/claude-types";
+import type { ClaudeEffort, ClaudePermissionMode } from "@shared/claude-types";
 import { codexModels } from "@shared/codex-models";
 import type {
   CodexFastMode,
   CodexModelReasoningEffort,
+  CodexPermissionMode,
 } from "@shared/codex-types";
 import {
   type LastClaudeSessionOptions,
@@ -89,7 +91,15 @@ import {
   useHotkey,
 } from "@tanstack/react-hotkeys";
 import { useMutation } from "@tanstack/react-query";
-import { AlertCircle, ChevronsUpDown } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronsUpDown,
+  Plug,
+  ShieldCheck,
+  Smartphone,
+  User,
+} from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -126,6 +136,26 @@ const SESSION_TYPE_OPTIONS: {
   { value: "claude", label: "Claude", icon: ClaudeCodeIcon },
   { value: "codex", label: "Codex", icon: CodexIcon },
   { value: "cursorAgent", label: "Cursor", icon: CursorAgentIcon },
+];
+
+const cyclePermissionModeHotkey: Hotkey = "Shift+Tab";
+
+const CLAUDE_PERMISSION_MODE_OPTIONS: SessionOption<ClaudePermissionMode>[] = [
+  { value: "default", label: "Default" },
+  { value: "acceptEdits", label: "Accept edits", tone: "caution" },
+  { value: "plan", label: "Plan", tone: "notice" },
+  { value: "yolo", label: "Yolo", tone: "danger" },
+];
+
+const CODEX_PERMISSION_MODE_OPTIONS: SessionOption<CodexPermissionMode>[] = [
+  { value: "default", label: "Default" },
+  { value: "full-auto", label: "Full Auto", tone: "caution" },
+  { value: "yolo", label: "Yolo", tone: "danger" },
+];
+
+const CURSOR_PERMISSION_MODE_OPTIONS: SessionOption<"default" | "yolo">[] = [
+  { value: "default", label: "Default" },
+  { value: "yolo", label: "YOLO", tone: "danger" },
 ];
 
 const CODEX_MODEL_REASONING_EFFORT_OPTIONS: {
@@ -170,6 +200,8 @@ function getCodexSupportedReasoningEfforts(
     : CODEX_MODEL_REASONING_EFFORT_OPTIONS.map((option) => option.value);
 }
 
+const DEFAULT_EFFORT_VALUE = "default";
+
 const CLAUDE_EFFORT_OPTIONS: { value: ClaudeEffort; label: string }[] = [
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
@@ -194,26 +226,11 @@ const switchSessionTypeHotkey: Hotkey = "Alt+Tab";
 
 type CursorAgentMode = "default" | "plan" | "ask";
 
-const CURSOR_AGENT_MODE_OPTIONS: {
-  value: CursorAgentMode;
-  label: string;
-}[] = [
+const CURSOR_AGENT_MODE_OPTIONS: SessionOption<CursorAgentMode>[] = [
   { value: "default", label: "Default" },
-  { value: "plan", label: "Plan" },
-  { value: "ask", label: "Ask" },
+  { value: "plan", label: "Plan", tone: "notice" },
+  { value: "ask", label: "Ask", tone: "notice" },
 ];
-
-function cycleCursorAgentMode(current: CursorAgentMode): CursorAgentMode {
-  const index = CURSOR_AGENT_MODE_OPTIONS.findIndex(
-    (option) => option.value === current,
-  );
-  return (
-    CURSOR_AGENT_MODE_OPTIONS[(index + 1) % CURSOR_AGENT_MODE_OPTIONS.length]
-      ?.value ?? "default"
-  );
-}
-
-const cycleCursorModeHotkey: Hotkey = "Shift+Tab";
 
 function toStoredCursorMode(
   mode: CursorAgentMode,
@@ -297,7 +314,13 @@ function cursorConfigToOptions(
   };
 }
 
-function AccountUsagePercent({ percent }: { percent: number | null }) {
+function AccountUsagePercent({
+  percent,
+  className,
+}: {
+  percent: number | null;
+  className?: string;
+}) {
   if (percent == null) {
     return null;
   }
@@ -305,12 +328,102 @@ function AccountUsagePercent({ percent }: { percent: number | null }) {
   return (
     <span
       className={cn(
-        "ml-auto text-xs tabular-nums",
+        "text-xs tabular-nums",
         percent >= 100 ? "text-[#DE7356]" : "text-muted-foreground",
+        className,
       )}
     >
       {percent}%
     </span>
+  );
+}
+
+function HotkeyHints() {
+  return (
+    <>
+      <span className="inline-flex items-center gap-1">
+        <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
+        agent
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <Kbd>{formatForDisplay(cyclePermissionModeHotkey)}</Kbd>
+        mode
+      </span>
+    </>
+  );
+}
+
+const DEFAULT_ACCOUNT_VALUE = "default";
+
+function AccountSelect({
+  kind,
+  accountId,
+  onAccountIdChange,
+}: {
+  kind: "claude" | "codex";
+  accountId: string | undefined;
+  onAccountIdChange: (accountId: string | undefined) => void;
+}) {
+  const accounts = useAppState((state) =>
+    kind === "claude"
+      ? state.claudeAccounts.accounts
+      : state.codexAccounts.accounts,
+  );
+  const accountUsagePercent = useAccountUsagePercent(kind);
+
+  if (accounts.length === 0) {
+    return null;
+  }
+
+  const selected = accounts.find((account) => account.id === accountId) ?? null;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          aria-label="Account"
+          className={cn(optionPillClassName, "text-muted-foreground min-w-0")}
+        >
+          <User className="size-3.5 shrink-0 opacity-70" />
+          <span className="truncate">
+            {selected?.label ?? "Default account"}
+          </span>
+          <AccountUsagePercent
+            percent={accountUsagePercent(selected?.id ?? null)}
+          />
+          <ChevronDown className="size-3 shrink-0 opacity-60" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={6} className="min-w-56">
+        <DropdownMenuRadioGroup
+          value={selected?.id ?? DEFAULT_ACCOUNT_VALUE}
+          onValueChange={(value) => {
+            onAccountIdChange(
+              value === DEFAULT_ACCOUNT_VALUE ? undefined : value,
+            );
+          }}
+        >
+          <DropdownMenuRadioItem value={DEFAULT_ACCOUNT_VALUE}>
+            Default account
+            <AccountUsagePercent
+              percent={accountUsagePercent(null)}
+              className="ml-auto"
+            />
+          </DropdownMenuRadioItem>
+          {accounts.map((account) => (
+            <DropdownMenuRadioItem key={account.id} value={account.id}>
+              {account.label}
+              <AccountUsagePercent
+                percent={accountUsagePercent(account.id)}
+                className="ml-auto"
+              />
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -493,68 +606,79 @@ export function NewSessionDialog() {
       }}
     >
       <DialogContent showCloseButton={false}>
-        <DialogHeader>
-          <DialogTitle className="hidden">
+        <DialogHeader className="gap-1.5">
+          <DialogTitle className="sr-only">
             {isEditing ? "Edit scheduled session" : "Start new session"}
           </DialogTitle>
-          <div className="flex items-start justify-between gap-2">
-            <DialogDescription className="min-w-0">
-              {isEditing ? (
-                <>
-                  <span className="text-foreground">
-                    Edit scheduled session
-                  </span>
-                  <br />
-                </>
-              ) : null}
-              <span className="inline-flex max-w-full items-center gap-0.5">
-                Project:
-                <ProjectPicker
-                  id="new-session-project"
-                  value={projectPath}
-                  onChange={setPickedProjectPath}
-                />
-              </span>
-              <br />
-              <span className="text-xs text-muted-foreground">
-                {projectPath}
-              </span>
-            </DialogDescription>
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-              <Kbd>{formatForDisplay(switchSessionTypeHotkey)}</Kbd>
+          <DialogDescription className="sr-only">
+            Configure and start an agent session in {projectPath}.
+          </DialogDescription>
+          {isEditing ? (
+            <span className="text-sm">Edit scheduled session</span>
+          ) : null}
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="text-muted-foreground shrink-0 text-[13px]">
+              Project
             </span>
+            <ProjectPicker
+              id="new-session-project"
+              variant="chip"
+              value={projectPath}
+              onChange={setPickedProjectPath}
+            />
           </div>
         </DialogHeader>
 
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          value={sessionType}
-          onValueChange={(value) => {
-            if (value) {
-              setSessionType(value as LastSessionType);
-            }
-          }}
-        >
-          {SESSION_TYPE_OPTIONS.map((option) => {
-            const isActive = sessionType === option.value;
-            return (
-              <ToggleGroupItem
-                key={option.value}
-                value={option.value}
-                title={isActive ? undefined : option.label}
-                className="gap-1.5"
-              >
-                <option.icon className="size-4 shrink-0" />
-                {isActive && (
-                  <span className="animate-in fade-in slide-in-from-left-1 duration-150">
-                    {option.label}
-                  </span>
-                )}
-              </ToggleGroupItem>
-            );
-          })}
-        </ToggleGroup>
+        <div className="flex items-center justify-between gap-2">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            value={sessionType}
+            onValueChange={(value) => {
+              if (value) {
+                setSessionType(value as LastSessionType);
+              }
+            }}
+            className="shrink-0"
+          >
+            {SESSION_TYPE_OPTIONS.map((option) => {
+              const isActive = sessionType === option.value;
+              return (
+                <ToggleGroupItem
+                  key={option.value}
+                  value={option.value}
+                  title={isActive ? undefined : option.label}
+                  className="gap-1.5"
+                >
+                  <option.icon className="size-4 shrink-0" />
+                  {isActive && (
+                    <span className="animate-in fade-in slide-in-from-left-1 duration-150">
+                      {option.label}
+                    </span>
+                  )}
+                </ToggleGroupItem>
+              );
+            })}
+          </ToggleGroup>
+
+          {sessionType === "claude" ? (
+            <AccountSelect
+              kind="claude"
+              accountId={claudeOptions.accountId}
+              onAccountIdChange={(accountId) => {
+                setClaudeOptions((current) => ({ ...current, accountId }));
+              }}
+            />
+          ) : sessionType === "codex" ? (
+            <AccountSelect
+              kind="codex"
+              accountId={codexOptions.accountId}
+              onAccountIdChange={(accountId) => {
+                setCodexOptions((current) => ({ ...current, accountId }));
+              }}
+            />
+          ) : null}
+        </div>
 
         {sessionType === "claude" ? (
           <LocalClaudeSessionForm
@@ -654,11 +778,15 @@ function LocalClaudeSessionForm({
     () => getClaudeSupportedEfforts(options.model),
     [options.model],
   );
-  const claudeEffortOptions = useMemo(
-    () =>
-      CLAUDE_EFFORT_OPTIONS.filter((option) =>
+  const claudeEffortSelectOptions = useMemo<
+    SessionOption<ClaudeEffort | typeof DEFAULT_EFFORT_VALUE>[]
+  >(
+    () => [
+      { value: DEFAULT_EFFORT_VALUE, label: "Default" },
+      ...CLAUDE_EFFORT_OPTIONS.filter((option) =>
         supportedClaudeEfforts.includes(option.value),
       ),
+    ],
     [supportedClaudeEfforts],
   );
 
@@ -708,7 +836,6 @@ function LocalClaudeSessionForm({
   );
 
   const claudeAccounts = useAppState((s) => s.claudeAccounts.accounts);
-  const accountUsagePercent = useAccountUsagePercent("claude");
   const selectedAccountId =
     options.accountId &&
     claudeAccounts.some((account) => account.id === options.accountId)
@@ -795,190 +922,111 @@ function LocalClaudeSessionForm({
 
   return (
     <form
-      className="space-y-4"
+      className="space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
         handleSubmit();
       }}
     >
-      <div className="space-y-2">
-        <Label htmlFor="new-session-initial-prompt">
-          Initial prompt (optional)
-        </Label>
-        <Textarea
-          id="new-session-initial-prompt"
-          autoFocus={shouldAutoFocus()}
-          placeholder="What would you like Claude to do?"
-          value={initialPrompt}
-          onChange={(event) => {
-            setInitialPrompt(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !isCoarsePointer()
-            ) {
-              event.preventDefault();
-              handleSubmit();
-            }
-          }}
-          rows={3}
-        />
-      </div>
-
-      <PermissionModeToggleGroup
-        label="Permission mode"
-        permissionMode={options.permissionMode}
-        onPermissionModeChange={(value) => {
-          setOptions((current) => ({ ...current, permissionMode: value }));
-        }}
+      <SessionPromptBox
+        id="new-session-initial-prompt"
+        autoFocus={shouldAutoFocus()}
+        placeholder="What would you like Claude to do?"
+        value={initialPrompt}
+        onChange={setInitialPrompt}
+        onSubmit={handleSubmit}
+        handoffControl={
+          editScheduledSessionId ? null : (
+            <HandoffPicker
+              variant="chip"
+              value={selectedHandoff}
+              onChange={onHandoffChange}
+              disabled={isPending}
+            />
+          )
+        }
+        modeControl={
+          <SessionOptionSelect
+            value={options.permissionMode}
+            onChange={(value) => {
+              setOptions((current) => ({ ...current, permissionMode: value }));
+            }}
+            options={CLAUDE_PERMISSION_MODE_OPTIONS}
+            ariaLabel="Permission mode"
+            icon={<ShieldCheck className="size-3.5 shrink-0" />}
+            cycleHotkey={cyclePermissionModeHotkey}
+          />
+        }
       />
 
-      {!editScheduledSessionId && (
-        <div className="space-y-2">
-          <Label>Continue from handoff (optional)</Label>
-          <HandoffPicker
-            value={selectedHandoff}
-            onChange={onHandoffChange}
-            disabled={isPending}
-          />
-        </div>
-      )}
-
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1 space-y-2">
-          <Label htmlFor="new-session-claude-model">Model</Label>
-          <ClaudeModelPicker
-            id="new-session-claude-model"
-            value={options.model}
-            recentModels={options.recentModels}
-            onChange={(value) => {
-              setOptions((current) => ({
-                ...current,
-                model: value,
-                recentModels: addRecentClaudeModel(current.recentModels, value),
-              }));
-            }}
-          />
-        </div>
-
-        <div className="w-fit shrink-0 space-y-2">
-          <Label className="whitespace-nowrap">Effort</Label>
-          <Select
-            value={options.effort ?? "no"}
-            onValueChange={(value) => {
-              setOptions((current) => ({
-                ...current,
-                effort: value === "no" ? undefined : (value as ClaudeEffort),
-              }));
-            }}
-          >
-            <SelectTrigger className="w-auto min-w-24 whitespace-nowrap">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="no" className="whitespace-nowrap">
-                Default
-              </SelectItem>
-              {claudeEffortOptions.map((option) => (
-                <SelectItem
-                  key={option.value}
-                  value={option.value}
-                  className="whitespace-nowrap"
-                >
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {claudeAccounts.length > 0 && (
-        <div className="space-y-2">
-          <Label>Account</Label>
-          <Select
-            value={selectedAccountId ?? "default"}
-            onValueChange={(value) => {
-              setOptions((current) => ({
-                ...current,
-                accountId: value === "default" ? undefined : value,
-              }));
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">
-                Default account
-                <AccountUsagePercent percent={accountUsagePercent(null)} />
-              </SelectItem>
-              {claudeAccounts.map((account) => (
-                <SelectItem key={account.id} value={account.id}>
-                  {account.label}
-                  <AccountUsagePercent
-                    percent={accountUsagePercent(account.id)}
-                  />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between gap-2">
-        <div className="space-y-0.5">
-          <Label htmlFor="new-session-mcp">Agent UI MCP</Label>
-          <p className="text-xs text-muted-foreground">
-            Let this session use Agent UI tools over MCP
-          </p>
-        </div>
-        <Switch
-          id="new-session-mcp"
-          checked={options.mcpEnabled ?? true}
-          onCheckedChange={(checked) => {
+      <div className="flex items-center gap-1.5">
+        <ClaudeModelPicker
+          id="new-session-claude-model"
+          value={options.model}
+          recentModels={options.recentModels}
+          onChange={(value) => {
             setOptions((current) => ({
               ...current,
-              mcpEnabled: checked ? undefined : false,
+              model: value,
+              recentModels: addRecentClaudeModel(current.recentModels, value),
             }));
           }}
+          triggerClassName={cn(optionPillClassName, "min-w-0 flex-1")}
         />
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <div className="space-y-0.5">
-          <Label htmlFor="new-session-remote-control">Remote control</Label>
-          <p className="text-xs text-muted-foreground">
-            Control this session from claude.ai or the mobile app
-          </p>
-        </div>
-        <Switch
-          id="new-session-remote-control"
-          checked={options.remoteControl ?? false}
-          onCheckedChange={(checked) => {
+        <SessionOptionSelect
+          value={options.effort ?? DEFAULT_EFFORT_VALUE}
+          onChange={(value) => {
             setOptions((current) => ({
               ...current,
-              remoteControl: checked || undefined,
+              effort: value === DEFAULT_EFFORT_VALUE ? undefined : value,
             }));
           }}
+          options={claudeEffortSelectOptions}
+          ariaLabel="Effort"
+          label="Effort"
         />
       </div>
 
       <Collapsible>
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="flex w-full items-center justify-between px-2"
-          >
-            <span className="text-sm font-medium">Advanced settings</span>
-            <ChevronsUpDown className="size-4" />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-4 pt-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <SessionOptionToggle
+              pressed={options.mcpEnabled ?? true}
+              onPressedChange={(pressed) => {
+                setOptions((current) => ({
+                  ...current,
+                  mcpEnabled: pressed ? undefined : false,
+                }));
+              }}
+              label="MCP"
+              description="Let this session use Agent UI tools over MCP"
+              icon={<Plug className="size-3.5 shrink-0" />}
+            />
+            <SessionOptionToggle
+              pressed={options.remoteControl ?? false}
+              onPressedChange={(pressed) => {
+                setOptions((current) => ({
+                  ...current,
+                  remoteControl: pressed || undefined,
+                }));
+              }}
+              label="Remote"
+              description="Control this session from claude.ai or the mobile app"
+              icon={<Smartphone className="size-3.5 shrink-0" />}
+            />
+          </div>
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className={cn(optionPillClassName, "text-muted-foreground")}
+            >
+              Advanced
+              <ChevronsUpDown className="size-3.5" />
+            </Button>
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent className="space-y-4 pt-3">
           <div className="space-y-2">
             <Label htmlFor="new-session-name">Session name (optional)</Label>
             <Input
@@ -1064,6 +1112,7 @@ function LocalClaudeSessionForm({
         scheduleDraft={scheduleDraft}
         setScheduleDraft={setScheduleDraft}
         mode={editScheduledSessionId ? "edit" : "create"}
+        hints={<HotkeyHints />}
       />
     </form>
   );
@@ -1189,7 +1238,6 @@ function CodexSessionForm({
   );
 
   const codexAccounts = useAppState((s) => s.codexAccounts.accounts);
-  const accountUsagePercent = useAccountUsagePercent("codex");
   const selectedAccountId =
     options.accountId &&
     codexAccounts.some((account) => account.id === options.accountId)
@@ -1274,201 +1322,113 @@ function CodexSessionForm({
 
   return (
     <form
-      className="space-y-4"
+      className="space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
         handleSubmit();
       }}
     >
-      <div className="space-y-2">
-        <Label htmlFor="new-codex-initial-prompt">
-          Initial prompt (optional)
-        </Label>
-        <Textarea
-          id="new-codex-initial-prompt"
-          autoFocus={shouldAutoFocus()}
-          placeholder="What would you like Codex to do? (prefix with /plan for plan mode)"
-          value={initialPrompt}
-          onChange={(event) => {
-            setInitialPrompt(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !isCoarsePointer()
-            ) {
-              event.preventDefault();
-              handleSubmit();
-            }
-          }}
-          rows={3}
-        />
-      </div>
-
-      <CodexPermissionModeToggleGroup
-        label="Permission mode"
-        permissionMode={options.permissionMode}
-        onPermissionModeChange={(value) => {
-          setOptions((current) => ({ ...current, permissionMode: value }));
-        }}
+      <SessionPromptBox
+        id="new-codex-initial-prompt"
+        autoFocus={shouldAutoFocus()}
+        placeholder="What would you like Codex to do? (prefix with /plan for plan mode)"
+        value={initialPrompt}
+        onChange={setInitialPrompt}
+        onSubmit={handleSubmit}
+        handoffControl={
+          editScheduledSessionId ? null : (
+            <HandoffPicker
+              variant="chip"
+              value={selectedHandoff}
+              onChange={onHandoffChange}
+              disabled={isPending}
+            />
+          )
+        }
+        modeControl={
+          <SessionOptionSelect
+            value={options.permissionMode}
+            onChange={(value) => {
+              setOptions((current) => ({ ...current, permissionMode: value }));
+            }}
+            options={CODEX_PERMISSION_MODE_OPTIONS}
+            ariaLabel="Permission mode"
+            icon={<ShieldCheck className="size-3.5 shrink-0" />}
+            cycleHotkey={cyclePermissionModeHotkey}
+          />
+        }
       />
 
-      {!editScheduledSessionId && (
-        <div className="space-y-2">
-          <Label>Continue from handoff (optional)</Label>
-          <HandoffPicker
-            value={selectedHandoff}
-            onChange={onHandoffChange}
-            disabled={isPending}
-          />
-        </div>
-      )}
-
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1 space-y-2">
-          <Label htmlFor="new-codex-model">Model (optional)</Label>
-          <CodexModelPicker
-            id="new-codex-model"
-            value={options.model ?? CODEX_DEFAULT_MODEL_VALUE}
-            models={codexModelOptions}
-            recentModels={options.recentModels}
-            onChange={(value) => {
-              setOptions((current) => ({
-                ...current,
-                model: value === CODEX_DEFAULT_MODEL_VALUE ? undefined : value,
-                recentModels: addRecentCodexModel(
-                  current.recentModels,
-                  value === CODEX_DEFAULT_MODEL_VALUE ? undefined : value,
-                ),
-              }));
-            }}
-            disabled={isPending}
-          />
-        </div>
-
-        <div className="w-fit shrink-0 space-y-2">
-          <Label className="whitespace-nowrap">Effort</Label>
-          <Select
-            value={options.modelReasoningEffort}
-            onValueChange={(value) => {
-              setOptions((current) => ({
-                ...current,
-                modelReasoningEffort: value as CodexModelReasoningEffort,
-              }));
-            }}
-          >
-            <SelectTrigger className="w-auto min-w-24 whitespace-nowrap">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {codexEffortOptions.map((option) => (
-                <SelectItem
-                  key={option.value}
-                  value={option.value}
-                  className="whitespace-nowrap"
-                >
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="w-fit shrink-0 space-y-2">
-          <Label className="whitespace-nowrap">Fast mode</Label>
-          <Select
-            value={options.fastMode}
-            onValueChange={(value) => {
-              setOptions((current) => ({
-                ...current,
-                fastMode: value as CodexFastMode,
-              }));
-            }}
-          >
-            <SelectTrigger className="w-auto min-w-24 whitespace-nowrap">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CODEX_FAST_MODE_OPTIONS.map((option) => (
-                <SelectItem
-                  key={option.value}
-                  value={option.value}
-                  className="whitespace-nowrap"
-                >
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {codexAccounts.length > 0 && (
-        <div className="space-y-2">
-          <Label>Account</Label>
-          <Select
-            value={selectedAccountId ?? "default"}
-            onValueChange={(value) => {
-              setOptions((current) => ({
-                ...current,
-                accountId: value === "default" ? undefined : value,
-              }));
-            }}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">
-                Default account
-                <AccountUsagePercent percent={accountUsagePercent(null)} />
-              </SelectItem>
-              {codexAccounts.map((account) => (
-                <SelectItem key={account.id} value={account.id}>
-                  {account.label}
-                  <AccountUsagePercent
-                    percent={accountUsagePercent(account.id)}
-                  />
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between gap-2">
-        <div className="space-y-0.5">
-          <Label htmlFor="new-codex-mcp">Agent UI MCP</Label>
-          <p className="text-xs text-muted-foreground">
-            Let this session use Agent UI tools over MCP
-          </p>
-        </div>
-        <Switch
-          id="new-codex-mcp"
-          checked={options.mcpEnabled ?? true}
-          onCheckedChange={(checked) => {
+      <div className="flex items-center gap-1.5">
+        <CodexModelPicker
+          id="new-codex-model"
+          value={options.model ?? CODEX_DEFAULT_MODEL_VALUE}
+          models={codexModelOptions}
+          recentModels={options.recentModels}
+          onChange={(value) => {
             setOptions((current) => ({
               ...current,
-              mcpEnabled: checked ? undefined : false,
+              model: value === CODEX_DEFAULT_MODEL_VALUE ? undefined : value,
+              recentModels: addRecentCodexModel(
+                current.recentModels,
+                value === CODEX_DEFAULT_MODEL_VALUE ? undefined : value,
+              ),
             }));
           }}
+          disabled={isPending}
+          triggerClassName={cn(optionPillClassName, "min-w-0 flex-1")}
+        />
+        <SessionOptionSelect
+          value={options.modelReasoningEffort}
+          onChange={(value) => {
+            setOptions((current) => ({
+              ...current,
+              modelReasoningEffort: value,
+            }));
+          }}
+          options={codexEffortOptions}
+          ariaLabel="Reasoning effort"
+          label="Effort"
+          disabled={isPending}
+        />
+        <SessionOptionSelect
+          value={options.fastMode}
+          onChange={(value) => {
+            setOptions((current) => ({ ...current, fastMode: value }));
+          }}
+          options={CODEX_FAST_MODE_OPTIONS}
+          ariaLabel="Fast mode"
+          label="Fast"
+          disabled={isPending}
         />
       </div>
 
       <Collapsible>
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="flex w-full items-center justify-between px-2"
-          >
-            <span className="text-sm font-medium">Advanced settings</span>
-            <ChevronsUpDown className="size-4" />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-4 pt-2">
+        <div className="flex items-center justify-between gap-2">
+          <SessionOptionToggle
+            pressed={options.mcpEnabled ?? true}
+            onPressedChange={(pressed) => {
+              setOptions((current) => ({
+                ...current,
+                mcpEnabled: pressed ? undefined : false,
+              }));
+            }}
+            label="MCP"
+            description="Let this session use Agent UI tools over MCP"
+            icon={<Plug className="size-3.5 shrink-0" />}
+          />
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className={cn(optionPillClassName, "text-muted-foreground")}
+            >
+              Advanced
+              <ChevronsUpDown className="size-3.5" />
+            </Button>
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent className="space-y-4 pt-3">
           <div className="space-y-2">
             <Label htmlFor="new-codex-session-name">
               Session name (optional)
@@ -1516,6 +1476,7 @@ function CodexSessionForm({
         scheduleDraft={scheduleDraft}
         setScheduleDraft={setScheduleDraft}
         mode={editScheduledSessionId ? "edit" : "create"}
+        hints={<HotkeyHints />}
       />
     </form>
   );
@@ -1545,21 +1506,6 @@ function CursorAgentSessionForm({
     selectedHandoff,
     setSelectedHandoff,
   });
-
-  useHotkey(
-    cycleCursorModeHotkey,
-    () => {
-      setOptions((current) => ({
-        ...current,
-        mode: toStoredCursorMode(
-          cycleCursorAgentMode(toCursorAgentMode(current.mode)),
-        ),
-      }));
-    },
-    {
-      ignoreInputs: false,
-    },
-  );
 
   const handleError = (error: unknown) => {
     if (error instanceof Error && error.message.trim()) {
@@ -1673,128 +1619,74 @@ function CursorAgentSessionForm({
 
   return (
     <form
-      className="space-y-4"
+      className="space-y-3"
       onSubmit={(event) => {
         event.preventDefault();
         handleSubmit();
       }}
     >
-      <div className="space-y-2">
-        <Label htmlFor="new-cursor-agent-initial-prompt">
-          Initial prompt (optional)
-        </Label>
-        <Textarea
-          id="new-cursor-agent-initial-prompt"
-          autoFocus={shouldAutoFocus()}
-          placeholder="What would you like Cursor Agent to do?"
-          value={initialPrompt}
-          onChange={(event) => {
-            setInitialPrompt(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.key === "Enter" &&
-              !event.shiftKey &&
-              !isCoarsePointer()
-            ) {
-              event.preventDefault();
-              handleSubmit();
-            }
-          }}
-          rows={3}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <Label>Mode</Label>
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <Kbd>{formatForDisplay(cycleCursorModeHotkey)}</Kbd>
-          </span>
-        </div>
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          value={mode}
-          onValueChange={(value) => {
-            if (value) {
-              setOptions((current) => ({
-                ...current,
-                mode: toStoredCursorMode(value as CursorAgentMode),
-              }));
-            }
-          }}
-          className="w-full"
-        >
-          {CURSOR_AGENT_MODE_OPTIONS.map((option) => (
-            <ToggleGroupItem
-              key={option.value}
-              value={option.value}
-              className="flex-1"
-            >
-              {option.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      </div>
-
-      {!editScheduledSessionId && (
-        <div className="space-y-2">
-          <Label>Continue from handoff (optional)</Label>
-          <HandoffPicker
-            value={selectedHandoff}
-            onChange={onHandoffChange}
-            disabled={isPending}
-          />
-        </div>
-      )}
-
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1 space-y-2">
-          <Label>Model (optional)</Label>
-          <CursorModelPicker
-            includeAuto
-            value={options.model || "auto"}
-            recentModels={options.recentModels}
+      <SessionPromptBox
+        id="new-cursor-agent-initial-prompt"
+        autoFocus={shouldAutoFocus()}
+        placeholder="What would you like Cursor Agent to do?"
+        value={initialPrompt}
+        onChange={setInitialPrompt}
+        onSubmit={handleSubmit}
+        handoffControl={
+          editScheduledSessionId ? null : (
+            <HandoffPicker
+              variant="chip"
+              value={selectedHandoff}
+              onChange={onHandoffChange}
+              disabled={isPending}
+            />
+          )
+        }
+        modeControl={
+          <SessionOptionSelect
+            value={mode}
             onChange={(value) => {
               setOptions((current) => ({
                 ...current,
-                model: value === "auto" ? undefined : value,
-                recentModels: addRecentCursorModel(
-                  current.recentModels,
-                  value === "auto" ? undefined : value,
-                ),
+                mode: toStoredCursorMode(value),
               }));
             }}
-            disabled={isPending}
+            options={CURSOR_AGENT_MODE_OPTIONS}
+            ariaLabel="Mode"
+            label="Mode"
+            cycleHotkey={cyclePermissionModeHotkey}
           />
-        </div>
+        }
+      />
 
-        <div className="w-fit shrink-0 space-y-2">
-          <Label className="whitespace-nowrap">Permission mode</Label>
-          <Select
-            value={options.permissionMode}
-            onValueChange={(value) => {
-              setOptions((current) => ({
-                ...current,
-                permissionMode:
-                  value as LastCursorSessionOptions["permissionMode"],
-              }));
-            }}
-          >
-            <SelectTrigger className="w-auto min-w-28 whitespace-nowrap">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default" className="whitespace-nowrap">
-                Default
-              </SelectItem>
-              <SelectItem value="yolo" className="whitespace-nowrap">
-                YOLO
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="flex items-center gap-1.5">
+        <CursorModelPicker
+          includeAuto
+          value={options.model || "auto"}
+          recentModels={options.recentModels}
+          onChange={(value) => {
+            setOptions((current) => ({
+              ...current,
+              model: value === "auto" ? undefined : value,
+              recentModels: addRecentCursorModel(
+                current.recentModels,
+                value === "auto" ? undefined : value,
+              ),
+            }));
+          }}
+          disabled={isPending}
+          triggerClassName={cn(optionPillClassName, "min-w-0 flex-1")}
+        />
+        <SessionOptionSelect
+          value={options.permissionMode}
+          onChange={(value) => {
+            setOptions((current) => ({ ...current, permissionMode: value }));
+          }}
+          options={CURSOR_PERMISSION_MODE_OPTIONS}
+          ariaLabel="Permission mode"
+          icon={<ShieldCheck className="size-3.5 shrink-0" />}
+          disabled={isPending}
+        />
       </div>
 
       <Collapsible>
@@ -1839,6 +1731,7 @@ function CursorAgentSessionForm({
         scheduleDraft={scheduleDraft}
         setScheduleDraft={setScheduleDraft}
         mode={editScheduledSessionId ? "edit" : "create"}
+        hints={<HotkeyHints />}
       />
     </form>
   );

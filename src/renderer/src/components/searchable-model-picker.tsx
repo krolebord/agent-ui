@@ -33,6 +33,7 @@ interface SearchableModelPickerProps {
   recentModels?: string[];
   excludeFromRecents?: string[];
   disabled?: boolean;
+  triggerClassName?: string;
 }
 
 function uniqueModels(values: string[]): string[] {
@@ -67,6 +68,7 @@ export function SearchableModelPicker({
   recentModels = [],
   excludeFromRecents = [],
   disabled,
+  triggerClassName,
 }: SearchableModelPickerProps) {
   const [open, setOpen] = useState(false);
 
@@ -107,7 +109,7 @@ export function SearchableModelPicker({
           role="combobox"
           aria-expanded={open}
           disabled={disabled}
-          className="w-full justify-between font-normal"
+          className={cn("w-full justify-between font-normal", triggerClassName)}
         >
           <span className="min-w-0 truncate">{selectedModel.label}</span>
           <ChevronsUpDown className="size-4 shrink-0 opacity-50" />

@@ -23,6 +23,7 @@ interface ProjectPickerProps {
   onChange: (path: string) => void;
   disabled?: boolean;
   id?: string;
+  variant?: "inline" | "chip";
 }
 
 export function ProjectPicker({
@@ -30,6 +31,7 @@ export function ProjectPicker({
   onChange,
   disabled,
   id,
+  variant = "inline",
 }: ProjectPickerProps) {
   const [open, setOpen] = useState(false);
   const projects = useAppState((state) => state.projects);
@@ -52,8 +54,14 @@ export function ProjectPicker({
           role="combobox"
           aria-expanded={open}
           aria-label="Project"
+          title={value || undefined}
           disabled={disabled}
-          className="text-foreground -mr-1 h-6 max-w-full gap-1 px-1 font-normal"
+          className={cn(
+            "text-foreground max-w-full",
+            variant === "chip"
+              ? "bg-secondary border-border h-7 gap-1.5 border px-2 text-sm font-medium"
+              : "-mr-1 h-6 gap-1 px-1 font-normal",
+          )}
         >
           {selected ? (
             <ProjectFavicon projectPath={selected.path} className="size-3.5" />

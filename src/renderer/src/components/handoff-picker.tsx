@@ -13,7 +13,7 @@ import {
   PopoverTrigger,
 } from "@renderer/components/ui/popover";
 import { cn } from "@renderer/lib/utils";
-import { ChevronsUpDown, FileText } from "lucide-react";
+import { ChevronDown, ChevronsUpDown, FileText } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 export interface HandoffEntryDisplay {
@@ -28,6 +28,7 @@ interface HandoffPickerProps {
   value: HandoffEntryDisplay | null;
   onChange: (next: HandoffEntryDisplay | null) => void;
   disabled?: boolean;
+  variant?: "field" | "chip";
 }
 
 export function buildHandoffPromptTemplate(handoffPath: string): string {
@@ -84,8 +85,10 @@ export function HandoffPicker({
   value,
   onChange,
   disabled,
+  variant = "field",
 }: HandoffPickerProps) {
   const [open, setOpen] = useState(false);
+  const isChip = variant === "chip";
 
   const handoffs = useAppState((state) => state.handoffs);
   const entries = useMemo(
@@ -106,24 +109,47 @@ export function HandoffPicker({
   return (
     <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          disabled={disabled}
-          className="w-full justify-between font-normal"
-        >
-          <span className="flex min-w-0 items-center gap-2">
-            <FileText className="size-4 shrink-0 opacity-70" />
-            {value ? (
-              <span className="truncate">{value.title}</span>
-            ) : (
-              <span className="text-muted-foreground">No handoff selected</span>
+        {isChip ? (
+          <Button
+            type="button"
+            variant="ghost"
+            role="combobox"
+            aria-expanded={open}
+            aria-label="Continue from handoff"
+            disabled={disabled}
+            className={cn(
+              "h-8 min-w-0 gap-1.5 px-2.5 text-[13px] font-normal",
+              value
+                ? "text-foreground bg-secondary border-border border"
+                : "text-muted-foreground",
             )}
-          </span>
-          <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
-        </Button>
+          >
+            <FileText className="size-3.5 shrink-0 opacity-70" />
+            <span className="truncate">{value?.title ?? "Handoff"}</span>
+            <ChevronDown className="size-3 shrink-0 opacity-60" />
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            disabled={disabled}
+            className="w-full justify-between font-normal"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <FileText className="size-4 shrink-0 opacity-70" />
+              {value ? (
+                <span className="truncate">{value.title}</span>
+              ) : (
+                <span className="text-muted-foreground">
+                  No handoff selected
+                </span>
+              )}
+            </span>
+            <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+          </Button>
+        )}
       </PopoverTrigger>
       <PopoverContent
         align="start"
