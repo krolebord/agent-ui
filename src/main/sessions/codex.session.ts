@@ -694,6 +694,7 @@ export class CodexSessionsManager {
     const state = this.sessionsState;
     this.titleGeneration.requestFromPrompt({
       sessionId,
+      cwd: state.state[sessionId]?.startupConfig.cwd,
       prompt,
       defaultTitle: DEFAULT_CODEX_SESSION_TITLE,
       getTitle: () => {

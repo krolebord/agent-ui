@@ -54,6 +54,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
+import { useWorktreeManagerDialogStore } from "./worktree-manager-dialog";
 
 const STORAGE_KEY = "agent-ui:sessionHeaderOpenApp";
 
@@ -137,14 +138,34 @@ function AttachFileButton({ terminalId }: { terminalId: string }) {
   );
 }
 
-function BranchName({ branch }: { branch: string }) {
+function BranchName({
+  branch,
+  onManageWorktree,
+}: {
+  branch: string;
+  onManageWorktree?: () => void;
+}) {
   const { copied, copy } = useCopyToClipboard();
 
   return (
     <div className="flex min-w-0 items-center gap-0.5 text-xs text-muted-foreground">
-      <span className="truncate" title={branch}>
-        {branch}
-      </span>
+      {onManageWorktree ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-5 min-w-0 gap-1 px-1 text-xs font-normal text-muted-foreground hover:text-foreground"
+          onClick={onManageWorktree}
+          title={`Manage worktrees (${branch})`}
+        >
+          <GitFork className="size-3 shrink-0" />
+          <span className="truncate">{branch}</span>
+        </Button>
+      ) : (
+        <span className="truncate" title={branch}>
+          {branch}
+        </span>
+      )}
       <Button
         type="button"
         variant="ghost"
@@ -202,6 +223,8 @@ export function SessionHeader({ session }: { session: Session }) {
       : undefined;
 
   const projectLocked = activeProject?.interactionDisabled === true;
+  const worktreeOriginPath = activeProject?.worktreeOriginPath;
+  const openWorktreeManager = useWorktreeManagerDialogStore((s) => s.open);
 
   const refreshGitStatsMutation = useMutation(
     orpc.projects.refreshProject.mutationOptions(),
@@ -283,7 +306,19 @@ export function SessionHeader({ session }: { session: Session }) {
           {session.title}
         </div>
         {activeProject?.gitBranch ? (
-          <BranchName branch={activeProject.gitBranch} />
+          <BranchName
+            branch={activeProject.gitBranch}
+            onManageWorktree={
+              worktreeOriginPath
+                ? () => {
+                    openWorktreeManager({
+                      originPath: worktreeOriginPath,
+                      selectedPath: session.startupConfig.cwd,
+                    });
+                  }
+                : undefined
+            }
+          />
         ) : null}
       </div>
       {addedLines || deletedLines || aheadCommits || behindCommits ? (

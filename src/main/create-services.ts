@@ -257,11 +257,6 @@ export async function createServices(options: CreateServicesOptions) {
   const getCodexExternalAuth = async (accountId: string) =>
     await codexAccountsService.getExternalAuth(accountId);
 
-  const titleGenerationService = new TitleGenerationService({
-    getSettings: () => appSettingsState.state.titleGeneration,
-    workingDirectory: textGenerationWorkingDirectory,
-  });
-
   const projectsState = defineProjectState();
   persistenceService.registerAndHydrate(
     defineProjectStatePersistence(projectsState),
@@ -301,6 +296,18 @@ export async function createServices(options: CreateServicesOptions) {
 
   const projectGitService = new ProjectGitService(projectsState);
   projectGitService.start();
+
+  const titleGenerationService = new TitleGenerationService({
+    getSettings: () => appSettingsState.state.titleGeneration,
+    workingDirectory: textGenerationWorkingDirectory,
+    onTitleGenerated: ({ cwd, title }) => {
+      void projectGitService
+        .renamePlaceholderWorktree({ worktreePath: cwd, title })
+        .catch((error: unknown) => {
+          log.warn("Failed to rename placeholder worktree", { cwd, error });
+        });
+    },
+  });
 
   const skillsState = defineSkillsState();
   const skillsService = new SkillsService({

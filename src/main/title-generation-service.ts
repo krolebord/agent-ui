@@ -9,10 +9,12 @@ import { generateTitle } from "./title-generation";
 interface TitleGenerationServiceOptions {
   getSettings: () => TitleGenerationSettings;
   workingDirectory: string;
+  onTitleGenerated?: (input: { cwd: string; title: string }) => void;
 }
 
 export interface TitleGenerationRequestParams {
   sessionId: string;
+  cwd?: string;
   prompt: string;
   defaultTitle: string;
   getTitle: () => string | undefined;
@@ -25,10 +27,14 @@ export class TitleGenerationService {
   private readonly provisionalPromptBySession = new Map<string, string>();
   private readonly getSettings: () => TitleGenerationSettings;
   private readonly workingDirectory: string;
+  private readonly onTitleGenerated:
+    | ((input: { cwd: string; title: string }) => void)
+    | undefined;
 
   constructor(options: TitleGenerationServiceOptions) {
     this.getSettings = options.getSettings;
     this.workingDirectory = options.workingDirectory;
+    this.onTitleGenerated = options.onTitleGenerated;
   }
 
   forget(sessionId: string): void {
@@ -91,6 +97,10 @@ export class TitleGenerationService {
         }
 
         this.triggered.add(params.sessionId);
+
+        if (params.cwd) {
+          this.onTitleGenerated?.({ cwd: params.cwd, title });
+        }
 
         if (
           !this.canAutoManageTitle(

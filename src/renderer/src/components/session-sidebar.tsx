@@ -72,6 +72,7 @@ import {
 } from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
 import { useWorktreeDeleteDialogStore } from "./worktree-delete-dialog";
+import { useWorktreeManagerDialogStore } from "./worktree-manager-dialog";
 
 const projectDragSensors = [
   PointerSensor.configure({
@@ -175,6 +176,7 @@ export function SessionSidebar() {
     (x) => x.setOpenProjectPath,
   );
   const openWorktreeDeleteDialog = useWorktreeDeleteDialogStore((x) => x.open);
+  const openWorktreeManager = useWorktreeManagerDialogStore((x) => x.open);
 
   const toggleProjectCollapsed = useMutation(
     orpc.projects.setProjectCollapsed.mutationOptions(),
@@ -302,6 +304,10 @@ export function SessionSidebar() {
               }
               onCreateWorktree={() => setOpenProjectWorktreePath(group.path)}
               canCreateWorktree={Boolean(group.gitBranch) && !group.isWorktree}
+              onManageWorktrees={buildManageWorktreesHandler(
+                group,
+                openWorktreeManager,
+              )}
               onOpenSettings={() => setOpenProjectCwd(group.path)}
               onOpenCommands={() => setOpenProjectCommandsCwd(group.path)}
               onOpenFolder={() => openFolderMutation.mutate(group.path)}
@@ -385,12 +391,30 @@ export function SessionSidebar() {
   );
 }
 
+function buildManageWorktreesHandler(
+  group: ProjectSessionGroup,
+  openWorktreeManager: (input: {
+    originPath: string;
+    selectedPath?: string | null;
+  }) => void,
+): (() => void) | null {
+  const originPath = group.worktreeOriginPath;
+  if (originPath) {
+    return () => openWorktreeManager({ originPath, selectedPath: group.path });
+  }
+
+  return group.worktreeCount > 0
+    ? () => openWorktreeManager({ originPath: group.path })
+    : null;
+}
+
 function SortableProjectGroup({
   group,
   index,
   onToggleCollapsed,
   onCreateWorktree,
   canCreateWorktree,
+  onManageWorktrees,
   onOpenSettings,
   onOpenCommands,
   onOpenFolder,
@@ -405,6 +429,7 @@ function SortableProjectGroup({
   onToggleCollapsed: () => void;
   onCreateWorktree: () => void;
   canCreateWorktree: boolean;
+  onManageWorktrees: (() => void) | null;
   onOpenSettings: () => void;
   onOpenCommands: () => void;
   onOpenFolder: () => void;
@@ -584,7 +609,15 @@ function SortableProjectGroup({
                   Create worktree project
                 </DropdownMenuItem>
               ) : null}
-              {canCreateWorktree ? <DropdownMenuSeparator /> : null}
+              {onManageWorktrees ? (
+                <DropdownMenuItem onClick={onManageWorktrees}>
+                  <GitFork className="size-3.5" />
+                  Manage worktrees
+                </DropdownMenuItem>
+              ) : null}
+              {canCreateWorktree || onManageWorktrees ? (
+                <DropdownMenuSeparator />
+              ) : null}
               <DropdownMenuItem
                 disabled={
                   locked ||

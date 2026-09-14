@@ -723,6 +723,7 @@ export class SessionsServiceNew {
     const defaultTitle = getDefaultSessionTitle(sessionId);
     this.titleGeneration.requestFromPrompt({
       sessionId,
+      cwd: state.state[sessionId]?.startupConfig.cwd,
       prompt,
       defaultTitle,
       getTitle: () => state.state[sessionId]?.title,

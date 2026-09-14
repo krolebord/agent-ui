@@ -16,12 +16,16 @@ export function SyncStateProvider({
   );
 }
 
+export function useAppStateStore(): SyncStateStore {
+  const store = useContext(stateContext);
+  if (!store) {
+    throw new Error("useAppStateStore must be used within a SyncStateProvider");
+  }
+  return store;
+}
+
 export function useAppState<T>(
   selector: (state: ExtractState<SyncStateStore>) => T,
 ) {
-  const store = useContext(stateContext);
-  if (!store) {
-    throw new Error("useAppState must be used within a SyncStateProvider");
-  }
-  return useStore(store, selector);
+  return useStore(useAppStateStore(), selector);
 }

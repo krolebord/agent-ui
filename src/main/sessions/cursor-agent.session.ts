@@ -331,6 +331,7 @@ export class CursorAgentSessionsManager {
     const state = this.sessionsState;
     this.titleGeneration.requestFromPrompt({
       sessionId,
+      cwd: state.state[sessionId]?.startupConfig.cwd,
       prompt,
       defaultTitle: DEFAULT_CURSOR_AGENT_SESSION_TITLE,
       getTitle: () => {

@@ -80,6 +80,7 @@ export interface ClaudeProject {
   gitDiffStats?: GitDiffStats;
   gitUpstreamDiffStats?: GitUpstreamDiffStats;
   worktreeOriginPath?: string;
+  worktreePlaceholder?: boolean;
   worktreeSetupCommands?: string;
   interactionDisabled?: boolean;
   deletionToast?: ProjectDeletionToast;

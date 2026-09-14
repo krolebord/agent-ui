@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   EditableFileConflictError,
   readEditableFileSnapshot,
@@ -17,10 +17,12 @@ describe("project file editing", () => {
   let projectPath: string;
 
   beforeEach(async () => {
+    vi.stubEnv("GIT_EDITOR", undefined);
     projectPath = await mkdtemp(path.join(tmpdir(), "agent-ui-file-edit-"));
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await rm(projectPath, { recursive: true, force: true });
   });
 

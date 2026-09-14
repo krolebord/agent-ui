@@ -27,6 +27,7 @@ import {
 } from "@renderer/components/ui/sheet";
 import { Toaster } from "@renderer/components/ui/sonner";
 import { WorktreeDeleteDialog } from "@renderer/components/worktree-delete-dialog";
+import { WorktreeManagerDialog } from "@renderer/components/worktree-manager-dialog";
 import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
 import { useAttentionFavicon } from "@renderer/hooks/use-attention-favicon";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
@@ -129,6 +130,7 @@ function App() {
       <ProjectCommandsDialog />
       <ProjectWorktreeDialog />
       <WorktreeDeleteDialog />
+      <WorktreeManagerDialog />
       <ProjectDeletionToastListener />
       <ArtifactToastListener />
       <SettingsDialog />

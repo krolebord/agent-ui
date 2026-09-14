@@ -12,6 +12,8 @@ export interface ProjectSessionGroup {
   gitUpstreamDiffStats?: GitUpstreamDiffStats;
   isWorktree: boolean;
   worktreeOriginName?: string;
+  worktreeOriginPath?: string;
+  worktreeCount: number;
   interactionDisabled: boolean;
   sessions: Session[];
 }
@@ -116,44 +118,163 @@ export function groupHasAwaitingUserInput(
   );
 }
 
-export interface ProjectPickerOption {
+export interface ProjectTreeWorktree {
   path: string;
   label: string;
-  isWorktree: boolean;
+  disabled: boolean;
+}
+
+export interface ProjectTreeNode {
+  path: string;
+  label: string;
+  branch?: string;
   hidden: boolean;
   disabled: boolean;
   unlisted: boolean;
+  canCreateWorktree: boolean;
+  worktrees: ProjectTreeWorktree[];
 }
 
-export function buildProjectPickerOptions(input: {
+export function getWorktreeDisplayName(project: ClaudeProject): string {
+  return (
+    project.alias?.trim() ||
+    project.gitBranch?.trim() ||
+    getProjectNameFromPath(project.path)
+  );
+}
+
+export function buildProjectTree(input: {
   projects: ClaudeProject[];
   selectedPath: string;
-}): ProjectPickerOption[] {
-  const options = input.projects.map((project) => ({
-    path: project.path,
-    label: getProjectDisplayName(project),
-    isWorktree: Boolean(project.worktreeOriginPath),
-    hidden: project.hidden === true,
-    disabled: project.interactionDisabled === true,
-    unlisted: false,
-  }));
+}): ProjectTreeNode[] {
+  const nodesByPath = new Map<string, ProjectTreeNode>();
+  const nodes: ProjectTreeNode[] = [];
+
+  const addNode = (project: ClaudeProject, isWorktree: boolean) => {
+    const node: ProjectTreeNode = {
+      path: project.path,
+      label: isWorktree
+        ? getWorktreeDisplayName(project)
+        : getProjectDisplayName(project),
+      branch: project.gitBranch,
+      hidden: project.hidden === true,
+      disabled: project.interactionDisabled === true,
+      unlisted: false,
+      canCreateWorktree:
+        !isWorktree &&
+        Boolean(project.gitBranch) &&
+        project.interactionDisabled !== true,
+      worktrees: [],
+    };
+    nodesByPath.set(node.path, node);
+    nodes.push(node);
+  };
+
+  for (const project of input.projects) {
+    if (!project.worktreeOriginPath) {
+      addNode(project, false);
+    }
+  }
+
+  for (const project of input.projects) {
+    if (!project.worktreeOriginPath) {
+      continue;
+    }
+
+    const origin = nodesByPath.get(project.worktreeOriginPath);
+    if (!origin) {
+      addNode(project, true);
+      continue;
+    }
+
+    origin.worktrees.push({
+      path: project.path,
+      label: getWorktreeDisplayName(project),
+      disabled: project.interactionDisabled === true,
+    });
+  }
 
   const selectedPath = input.selectedPath.trim();
-  if (!selectedPath || options.some((option) => option.path === selectedPath)) {
-    return options;
+  if (
+    !selectedPath ||
+    input.projects.some((project) => project.path === selectedPath)
+  ) {
+    return nodes;
   }
 
   return [
     {
       path: selectedPath,
       label: getProjectNameFromPath(selectedPath),
-      isWorktree: false,
       hidden: false,
       disabled: false,
       unlisted: true,
+      canCreateWorktree: false,
+      worktrees: [],
     },
-    ...options,
+    ...nodes,
   ];
+}
+
+export type ProjectSelection =
+  | { kind: "project"; path: string }
+  | { kind: "new-worktree"; originPath: string };
+
+export interface ProjectSelectionDisplay {
+  faviconPath: string;
+  label: string;
+  detail: string | null;
+}
+
+export function getProjectSelectionOriginPath(value: ProjectSelection): string {
+  return value.kind === "project" ? value.path : value.originPath;
+}
+
+export function resolveProjectSelectionDisplay(
+  nodes: ProjectTreeNode[],
+  value: ProjectSelection,
+): ProjectSelectionDisplay | null {
+  if (value.kind === "new-worktree") {
+    const origin = nodes.find((node) => node.path === value.originPath);
+    return origin
+      ? {
+          faviconPath: origin.path,
+          label: origin.label,
+          detail: "New worktree",
+        }
+      : null;
+  }
+
+  for (const node of nodes) {
+    if (node.path === value.path) {
+      return { faviconPath: node.path, label: node.label, detail: null };
+    }
+
+    const worktree = node.worktrees.find((item) => item.path === value.path);
+    if (worktree) {
+      return {
+        faviconPath: node.path,
+        label: node.label,
+        detail: worktree.label,
+      };
+    }
+  }
+
+  return null;
+}
+
+export function projectTreeNodeHoldsSelection(
+  node: ProjectTreeNode,
+  value: ProjectSelection,
+): boolean {
+  if (value.kind === "new-worktree") {
+    return value.originPath === node.path;
+  }
+
+  return (
+    value.path === node.path ||
+    node.worktrees.some((worktree) => worktree.path === value.path)
+  );
 }
 
 export function buildProjectSessionGroups(
@@ -174,6 +295,17 @@ export function buildProjectSessionGroups(
     sessionsByPath.set(session.startupConfig.cwd, [session]);
   }
 
+  const worktreeCounts = new Map<string, number>();
+  for (const project of state.projects) {
+    if (!project.worktreeOriginPath) {
+      continue;
+    }
+    worktreeCounts.set(
+      project.worktreeOriginPath,
+      (worktreeCounts.get(project.worktreeOriginPath) ?? 0) + 1,
+    );
+  }
+
   const groups: ProjectSessionGroup[] = [];
   const seenPaths = new Set<string>();
 
@@ -190,6 +322,8 @@ export function buildProjectSessionGroups(
       worktreeOriginName: project.worktreeOriginPath
         ? getProjectNameFromPath(project.worktreeOriginPath)
         : undefined,
+      worktreeOriginPath: project.worktreeOriginPath,
+      worktreeCount: worktreeCounts.get(project.path) ?? 0,
       interactionDisabled: project.interactionDisabled === true,
       sessions: sessionsByPath.get(project.path) ?? [],
     });
@@ -208,10 +342,54 @@ export function buildProjectSessionGroups(
       hidden: false,
       fromProjectList: false,
       isWorktree: false,
+      worktreeCount: 0,
       interactionDisabled: false,
       sessions,
     });
   }
 
   return groups;
+}
+
+export interface WorktreeManagerRow {
+  path: string;
+  label: string;
+  branch?: string;
+  activeSessionCount: number;
+  addedLines: number;
+  deletedLines: number;
+  upstreamBranch: string | null;
+  aheadCommits: number;
+  behindCommits: number;
+  removing: boolean;
+}
+
+export function buildWorktreeManagerRows(input: {
+  projects: ClaudeProject[];
+  sessionsById: Record<string, Session>;
+  originPath: string;
+}): WorktreeManagerRow[] {
+  const activeSessionCounts = new Map<string, number>();
+  for (const session of Object.values(input.sessionsById)) {
+    if (isSessionSettled(session)) {
+      continue;
+    }
+    const cwd = session.startupConfig.cwd;
+    activeSessionCounts.set(cwd, (activeSessionCounts.get(cwd) ?? 0) + 1);
+  }
+
+  return input.projects
+    .filter((project) => project.worktreeOriginPath === input.originPath)
+    .map((project) => ({
+      path: project.path,
+      label: getWorktreeDisplayName(project),
+      branch: project.gitBranch,
+      activeSessionCount: activeSessionCounts.get(project.path) ?? 0,
+      addedLines: project.gitDiffStats?.addedLines ?? 0,
+      deletedLines: project.gitDiffStats?.deletedLines ?? 0,
+      upstreamBranch: project.gitUpstreamDiffStats?.upstreamBranch ?? null,
+      aheadCommits: project.gitUpstreamDiffStats?.aheadCommits ?? 0,
+      behindCommits: project.gitUpstreamDiffStats?.behindCommits ?? 0,
+      removing: project.interactionDisabled === true,
+    }));
 }

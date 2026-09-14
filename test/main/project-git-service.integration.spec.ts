@@ -11,6 +11,7 @@ describe("selected changes with real Git", () => {
   let service: ProjectGitService;
 
   beforeEach(async () => {
+    vi.stubEnv("GIT_EDITOR", undefined);
     vi.stubEnv("PAGER", undefined);
     vi.stubEnv("GIT_PAGER", undefined);
     repo = await mkdtemp("/var/tmp/agent-ui-git-");
@@ -136,5 +137,262 @@ describe("selected changes with real Git", () => {
       "removed file.md",
     );
     expect((await git.status()).isClean()).toBe(true);
+  });
+});
+
+describe("session worktrees with real Git", () => {
+  let repo: string;
+  let git: ReturnType<typeof simpleGit>;
+  let projectsState: ReturnType<typeof defineProjectState>;
+  let service: ProjectGitService;
+
+  beforeEach(async () => {
+    vi.stubEnv("GIT_EDITOR", undefined);
+    vi.stubEnv("PAGER", undefined);
+    vi.stubEnv("GIT_PAGER", undefined);
+    repo = await mkdtemp("/var/tmp/agent-ui-worktree-");
+    git = simpleGit({
+      baseDir: repo,
+      unsafe: { allowUnsafeHooksPath: true },
+    });
+    await git.init(["--initial-branch=main"]);
+    await git.addConfig("user.name", "Test");
+    await git.addConfig("user.email", "test@example.com");
+    await git.addConfig("commit.gpgsign", "false");
+    await git.addConfig("core.hooksPath", "/dev/null");
+    await writeFile(path.join(repo, "readme.md"), "hello\n");
+    await git.add(".");
+    await git.commit("Initial commit");
+
+    projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({ path: repo, collapsed: false });
+    });
+    service = new ProjectGitService(projectsState);
+  });
+
+  afterEach(async () => {
+    await service?.dispose();
+    vi.unstubAllEnvs();
+    await rm(repo, { recursive: true, force: true });
+    await rm(`${repo}-fix-login`, { recursive: true, force: true });
+    await rm(`${repo}-fix-login-2`, { recursive: true, force: true });
+    for (const name of [
+      "merged-work",
+      "pending-work",
+      "pushed-work",
+      "unmerged-work",
+    ]) {
+      await rm(`${repo}-${name}`, { recursive: true, force: true });
+    }
+  });
+
+  const findProject = (projectPath: string) =>
+    projectsState.state.find((project) => project.path === projectPath);
+
+  it("creates a named worktree branch under the agent-ui prefix", async () => {
+    const result = await service.createSessionWorktree({
+      sourcePath: repo,
+      name: "Fix Login!",
+    });
+
+    expect(result.path).toBe(`${repo}-fix-login`);
+    expect(findProject(result.path)).toMatchObject({
+      worktreeOriginPath: repo,
+      worktreePlaceholder: undefined,
+      gitBranch: "agent-ui/fix-login",
+    });
+  });
+
+  it("suffixes the name when the branch is already taken", async () => {
+    await service.createSessionWorktree({
+      sourcePath: repo,
+      name: "fix-login",
+    });
+    const second = await service.createSessionWorktree({
+      sourcePath: repo,
+      name: "fix-login",
+    });
+
+    expect(second.path).toBe(`${repo}-fix-login-2`);
+    expect(findProject(second.path)?.gitBranch).toBe("agent-ui/fix-login-2");
+  });
+
+  it("generates a placeholder branch when no name is given", async () => {
+    const result = await service.createSessionWorktree({ sourcePath: repo });
+    const project = findProject(result.path);
+
+    expect(project?.worktreePlaceholder).toBe(true);
+    expect(project?.gitBranch).toMatch(/^agent-ui\/[0-9a-f]{8}$/);
+
+    await rm(result.path, { recursive: true, force: true });
+  });
+
+  it("renames the placeholder branch and aliases the project from a title", async () => {
+    const result = await service.createSessionWorktree({ sourcePath: repo });
+
+    await service.renamePlaceholderWorktree({
+      worktreePath: result.path,
+      title: "Fix login redirect",
+    });
+
+    expect(findProject(result.path)).toMatchObject({
+      alias: "Fix login redirect",
+      gitBranch: "agent-ui/fix-login-redirect",
+      worktreePlaceholder: undefined,
+    });
+    expect(
+      await simpleGit({ baseDir: result.path }).branchLocal(),
+    ).toMatchObject({ current: "agent-ui/fix-login-redirect" });
+
+    await rm(result.path, { recursive: true, force: true });
+  });
+
+  it("leaves a renamed worktree alone on later titles", async () => {
+    const result = await service.createSessionWorktree({ sourcePath: repo });
+    await service.renamePlaceholderWorktree({
+      worktreePath: result.path,
+      title: "First title",
+    });
+    await service.renamePlaceholderWorktree({
+      worktreePath: result.path,
+      title: "Second title",
+    });
+
+    expect(findProject(result.path)).toMatchObject({
+      alias: "First title",
+      gitBranch: "agent-ui/first-title",
+    });
+
+    await rm(result.path, { recursive: true, force: true });
+  });
+
+  it("keeps the branch when it already has an upstream", async () => {
+    const remote = await mkdtemp("/var/tmp/agent-ui-worktree-remote-");
+    await simpleGit({ baseDir: remote }).init(["--bare"]);
+    await git.addRemote("origin", remote);
+
+    const result = await service.createSessionWorktree({ sourcePath: repo });
+    const worktreeGit = simpleGit({ baseDir: result.path });
+    const placeholderBranch = (await worktreeGit.branchLocal()).current;
+    await worktreeGit.push(["-u", "origin", placeholderBranch]);
+
+    await service.renamePlaceholderWorktree({
+      worktreePath: result.path,
+      title: "Fix login redirect",
+    });
+
+    expect((await worktreeGit.branchLocal()).current).toBe(placeholderBranch);
+    expect(findProject(result.path)).toMatchObject({
+      alias: "Fix login redirect",
+      worktreePlaceholder: undefined,
+    });
+
+    await rm(result.path, { recursive: true, force: true });
+    await rm(remote, { recursive: true, force: true });
+  });
+
+  it("reports branch, merge and upstream state for each worktree", async () => {
+    const merged = await service.createSessionWorktree({
+      sourcePath: repo,
+      name: "merged-work",
+    });
+    const pending = await service.createSessionWorktree({
+      sourcePath: repo,
+      name: "pending-work",
+    });
+
+    await writeFile(path.join(merged.path, "merged.md"), "merged\n");
+    const mergedGit = simpleGit({ baseDir: merged.path });
+    await mergedGit.add(".");
+    await mergedGit.commit("Merged work");
+    await git.raw(["merge", "--no-edit", "agent-ui/merged-work"]);
+
+    await writeFile(path.join(pending.path, "pending.md"), "pending\n");
+    const pendingGit = simpleGit({ baseDir: pending.path });
+    await pendingGit.add(".");
+    await pendingGit.commit("Pending work");
+
+    const overview = await service.getWorktreeStatuses(repo);
+
+    expect(overview.originBranch).toBe("main");
+    expect(overview.statuses).toEqual([
+      {
+        path: merged.path,
+        branch: "agent-ui/merged-work",
+        upstreamBranch: null,
+        merged: true,
+      },
+      {
+        path: pending.path,
+        branch: "agent-ui/pending-work",
+        upstreamBranch: null,
+        merged: false,
+      },
+    ]);
+
+    await rm(merged.path, { recursive: true, force: true });
+    await rm(pending.path, { recursive: true, force: true });
+  });
+
+  it("reports the upstream branch once a worktree is pushed", async () => {
+    const remote = await mkdtemp("/var/tmp/agent-ui-worktree-remote-");
+    await simpleGit({ baseDir: remote }).init(["--bare"]);
+    await git.addRemote("origin", remote);
+
+    const worktree = await service.createSessionWorktree({
+      sourcePath: repo,
+      name: "pushed-work",
+    });
+    await simpleGit({ baseDir: worktree.path }).push([
+      "-u",
+      "origin",
+      "agent-ui/pushed-work",
+    ]);
+
+    const overview = await service.getWorktreeStatuses(repo);
+
+    expect(overview.statuses[0]).toMatchObject({
+      path: worktree.path,
+      upstreamBranch: "origin/agent-ui/pushed-work",
+    });
+
+    await rm(worktree.path, { recursive: true, force: true });
+    await rm(remote, { recursive: true, force: true });
+  });
+
+  it("force deletes an unmerged branch with its worktree", async () => {
+    const worktree = await service.createSessionWorktree({
+      sourcePath: repo,
+      name: "unmerged-work",
+    });
+    await writeFile(path.join(worktree.path, "unmerged.md"), "unmerged\n");
+    const worktreeGit = simpleGit({ baseDir: worktree.path });
+    await worktreeGit.add(".");
+    await worktreeGit.commit("Unmerged work");
+
+    const result = await service.performDeleteWorktreeFolderAndBranch({
+      path: worktree.path,
+      deleteFolder: true,
+      deleteBranch: true,
+      forceDeleteFolder: false,
+      forceDeleteBranch: true,
+    });
+
+    expect(result.warning).toBeUndefined();
+    expect((await git.branchLocal()).all).not.toContain(
+      "agent-ui/unmerged-work",
+    );
+  });
+
+  it("refuses to branch off a worktree project", async () => {
+    const result = await service.createSessionWorktree({
+      sourcePath: repo,
+      name: "fix-login",
+    });
+
+    await expect(
+      service.createSessionWorktree({ sourcePath: result.path }),
+    ).rejects.toThrow("itself a worktree");
   });
 });

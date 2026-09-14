@@ -18,7 +18,10 @@ import {
   HandoffPicker,
   useHandoffSelection,
 } from "@renderer/components/handoff-picker";
-import { ProjectPicker } from "@renderer/components/project-picker";
+import {
+  ProjectPicker,
+  type ProjectSelection,
+} from "@renderer/components/project-picker";
 import {
   buildScheduleSpec,
   type ScheduleDraft,
@@ -63,6 +66,10 @@ import {
 } from "@renderer/components/ui/toggle-group";
 import { useAccountUsagePercent } from "@renderer/hooks/use-account-usage";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
+import {
+  type SessionTargetStatus,
+  useSessionProjectTarget,
+} from "@renderer/hooks/use-session-project-target";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { cn } from "@renderer/lib/utils";
@@ -95,6 +102,7 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronsUpDown,
+  LoaderCircle,
   Plug,
   ShieldCheck,
   Smartphone,
@@ -480,14 +488,22 @@ export function NewSessionDialog() {
   const wasOpenRef = useRef(false);
   const isOpen = openProjectCwd !== null || editEntry !== null;
 
-  const [pickedProjectPath, setPickedProjectPath] = useState<string | null>(
-    null,
-  );
+  const [selectionOverride, setSelectionOverride] =
+    useState<ProjectSelection | null>(null);
+  const [worktreeName, setWorktreeName] = useState("");
   const [pickedProjectKey, setPickedProjectKey] = useState(lookupCwd);
   if (pickedProjectKey !== lookupCwd) {
     setPickedProjectKey(lookupCwd);
-    setPickedProjectPath(null);
+    setSelectionOverride(null);
+    setWorktreeName("");
   }
+
+  const selection: ProjectSelection = selectionOverride ?? {
+    kind: "project",
+    path: project?.path ?? lookupCwd ?? "",
+  };
+  const projectTarget = useSessionProjectTarget(selection, worktreeName);
+  const resetProjectTarget = projectTarget.reset;
 
   useEffect(() => {
     if (!isOpen) {
@@ -500,6 +516,9 @@ export function NewSessionDialog() {
     wasOpenRef.current = true;
 
     setSelectedHandoff(null);
+    setSelectionOverride(null);
+    setWorktreeName("");
+    resetProjectTarget();
     const resolvedClaude = resolveClaudeSessionOptions(
       storedLastSessionOptions.claude,
     );
@@ -541,7 +560,7 @@ export function NewSessionDialog() {
     setClaudeOptions(resolvedClaude);
     setCodexOptions(resolvedCodex);
     setCursorOptions(resolvedCursor);
-  }, [isOpen, editEntry, storedLastSessionOptions]);
+  }, [isOpen, editEntry, storedLastSessionOptions, resetProjectTarget]);
 
   const persistLastSessionOptions = useMutation(
     orpc.appSettings.setLastSessionOptions.mutationOptions(),
@@ -593,8 +612,14 @@ export function NewSessionDialog() {
     return null;
   }
 
-  const projectPath = pickedProjectPath ?? project?.path ?? lookupCwd ?? "";
+  const projectPath =
+    selection.kind === "project" ? selection.path : selection.originPath;
   const isEditing = editEntry !== null;
+  const sessionFormTarget = {
+    projectPath,
+    resolveSessionCwd: projectTarget.resolve,
+    targetStatus: projectTarget.status,
+  };
 
   return (
     <Dialog
@@ -616,16 +641,24 @@ export function NewSessionDialog() {
           {isEditing ? (
             <span className="text-sm">Edit scheduled session</span>
           ) : null}
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="text-muted-foreground shrink-0 text-[13px]">
-              Project
-            </span>
+          <div className="flex min-w-0 flex-col gap-1.5">
             <ProjectPicker
               id="new-session-project"
-              variant="chip"
-              value={projectPath}
-              onChange={setPickedProjectPath}
+              value={selection}
+              onChange={setSelectionOverride}
             />
+            {selection.kind === "new-worktree" ? (
+              <Input
+                id="new-session-worktree-name"
+                aria-label="Worktree name"
+                className="h-8"
+                placeholder="Worktree name (optional)"
+                value={worktreeName}
+                onChange={(event) => {
+                  setWorktreeName(event.target.value);
+                }}
+              />
+            ) : null}
           </div>
         </DialogHeader>
 
@@ -682,7 +715,7 @@ export function NewSessionDialog() {
 
         {sessionType === "claude" ? (
           <LocalClaudeSessionForm
-            projectPath={projectPath}
+            {...sessionFormTarget}
             initialPrompt={initialPrompt}
             setInitialPrompt={setInitialPrompt}
             sessionName={sessionName}
@@ -698,7 +731,7 @@ export function NewSessionDialog() {
           />
         ) : sessionType === "codex" ? (
           <CodexSessionForm
-            projectPath={projectPath}
+            {...sessionFormTarget}
             initialPrompt={initialPrompt}
             setInitialPrompt={setInitialPrompt}
             sessionName={sessionName}
@@ -714,7 +747,7 @@ export function NewSessionDialog() {
           />
         ) : (
           <CursorAgentSessionForm
-            projectPath={projectPath}
+            {...sessionFormTarget}
             initialPrompt={initialPrompt}
             setInitialPrompt={setInitialPrompt}
             sessionName={sessionName}
@@ -734,8 +767,27 @@ export function NewSessionDialog() {
   );
 }
 
+function SessionTargetStatusLine({ status }: { status: SessionTargetStatus }) {
+  if (status === "idle") {
+    return null;
+  }
+
+  return (
+    <div className="text-muted-foreground flex items-center gap-2 text-xs">
+      <LoaderCircle className="size-3.5 animate-spin" />
+      <span>
+        {status === "creating"
+          ? "Creating worktree..."
+          : "Running worktree setup..."}
+      </span>
+    </div>
+  );
+}
+
 interface SessionFormProps<TOptions> {
   projectPath: string;
+  resolveSessionCwd: () => Promise<string>;
+  targetStatus: SessionTargetStatus;
   initialPrompt: string;
   setInitialPrompt: (value: string) => void;
   sessionName: string;
@@ -752,6 +804,8 @@ interface SessionFormProps<TOptions> {
 
 function LocalClaudeSessionForm({
   projectPath,
+  resolveSessionCwd,
+  targetStatus,
   initialPrompt,
   setInitialPrompt,
   sessionName,
@@ -811,7 +865,6 @@ function LocalClaudeSessionForm({
         setActiveSessionId(sessionId);
         onClose();
       },
-      onError: handleError,
     }),
   );
 
@@ -821,7 +874,6 @@ function LocalClaudeSessionForm({
         toast.success("Session scheduled");
         onClose();
       },
-      onError: handleError,
     }),
   );
 
@@ -831,7 +883,6 @@ function LocalClaudeSessionForm({
         toast.success("Schedule updated");
         onClose();
       },
-      onError: handleError,
     }),
   );
 
@@ -842,8 +893,8 @@ function LocalClaudeSessionForm({
       ? options.accountId
       : undefined;
 
-  const buildSessionConfig = () => ({
-    cwd: projectPath,
+  const buildSessionConfig = (cwd: string) => ({
+    cwd,
     initialPrompt: initialPrompt || undefined,
     sessionName: sessionName || undefined,
     model: options.model,
@@ -857,33 +908,10 @@ function LocalClaudeSessionForm({
     accountId: selectedAccountId,
   });
 
-  const ensureProject = useMutation(
-    orpc.projects.addProject.mutationOptions({
-      onSuccess: () => {
-        const sessionConfig = buildSessionConfig();
-
-        if (scheduleDraft) {
-          const result = buildScheduleSpec(scheduleDraft);
-          if ("error" in result) {
-            setErrorMessage(result.error);
-            return;
-          }
-          scheduleSession.mutate({
-            name: sessionName || undefined,
-            schedule: result.schedule,
-            config: { type: "claude", ...sessionConfig },
-          });
-          return;
-        }
-
-        const { cols, rows } = getTerminalSize();
-        startSession.mutate({ ...sessionConfig, cols, rows });
-      },
-      onError: handleError,
-    }),
-  );
+  const ensureProject = useMutation(orpc.projects.addProject.mutationOptions());
 
   const isPending =
+    targetStatus !== "idle" ||
     ensureProject.isPending ||
     startSession.isPending ||
     scheduleSession.isPending ||
@@ -892,32 +920,53 @@ function LocalClaudeSessionForm({
   const handleSubmit = () => {
     setErrorMessage(null);
 
-    const normalizedPath = projectPath.trim();
-    if (!normalizedPath) {
+    if (!projectPath.trim()) {
       setErrorMessage("Project path is required.");
       return;
     }
 
-    if (editScheduledSessionId) {
-      if (!scheduleDraft) {
-        setErrorMessage("Schedule is required.");
-        return;
-      }
-      const result = buildScheduleSpec(scheduleDraft);
-      if ("error" in result) {
-        setErrorMessage(result.error);
-        return;
-      }
-      updateScheduledSession.mutate({
-        id: editScheduledSessionId,
-        name: sessionName || undefined,
-        schedule: result.schedule,
-        config: { type: "claude", ...buildSessionConfig() },
-      });
+    const schedule = scheduleDraft ? buildScheduleSpec(scheduleDraft) : null;
+    if (schedule && "error" in schedule) {
+      setErrorMessage(schedule.error);
       return;
     }
 
-    ensureProject.mutate({ path: normalizedPath });
+    void (async () => {
+      try {
+        const cwd = await resolveSessionCwd();
+        const sessionConfig = buildSessionConfig(cwd);
+
+        if (editScheduledSessionId) {
+          if (!schedule) {
+            setErrorMessage("Schedule is required.");
+            return;
+          }
+          await updateScheduledSession.mutateAsync({
+            id: editScheduledSessionId,
+            name: sessionName || undefined,
+            schedule: schedule.schedule,
+            config: { type: "claude", ...sessionConfig },
+          });
+          return;
+        }
+
+        await ensureProject.mutateAsync({ path: cwd });
+
+        if (schedule) {
+          await scheduleSession.mutateAsync({
+            name: sessionName || undefined,
+            schedule: schedule.schedule,
+            config: { type: "claude", ...sessionConfig },
+          });
+          return;
+        }
+
+        const { cols, rows } = getTerminalSize();
+        await startSession.mutateAsync({ ...sessionConfig, cols, rows });
+      } catch (error) {
+        handleError(error);
+      }
+    })();
   };
 
   return (
@@ -1099,6 +1148,8 @@ function LocalClaudeSessionForm({
         </CollapsibleContent>
       </Collapsible>
 
+      <SessionTargetStatusLine status={targetStatus} />
+
       {errorMessage ? (
         <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
           <AlertCircle className="size-4 shrink-0" />
@@ -1120,6 +1171,8 @@ function LocalClaudeSessionForm({
 
 function CodexSessionForm({
   projectPath,
+  resolveSessionCwd,
+  targetStatus,
   initialPrompt,
   setInitialPrompt,
   sessionName,
@@ -1213,7 +1266,6 @@ function CodexSessionForm({
         setActiveSessionId(result.sessionId);
         onClose();
       },
-      onError: handleError,
     }),
   );
 
@@ -1223,7 +1275,6 @@ function CodexSessionForm({
         toast.success("Session scheduled");
         onClose();
       },
-      onError: handleError,
     }),
   );
 
@@ -1233,7 +1284,6 @@ function CodexSessionForm({
         toast.success("Schedule updated");
         onClose();
       },
-      onError: handleError,
     }),
   );
 
@@ -1244,8 +1294,8 @@ function CodexSessionForm({
       ? options.accountId
       : undefined;
 
-  const buildSessionConfig = () => ({
-    cwd: projectPath,
+  const buildSessionConfig = (cwd: string) => ({
+    cwd,
     sessionName: sessionName || undefined,
     model: options.model || undefined,
     modelReasoningEffort: options.modelReasoningEffort,
@@ -1257,33 +1307,10 @@ function CodexSessionForm({
     accountId: selectedAccountId,
   });
 
-  const ensureProject = useMutation(
-    orpc.projects.addProject.mutationOptions({
-      onSuccess: () => {
-        const sessionConfig = buildSessionConfig();
-
-        if (scheduleDraft) {
-          const result = buildScheduleSpec(scheduleDraft);
-          if ("error" in result) {
-            setErrorMessage(result.error);
-            return;
-          }
-          scheduleSession.mutate({
-            name: sessionName || undefined,
-            schedule: result.schedule,
-            config: { type: "codex", ...sessionConfig },
-          });
-          return;
-        }
-
-        const { cols, rows } = getTerminalSize();
-        startSession.mutate({ ...sessionConfig, cols, rows });
-      },
-      onError: handleError,
-    }),
-  );
+  const ensureProject = useMutation(orpc.projects.addProject.mutationOptions());
 
   const isPending =
+    targetStatus !== "idle" ||
     ensureProject.isPending ||
     startSession.isPending ||
     scheduleSession.isPending ||
@@ -1292,32 +1319,53 @@ function CodexSessionForm({
   const handleSubmit = () => {
     setErrorMessage(null);
 
-    const normalizedPath = projectPath.trim();
-    if (!normalizedPath) {
+    if (!projectPath.trim()) {
       setErrorMessage("Project path is required.");
       return;
     }
 
-    if (editScheduledSessionId) {
-      if (!scheduleDraft) {
-        setErrorMessage("Schedule is required.");
-        return;
-      }
-      const result = buildScheduleSpec(scheduleDraft);
-      if ("error" in result) {
-        setErrorMessage(result.error);
-        return;
-      }
-      updateScheduledSession.mutate({
-        id: editScheduledSessionId,
-        name: sessionName || undefined,
-        schedule: result.schedule,
-        config: { type: "codex", ...buildSessionConfig() },
-      });
+    const schedule = scheduleDraft ? buildScheduleSpec(scheduleDraft) : null;
+    if (schedule && "error" in schedule) {
+      setErrorMessage(schedule.error);
       return;
     }
 
-    ensureProject.mutate({ path: normalizedPath });
+    void (async () => {
+      try {
+        const cwd = await resolveSessionCwd();
+        const sessionConfig = buildSessionConfig(cwd);
+
+        if (editScheduledSessionId) {
+          if (!schedule) {
+            setErrorMessage("Schedule is required.");
+            return;
+          }
+          await updateScheduledSession.mutateAsync({
+            id: editScheduledSessionId,
+            name: sessionName || undefined,
+            schedule: schedule.schedule,
+            config: { type: "codex", ...sessionConfig },
+          });
+          return;
+        }
+
+        await ensureProject.mutateAsync({ path: cwd });
+
+        if (schedule) {
+          await scheduleSession.mutateAsync({
+            name: sessionName || undefined,
+            schedule: schedule.schedule,
+            config: { type: "codex", ...sessionConfig },
+          });
+          return;
+        }
+
+        const { cols, rows } = getTerminalSize();
+        await startSession.mutateAsync({ ...sessionConfig, cols, rows });
+      } catch (error) {
+        handleError(error);
+      }
+    })();
   };
 
   return (
@@ -1463,6 +1511,8 @@ function CodexSessionForm({
         </CollapsibleContent>
       </Collapsible>
 
+      <SessionTargetStatusLine status={targetStatus} />
+
       {errorMessage ? (
         <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">
           <AlertCircle className="size-4 shrink-0" />
@@ -1484,6 +1534,8 @@ function CodexSessionForm({
 
 function CursorAgentSessionForm({
   projectPath,
+  resolveSessionCwd,
+  targetStatus,
   initialPrompt,
   setInitialPrompt,
   sessionName,
@@ -1521,7 +1573,6 @@ function CursorAgentSessionForm({
         setActiveSessionId(result.sessionId);
         onClose();
       },
-      onError: handleError,
     }),
   );
 
@@ -1531,7 +1582,6 @@ function CursorAgentSessionForm({
         toast.success("Session scheduled");
         onClose();
       },
-      onError: handleError,
     }),
   );
 
@@ -1541,12 +1591,11 @@ function CursorAgentSessionForm({
         toast.success("Schedule updated");
         onClose();
       },
-      onError: handleError,
     }),
   );
 
-  const buildSessionConfig = () => ({
-    cwd: projectPath,
+  const buildSessionConfig = (cwd: string) => ({
+    cwd,
     sessionName: sessionName || undefined,
     model: options.model || undefined,
     mode: options.mode,
@@ -1554,33 +1603,10 @@ function CursorAgentSessionForm({
     initialPrompt: initialPrompt || undefined,
   });
 
-  const ensureProject = useMutation(
-    orpc.projects.addProject.mutationOptions({
-      onSuccess: () => {
-        const sessionConfig = buildSessionConfig();
-
-        if (scheduleDraft) {
-          const result = buildScheduleSpec(scheduleDraft);
-          if ("error" in result) {
-            setErrorMessage(result.error);
-            return;
-          }
-          scheduleSession.mutate({
-            name: sessionName || undefined,
-            schedule: result.schedule,
-            config: { type: "cursorAgent", ...sessionConfig },
-          });
-          return;
-        }
-
-        const { cols, rows } = getTerminalSize();
-        startSession.mutate({ ...sessionConfig, cols, rows });
-      },
-      onError: handleError,
-    }),
-  );
+  const ensureProject = useMutation(orpc.projects.addProject.mutationOptions());
 
   const isPending =
+    targetStatus !== "idle" ||
     ensureProject.isPending ||
     startSession.isPending ||
     scheduleSession.isPending ||
@@ -1589,32 +1615,53 @@ function CursorAgentSessionForm({
   const handleSubmit = () => {
     setErrorMessage(null);
 
-    const normalizedPath = projectPath.trim();
-    if (!normalizedPath) {
+    if (!projectPath.trim()) {
       setErrorMessage("Project path is required.");
       return;
     }
 
-    if (editScheduledSessionId) {
-      if (!scheduleDraft) {
-        setErrorMessage("Schedule is required.");
-        return;
-      }
-      const result = buildScheduleSpec(scheduleDraft);
-      if ("error" in result) {
-        setErrorMessage(result.error);
-        return;
-      }
-      updateScheduledSession.mutate({
-        id: editScheduledSessionId,
-        name: sessionName || undefined,
-        schedule: result.schedule,
-        config: { type: "cursorAgent", ...buildSessionConfig() },
-      });
+    const schedule = scheduleDraft ? buildScheduleSpec(scheduleDraft) : null;
+    if (schedule && "error" in schedule) {
+      setErrorMessage(schedule.error);
       return;
     }
 
-    ensureProject.mutate({ path: normalizedPath });
+    void (async () => {
+      try {
+        const cwd = await resolveSessionCwd();
+        const sessionConfig = buildSessionConfig(cwd);
+
+        if (editScheduledSessionId) {
+          if (!schedule) {
+            setErrorMessage("Schedule is required.");
+            return;
+          }
+          await updateScheduledSession.mutateAsync({
+            id: editScheduledSessionId,
+            name: sessionName || undefined,
+            schedule: schedule.schedule,
+            config: { type: "cursorAgent", ...sessionConfig },
+          });
+          return;
+        }
+
+        await ensureProject.mutateAsync({ path: cwd });
+
+        if (schedule) {
+          await scheduleSession.mutateAsync({
+            name: sessionName || undefined,
+            schedule: schedule.schedule,
+            config: { type: "cursorAgent", ...sessionConfig },
+          });
+          return;
+        }
+
+        const { cols, rows } = getTerminalSize();
+        await startSession.mutateAsync({ ...sessionConfig, cols, rows });
+      } catch (error) {
+        handleError(error);
+      }
+    })();
   };
 
   return (
@@ -1717,6 +1764,8 @@ function CursorAgentSessionForm({
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      <SessionTargetStatusLine status={targetStatus} />
 
       {errorMessage ? (
         <div className="flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-300">

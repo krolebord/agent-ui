@@ -9,7 +9,13 @@ import type {
   GitUpstreamDiffStats,
 } from "@shared/claude-types";
 import { autogenerateCommitPlaceholderSubject } from "@shared/commit-message-generation";
-import { buildSuggestedWorktreePath } from "@shared/project-worktree";
+import {
+  buildSuggestedWorktreePath,
+  buildWorktreeBranchName,
+  generatePlaceholderWorktreeSegment,
+  sanitizeWorktreeBranchSegment,
+  WORKTREE_BRANCH_PREFIX,
+} from "@shared/project-worktree";
 import simpleGit from "simple-git";
 import log from "./logger";
 import type { ProjectState } from "./project-service";
@@ -24,6 +30,8 @@ import { withThrottledAsyncRunner } from "./throttle-runner";
 const EMPTY_GIT_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const GIT_PROJECT_REFRESH_THROTTLE_MS = 3_000;
 const SCRATCH_INDEX_PREFIX = "agent-ui-scratch-index-";
+const WORKTREE_NAME_ATTEMPTS = 20;
+const WORKTREE_ALIAS_MAX_LENGTH = 60;
 const gitIndexPathCache = new Map<string, string>();
 
 function createGit(
@@ -353,6 +361,100 @@ async function getLocalBranchNames(
   } catch {
     return alphabetizeBranchNames(discoveredBranches);
   }
+}
+
+export interface WorktreeStatus {
+  path: string;
+  branch: string | null;
+  upstreamBranch: string | null;
+  merged: boolean;
+}
+
+export interface WorktreeStatusOverview {
+  originBranch: string | null;
+  statuses: WorktreeStatus[];
+}
+
+async function readCurrentBranchName(
+  git: ReturnType<typeof simpleGit>,
+): Promise<string | null> {
+  const branch = await git
+    .raw(["rev-parse", "--abbrev-ref", "HEAD"])
+    .then((output) => output.trim())
+    .catch(() => "");
+
+  return branch && branch !== "HEAD" ? branch : null;
+}
+
+async function readWorktreeBranches(
+  git: ReturnType<typeof simpleGit>,
+): Promise<Map<string, string>> {
+  const branchByPath = new Map<string, string>();
+  const output = await git
+    .raw(["worktree", "list", "--porcelain"])
+    .catch(() => "");
+
+  let currentPath: string | null = null;
+  for (const line of output.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      currentPath = line.slice("worktree ".length).trim();
+      continue;
+    }
+    if (currentPath && line.startsWith("branch refs/heads/")) {
+      branchByPath.set(currentPath, line.slice("branch refs/heads/".length));
+      currentPath = null;
+    }
+  }
+
+  return branchByPath;
+}
+
+async function readBranchUpstreams(
+  git: ReturnType<typeof simpleGit>,
+): Promise<Map<string, string>> {
+  const upstreamByBranch = new Map<string, string>();
+  const output = await git
+    .raw([
+      "for-each-ref",
+      "--format=%(refname:short)\t%(upstream:short)",
+      "refs/heads",
+    ])
+    .catch(() => "");
+
+  for (const line of output.split("\n")) {
+    const [branch, upstream] = line.split("\t");
+    if (branch?.trim() && upstream?.trim()) {
+      upstreamByBranch.set(branch.trim(), upstream.trim());
+    }
+  }
+
+  return upstreamByBranch;
+}
+
+async function readMergedBranchNames(
+  git: ReturnType<typeof simpleGit>,
+  target: string,
+): Promise<Set<string>> {
+  const output = await git
+    .raw(["branch", "--merged", target, "--format=%(refname:short)"])
+    .catch(() => "");
+
+  return new Set(
+    output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+}
+
+async function listLocalBranchNames(
+  git: ReturnType<typeof simpleGit>,
+): Promise<string[]> {
+  const output = await git.raw(["branch", "--format=%(refname:short)"]);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 async function isExistingNonEmptyPath(targetPath: string): Promise<boolean> {
@@ -1340,6 +1442,54 @@ export class ProjectGitService {
     await this.refreshProject(projectPath);
   }
 
+  async getWorktreeStatuses(
+    originPath: string,
+  ): Promise<WorktreeStatusOverview> {
+    const trimmedOriginPath = originPath.trim();
+    const worktreeProjects = this.projectsState.state.filter(
+      (project) => project.worktreeOriginPath === trimmedOriginPath,
+    );
+
+    const fallback: WorktreeStatusOverview = {
+      originBranch: null,
+      statuses: worktreeProjects.map((project) => ({
+        path: project.path,
+        branch: project.gitBranch ?? null,
+        upstreamBranch: null,
+        merged: false,
+      })),
+    };
+
+    const git = createGit(trimmedOriginPath);
+    if (!(await git.checkIsRepo().catch(() => false))) {
+      return fallback;
+    }
+
+    const originBranch = await readCurrentBranchName(git);
+    const [branchByWorktreePath, upstreamByBranch, mergedBranches] =
+      await Promise.all([
+        readWorktreeBranches(git),
+        readBranchUpstreams(git),
+        originBranch
+          ? readMergedBranchNames(git, originBranch)
+          : new Set<string>(),
+      ]);
+
+    const statuses = worktreeProjects.map((project) => {
+      const branch =
+        branchByWorktreePath.get(project.path) ?? project.gitBranch ?? null;
+
+      return {
+        path: project.path,
+        branch,
+        upstreamBranch: branch ? (upstreamByBranch.get(branch) ?? null) : null,
+        merged: branch ? mergedBranches.has(branch) : false,
+      };
+    });
+
+    return { originBranch, statuses };
+  }
+
   async getWorktreeCreationData(projectPath: string): Promise<{
     currentBranch: string;
     localBranches: string[];
@@ -1440,6 +1590,217 @@ export class ProjectGitService {
       fromBranch,
     ]);
 
+    return this.registerWorktreeProject({
+      sourcePath,
+      destinationPath,
+      alias,
+    });
+  }
+
+  async createSessionWorktree(input: {
+    sourcePath: string;
+    name?: string;
+  }): Promise<{
+    path: string;
+    projectRoot: string;
+    worktreeRoot: string;
+    setupCommands: string[];
+  }> {
+    const sourcePath = input.sourcePath.trim();
+    if (!sourcePath) {
+      throw new Error("Source path is required.");
+    }
+
+    const sourceProject = this.projectsState.state.find(
+      (project) => project.path === sourcePath,
+    );
+    if (sourceProject?.worktreeOriginPath) {
+      throw new Error(
+        "Cannot create a worktree from a project that is itself a worktree.",
+      );
+    }
+
+    const projectGitData = await readProjectGitData(sourcePath, {
+      includeLocalBranches: true,
+    });
+    if (!projectGitData.isRepo) {
+      throw new Error("Project is not a Git repository.");
+    }
+
+    const fromBranch = getDefaultWorktreeBranch(projectGitData);
+    const requestedSegment = sanitizeWorktreeBranchSegment(input.name ?? "");
+    const isPlaceholder = requestedSegment.length === 0;
+    const target = await this.resolveAvailableWorktreeTarget({
+      sourcePath,
+      segment: isPlaceholder
+        ? generatePlaceholderWorktreeSegment()
+        : requestedSegment,
+      localBranches: projectGitData.localBranches,
+    });
+
+    await projectGitData.git.raw([
+      "worktree",
+      "add",
+      "-b",
+      target.branch,
+      target.destinationPath,
+      fromBranch,
+    ]);
+
+    return this.registerWorktreeProject({
+      sourcePath,
+      destinationPath: target.destinationPath,
+      placeholder: isPlaceholder,
+    });
+  }
+
+  async renamePlaceholderWorktree(input: {
+    worktreePath: string;
+    title: string;
+  }): Promise<void> {
+    const project = this.projectsState.state.find(
+      (item) => item.path === input.worktreePath,
+    );
+    if (!project?.worktreePlaceholder || !project.worktreeOriginPath) {
+      return;
+    }
+
+    const title = input.title.trim();
+    const segment = sanitizeWorktreeBranchSegment(title);
+    if (!segment) {
+      this.clearWorktreePlaceholder(input.worktreePath);
+      return;
+    }
+
+    let renamedBranch: string | undefined;
+    try {
+      renamedBranch = await this.renamePlaceholderBranch(
+        input.worktreePath,
+        segment,
+      );
+    } catch (error) {
+      log.warn("Failed to rename placeholder worktree branch", {
+        worktreePath: input.worktreePath,
+        error,
+      });
+    }
+
+    if (this.disposed) {
+      return;
+    }
+
+    this.projectsState.updateState((projects) => {
+      const draft = projects.find((item) => item.path === input.worktreePath);
+      if (!draft) {
+        return;
+      }
+      draft.worktreePlaceholder = undefined;
+      draft.alias =
+        draft.alias?.trim() || title.slice(0, WORKTREE_ALIAS_MAX_LENGTH);
+      if (renamedBranch) {
+        draft.gitBranch = renamedBranch;
+      }
+    });
+
+    if (renamedBranch) {
+      await this.refreshProject(input.worktreePath);
+    }
+  }
+
+  private async renamePlaceholderBranch(
+    worktreePath: string,
+    segment: string,
+  ): Promise<string | undefined> {
+    const git = createGit(worktreePath);
+    const currentBranch = (
+      await git.raw(["rev-parse", "--abbrev-ref", "HEAD"])
+    ).trim();
+
+    if (!currentBranch.startsWith(WORKTREE_BRANCH_PREFIX)) {
+      return undefined;
+    }
+
+    const upstreamByBranch = await readBranchUpstreams(git);
+    if (upstreamByBranch.has(currentBranch)) {
+      return undefined;
+    }
+
+    const localBranches = await listLocalBranchNames(git);
+    for (let attempt = 0; attempt < WORKTREE_NAME_ATTEMPTS; attempt++) {
+      const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
+      const nextBranch = buildWorktreeBranchName(`${segment}${suffix}`);
+      if (nextBranch === currentBranch) {
+        return undefined;
+      }
+      if (localBranches.includes(nextBranch)) {
+        continue;
+      }
+
+      await git.raw(["branch", "-m", currentBranch, nextBranch]);
+      return nextBranch;
+    }
+
+    return undefined;
+  }
+
+  private clearWorktreePlaceholder(worktreePath: string): void {
+    if (this.disposed) {
+      return;
+    }
+
+    this.projectsState.updateState((projects) => {
+      const draft = projects.find((item) => item.path === worktreePath);
+      if (draft) {
+        draft.worktreePlaceholder = undefined;
+      }
+    });
+  }
+
+  private async resolveAvailableWorktreeTarget(input: {
+    sourcePath: string;
+    segment: string;
+    localBranches: string[];
+  }): Promise<{ branch: string; destinationPath: string }> {
+    for (let attempt = 0; attempt < WORKTREE_NAME_ATTEMPTS; attempt++) {
+      const suffix = attempt === 0 ? "" : `-${attempt + 1}`;
+      const branch = buildWorktreeBranchName(`${input.segment}${suffix}`);
+      const destinationPath = buildSuggestedWorktreePath(
+        input.sourcePath,
+        `${input.segment}${suffix}`,
+      );
+
+      if (
+        input.localBranches.includes(branch) ||
+        this.projectsState.state.some(
+          (project) => project.path === destinationPath,
+        ) ||
+        (await isExistingNonEmptyPath(destinationPath))
+      ) {
+        continue;
+      }
+
+      return { branch, destinationPath };
+    }
+
+    throw new Error("Could not find an unused worktree name.");
+  }
+
+  private async registerWorktreeProject(input: {
+    sourcePath: string;
+    destinationPath: string;
+    alias?: string;
+    placeholder?: boolean;
+  }): Promise<{
+    path: string;
+    projectRoot: string;
+    worktreeRoot: string;
+    setupCommands: string[];
+  }> {
+    const { sourcePath, destinationPath } = input;
+    const sourceProject = this.projectsState.state.find(
+      (project) => project.path === sourcePath,
+    );
+
     await copyProjectSettingsDirectory(sourcePath, destinationPath);
 
     const sourceProjectSettings = getProjectSettingsSnapshot(sourceProject);
@@ -1459,8 +1820,9 @@ export class ProjectGitService {
         projects.push({
           path: destinationPath,
           collapsed: false,
-          alias,
+          alias: input.alias,
           worktreeOriginPath: sourcePath,
+          worktreePlaceholder: input.placeholder ? true : undefined,
           ...sourceProjectSettings,
         });
       });
@@ -1535,6 +1897,7 @@ export class ProjectGitService {
     deleteFolder: boolean;
     deleteBranch: boolean;
     forceDeleteFolder: boolean;
+    forceDeleteBranch?: boolean;
   }): Promise<PerformDeleteWorktreeFolderResult> {
     const projectPath = input.path.trim();
     const project = this.projectsState.state.find(
@@ -1571,7 +1934,11 @@ export class ProjectGitService {
     }
 
     try {
-      await sourceGit.raw(["branch", "-d", project.gitBranch]);
+      await sourceGit.raw([
+        "branch",
+        input.forceDeleteBranch ? "-D" : "-d",
+        project.gitBranch,
+      ]);
       return {};
     } catch (error) {
       const gitError = error as { message?: string };

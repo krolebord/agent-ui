@@ -8,6 +8,7 @@ import { useProjectWorktreeDialogStore } from "@renderer/components/project-work
 import { useSettingsStore } from "@renderer/components/settings-dialog";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { useWorktreeDeleteDialogStore } from "@renderer/components/worktree-delete-dialog";
+import { useWorktreeManagerDialogStore } from "@renderer/components/worktree-manager-dialog";
 import { orpc } from "@renderer/orpc-client";
 import {
   buildProjectSessionGroups,
@@ -131,6 +132,9 @@ export function useAppShortcuts(): void {
   const isDiffReviewCommitDialogOpen = useDiffReviewCommitDialogStore(
     (state) => state.payload !== null,
   );
+  const openWorktreeManagerOriginPath = useWorktreeManagerDialogStore(
+    (state) => state.originPath,
+  );
 
   const dialogsAreOpen =
     confirmDialogOpen ||
@@ -139,6 +143,7 @@ export function useAppShortcuts(): void {
     Boolean(openProjectDefaultsDialogCwd) ||
     Boolean(openProjectWorktreeDialogPath) ||
     Boolean(openWorktreeDeleteDialogPath) ||
+    Boolean(openWorktreeManagerOriginPath) ||
     isDiffReviewCommitDialogOpen;
 
   useHotkey(

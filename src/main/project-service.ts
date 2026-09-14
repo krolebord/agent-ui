@@ -65,6 +65,7 @@ export const claudeProjectSchema = z.object({
   hidden: z.boolean().optional().catch(undefined),
   alias: projectAliasSchema,
   worktreeOriginPath: worktreeOriginPathSchema,
+  worktreePlaceholder: z.boolean().optional().catch(undefined),
   worktreeSetupCommands: z.string().optional().catch(undefined),
   interactionDisabled: z.boolean().optional().catch(undefined),
   deletionToast: projectDeletionToastSchema.optional().catch(undefined),
@@ -120,6 +121,8 @@ function normalizeProjects(projects: ClaudeProject[]): ClaudeProject[] {
       collapsed: project.collapsed === true,
       hidden: project.hidden === true ? true : undefined,
       worktreeOriginPath: project.worktreeOriginPath?.trim() || undefined,
+      worktreePlaceholder:
+        project.worktreePlaceholder === true ? true : undefined,
     });
   }
 
@@ -146,12 +149,20 @@ export const defineProjectStatePersistence = (state: ProjectState) =>
     schema: z.array(claudeProjectSchema).transform(normalizeProjects),
     toPersisted: (projects) =>
       projects.map(
-        ({ path, collapsed, hidden, alias, worktreeOriginPath }) => ({
+        ({
           path,
           collapsed,
           hidden,
           alias,
           worktreeOriginPath,
+          worktreePlaceholder,
+        }) => ({
+          path,
+          collapsed,
+          hidden,
+          alias,
+          worktreeOriginPath,
+          worktreePlaceholder,
         }),
       ) as ClaudeProject[],
   });
@@ -348,6 +359,7 @@ async function runWorktreeDeletionJob(
     path: string;
     deleteBranch: boolean;
     forceDeleteFolder: boolean;
+    forceDeleteBranch: boolean;
   },
 ): Promise<void> {
   const { path } = input;
@@ -358,6 +370,7 @@ async function runWorktreeDeletionJob(
         deleteFolder: true,
         deleteBranch: input.deleteBranch,
         forceDeleteFolder: input.forceDeleteFolder,
+        forceDeleteBranch: input.forceDeleteBranch,
       });
 
     const branchWarning = result.warning;
@@ -645,6 +658,13 @@ export const projectsRouter = {
     .handler(async ({ input, context }) =>
       addTrackedProject(input.path, context),
     ),
+  getWorktreeStatuses: procedure
+    .input(z.object({ originPath: projectPathSchema }))
+    .handler(async ({ input, context }) => {
+      return context.projectGitService.getWorktreeStatuses(
+        normalizeProjectPath(input.originPath),
+      );
+    }),
   getWorktreeCreationData: procedure
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input, context }) => {
@@ -928,6 +948,33 @@ export const projectsRouter = {
 
       return { path: result.path, sessionId };
     }),
+  createSessionWorktree: procedure
+    .input(
+      z.object({
+        sourcePath: projectPathSchema,
+        name: z.string().trim().optional(),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      const sourcePath = normalizeProjectPath(input.sourcePath);
+      assertProjectPathInteractionAllowed(sourcePath, context);
+
+      const result = await context.projectGitService.createSessionWorktree({
+        sourcePath,
+        name: input.name,
+      });
+
+      let setupSessionId: string | undefined;
+      if (result.setupCommands.length > 0) {
+        setupSessionId = context.sessions.worktreeSetup.createSessionAndStart({
+          cwd: result.worktreeRoot,
+          projectRoot: result.projectRoot,
+          commands: result.setupCommands,
+        });
+      }
+
+      return { path: result.path, setupSessionId };
+    }),
   setProjectCollapsed: procedure
     .input(z.object({ path: projectPathSchema, collapsed: z.boolean() }))
     .handler(async ({ input, context }) => {
@@ -1039,6 +1086,7 @@ export const projectsRouter = {
         deleteFolder: z.boolean(),
         deleteBranch: z.boolean(),
         forceDeleteFolder: z.boolean(),
+        forceDeleteBranch: z.boolean().optional(),
       }),
     )
     .handler(async ({ input, context }) => {
@@ -1088,6 +1136,7 @@ export const projectsRouter = {
         path,
         deleteBranch: input.deleteBranch,
         forceDeleteFolder: input.forceDeleteFolder,
+        forceDeleteBranch: input.forceDeleteBranch === true,
       }).catch((error) => {
         log.error("Worktree deletion job rejected", error);
       });

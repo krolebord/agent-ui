@@ -10,9 +10,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@renderer/components/ui/dropdown-menu";
 import { ScrollArea } from "@renderer/components/ui/scroll-area";
@@ -33,9 +34,14 @@ import {
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import {
+  buildProjectTree,
   getProjectDisplayName,
   getProjectNameFromPath,
   getSessionLastActivityLabel,
+  getWorktreeDisplayName,
+  type ProjectTreeNode,
+  projectTreeNodeHoldsSelection,
+  resolveProjectSelectionDisplay,
 } from "@renderer/services/terminal-session-selectors";
 import {
   canSettleSession,
@@ -73,6 +79,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAddProjectDialogStore } from "./add-project-dialog";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { ProjectFavicon } from "./project-favicon";
+import { useProjectWorktreeDialogStore } from "./project-worktree-dialog";
 import {
   renderContextMenuActions,
   renderDropdownMenuActions,
@@ -90,6 +97,11 @@ import {
   useUnpinnedNavPageActive,
 } from "./sidebar-view-toggle";
 import { useAppState } from "./sync-state-provider";
+
+interface ProjectScope {
+  path: string;
+  includeWorktrees: boolean;
+}
 
 const SETTLED_INITIAL_COUNT = 10;
 const SETTLED_PAGE_COUNT = 25;
@@ -691,6 +703,131 @@ function ShelfHeader({
   );
 }
 
+function ScopeCheck({ selected }: { selected: boolean }) {
+  return (
+    <Check
+      className={cn("size-3 shrink-0", selected ? "opacity-100" : "opacity-0")}
+    />
+  );
+}
+
+function ProjectScopeMenuEntry({
+  node,
+  scope,
+  onSelect,
+  onCreateWorktree,
+}: {
+  node: ProjectTreeNode;
+  scope: ProjectScope | null;
+  onSelect: (scope: ProjectScope) => void;
+  onCreateWorktree: (originPath: string) => void;
+}) {
+  const isRootSelected =
+    scope?.path === node.path &&
+    !(scope.includeWorktrees && node.worktrees.length > 0);
+  const isTreeSelected =
+    scope?.path === node.path &&
+    scope.includeWorktrees &&
+    node.worktrees.length > 0;
+  const holdsSelection =
+    scope != null &&
+    projectTreeNodeHoldsSelection(node, { kind: "project", path: scope.path });
+
+  const label = (
+    <>
+      <ProjectFavicon projectPath={node.path} className="size-3.5" />
+      <span className="min-w-0 truncate">{node.label}</span>
+      {node.hidden || node.unlisted ? (
+        <span className="shrink-0 text-xs text-zinc-500">
+          {node.hidden ? "hidden" : "unlisted"}
+        </span>
+      ) : null}
+    </>
+  );
+
+  const selectTree = () => {
+    onSelect({ path: node.path, includeWorktrees: true });
+  };
+
+  if (!node.canCreateWorktree && node.worktrees.length === 0) {
+    return (
+      <DropdownMenuItem
+        title={node.path}
+        className="gap-1.5"
+        onSelect={selectTree}
+      >
+        <ScopeCheck selected={isRootSelected} />
+        {label}
+      </DropdownMenuItem>
+    );
+  }
+
+  return (
+    <DropdownMenuSub defaultOpen={holdsSelection && !isTreeSelected}>
+      <DropdownMenuSubTrigger
+        title={node.path}
+        className={cn("gap-1.5", holdsSelection && "bg-accent/50")}
+        onClick={selectTree}
+      >
+        <ScopeCheck selected={isTreeSelected} />
+        {label}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="min-w-52">
+        {node.worktrees.length > 0 ? (
+          <DropdownMenuItem className="gap-1.5" onSelect={selectTree}>
+            <ScopeCheck selected={isTreeSelected} />
+            <span className="truncate">Project and worktrees</span>
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuItem
+          className="gap-1.5"
+          onSelect={() => {
+            onSelect({ path: node.path, includeWorktrees: false });
+          }}
+        >
+          <ScopeCheck selected={isRootSelected} />
+          <span className="truncate">Default</span>
+          {node.branch ? (
+            <span className="ml-auto truncate text-xs text-zinc-500">
+              {node.branch}
+            </span>
+          ) : null}
+        </DropdownMenuItem>
+
+        {node.worktrees.length > 0 ? <DropdownMenuSeparator /> : null}
+        {node.worktrees.map((worktree) => (
+          <DropdownMenuItem
+            key={worktree.path}
+            title={worktree.path}
+            className="gap-1.5"
+            onSelect={() => {
+              onSelect({ path: worktree.path, includeWorktrees: false });
+            }}
+          >
+            <ScopeCheck selected={scope?.path === worktree.path} />
+            <GitFork className="size-3.5 text-zinc-500" />
+            <span className="min-w-0 truncate">{worktree.label}</span>
+          </DropdownMenuItem>
+        ))}
+
+        {node.canCreateWorktree ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="gap-1.5"
+              onSelect={() => onCreateWorktree(node.path)}
+            >
+              <ScopeCheck selected={false} />
+              <Plus className="size-3.5 text-zinc-500" />
+              <span className="truncate">New worktree…</span>
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
+
 export function InboxSidebar() {
   const projects = useAppState((x) => x.projects);
   const sessions = useAppState((x) => x.sessions);
@@ -699,6 +836,9 @@ export function InboxSidebar() {
     (x) => x.setOpenProjectCwd,
   );
   const openAddProjectDialog = useAddProjectDialogStore((x) => x.open);
+  const setOpenProjectWorktreePath = useProjectWorktreeDialogStore(
+    (x) => x.setOpenProjectPath,
+  );
   const unpinnedNavPageActive = useUnpinnedNavPageActive();
 
   const settleMutation = useMutation(orpc.sessions.settle.mutationOptions());
@@ -710,30 +850,47 @@ export function InboxSidebar() {
     orpc.sessions.unsnooze.mutationOptions(),
   );
 
-  const [projectScopePath, setProjectScopePath] = useState<string | null>(null);
+  const [projectScope, setProjectScope] = useState<ProjectScope | null>(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const projectScopePath = projectScope?.path ?? null;
 
   const projectLabelByPath = useMemo(
     () =>
       new Map(
         projects.map((project) => [
           project.path,
-          getProjectDisplayName(project),
+          project.worktreeOriginPath
+            ? getWorktreeDisplayName(project)
+            : getProjectDisplayName(project),
         ]),
       ),
     [projects],
   );
 
+  const scopePaths = useMemo(() => {
+    if (projectScope === null) {
+      return null;
+    }
+    const paths = new Set([projectScope.path]);
+    if (projectScope.includeWorktrees) {
+      for (const project of projects) {
+        if (project.worktreeOriginPath === projectScope.path) {
+          paths.add(project.path);
+        }
+      }
+    }
+    return paths;
+  }, [projectScope, projects]);
+
   const scopedSessions = useMemo(() => {
     const all = Object.values(sessions).filter(
       (session) => session.type !== "local-terminal",
     );
-    if (projectScopePath === null) {
+    if (scopePaths === null) {
       return all;
     }
-    return all.filter(
-      (session) => session.startupConfig.cwd === projectScopePath,
-    );
-  }, [projectScopePath, sessions]);
+    return all.filter((session) => scopePaths.has(session.startupConfig.cwd));
+  }, [scopePaths, sessions]);
 
   const [wakeTick, setWakeTick] = useState(0);
 
@@ -761,9 +918,12 @@ export function InboxSidebar() {
   const [settledVisibleCount, setSettledVisibleCount] = useState(
     SETTLED_INITIAL_COUNT,
   );
-  const [settledScopeKey, setSettledScopeKey] = useState(projectScopePath);
-  if (settledScopeKey !== projectScopePath) {
-    setSettledScopeKey(projectScopePath);
+  const scopeKey = projectScope
+    ? `${projectScope.path}:${projectScope.includeWorktrees}`
+    : null;
+  const [settledScopeKey, setSettledScopeKey] = useState(scopeKey);
+  if (settledScopeKey !== scopeKey) {
+    setSettledScopeKey(scopeKey);
     setSettledVisibleCount(SETTLED_INITIAL_COUNT);
   }
 
@@ -865,6 +1025,38 @@ export function InboxSidebar() {
         : "All projects"
       : labelForPath(projectScopePath);
 
+  const projectNodes = useMemo(
+    () => buildProjectTree({ projects, selectedPath: projectScopePath ?? "" }),
+    [projects, projectScopePath],
+  );
+
+  const scopeDisplay =
+    projectScopePath === null
+      ? null
+      : resolveProjectSelectionDisplay(projectNodes, {
+          kind: "project",
+          path: projectScopePath,
+        });
+
+  const scopeSpansWorktrees =
+    projectScope?.includeWorktrees === true &&
+    projectNodes.some(
+      (node) => node.path === projectScope.path && node.worktrees.length > 0,
+    );
+
+  const selectScope = useCallback((scope: ProjectScope | null) => {
+    setProjectScope(scope);
+    setProjectMenuOpen(false);
+  }, []);
+
+  const createWorktree = useCallback(
+    (originPath: string) => {
+      setProjectMenuOpen(false);
+      setOpenProjectWorktreePath(originPath);
+    },
+    [setOpenProjectWorktreePath],
+  );
+
   const newSessionCwd =
     [
       activeSessionId === null
@@ -921,48 +1113,58 @@ export function InboxSidebar() {
       </div>
 
       <div className="border-b border-border/70 px-1.5 py-1.5">
-        <DropdownMenu>
+        <DropdownMenu
+          modal
+          open={projectMenuOpen}
+          onOpenChange={setProjectMenuOpen}
+        >
           <DropdownMenuTrigger asChild>
             <Button
               variant="flat"
               className="h-7 w-full justify-start gap-1.5 px-1.5 text-xs text-zinc-300 pointer-coarse:h-10 pointer-coarse:px-2 pointer-coarse:text-sm"
               aria-label="Filter sessions by project"
+              title={projectScopePath ?? undefined}
             >
               {projectScopePath === null ? (
                 <Folder className="size-3.5 shrink-0" />
               ) : (
-                <ProjectFavicon projectPath={projectScopePath} />
+                <ProjectFavicon
+                  projectPath={scopeDisplay?.faviconPath ?? projectScopePath}
+                />
               )}
-              <span className="min-w-0 flex-1 truncate text-left">
-                {scopeLabel}
+              <span className="min-w-0 truncate text-left">
+                {scopeDisplay?.label ?? scopeLabel}
               </span>
-              <ChevronDown className="size-3.5 shrink-0" />
+              {scopeDisplay?.detail ? (
+                <>
+                  <span className="shrink-0 text-zinc-600">/</span>
+                  <span className="min-w-0 truncate text-left text-zinc-400">
+                    {scopeDisplay.detail}
+                  </span>
+                </>
+              ) : null}
+              {scopeSpansWorktrees ? (
+                <span className="shrink-0 text-zinc-500">+ worktrees</span>
+              ) : null}
+              <ChevronDown className="ml-auto size-3.5 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-w-72">
-            {projects.length > 0 ? (
+          <DropdownMenuContent align="start" className="max-w-72 min-w-56">
+            {projectNodes.length > 0 ? (
               <>
-                <DropdownMenuRadioGroup
-                  value={projectScopePath ?? "all"}
-                  onValueChange={(value) => {
-                    setProjectScopePath(value === "all" ? null : value);
-                  }}
-                >
-                  <DropdownMenuRadioItem value="all">
-                    All projects
-                  </DropdownMenuRadioItem>
-                  {projects.map((project) => (
-                    <DropdownMenuRadioItem
-                      key={project.path}
-                      value={project.path}
-                    >
-                      <ProjectFavicon projectPath={project.path} />
-                      <span className="min-w-0 truncate">
-                        {getProjectDisplayName(project)}
-                      </span>
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
+                <DropdownMenuItem onSelect={() => selectScope(null)}>
+                  <ScopeCheck selected={projectScope === null} />
+                  All projects
+                </DropdownMenuItem>
+                {projectNodes.map((node) => (
+                  <ProjectScopeMenuEntry
+                    key={node.path}
+                    node={node}
+                    scope={projectScope}
+                    onSelect={selectScope}
+                    onCreateWorktree={createWorktree}
+                  />
+                ))}
                 <DropdownMenuSeparator />
               </>
             ) : null}
