@@ -14,6 +14,12 @@ export interface ClaudeModelAlias {
 
 export const claudeCatalogModels: ClaudeCatalogModel[] = [
   {
+    label: "Opus 5.5",
+    value: "claude-opus-5-5",
+    knowledgeCutoff: "June 2026",
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+  },
+  {
     label: "Opus 5",
     value: "claude-opus-5",
     knowledgeCutoff: "May 2026",

@@ -13,6 +13,52 @@ export const cursorModelFamilies: CursorModelFamily[] = [
     ],
   },
   {
+    id: "grok-4.7",
+    label: "Grok 4.7",
+    variants: [
+      {
+        value: "grok-4.7-xhigh",
+        variantLabel: "Extra high",
+        displayLabel: "Grok 4.7 · Extra high",
+      },
+      {
+        value: "grok-4.7-xhigh-fast",
+        variantLabel: "Extra high · Fast",
+        displayLabel: "Grok 4.7 · Extra high · Fast",
+      },
+      {
+        value: "grok-4.7-high",
+        variantLabel: "High",
+        displayLabel: "Grok 4.7 · High",
+      },
+      {
+        value: "grok-4.7-high-fast",
+        variantLabel: "High · Fast",
+        displayLabel: "Grok 4.7 · High · Fast",
+      },
+      {
+        value: "grok-4.7-medium",
+        variantLabel: "Medium",
+        displayLabel: "Grok 4.7 · Medium",
+      },
+      {
+        value: "grok-4.7-medium-fast",
+        variantLabel: "Medium · Fast",
+        displayLabel: "Grok 4.7 · Medium · Fast",
+      },
+      {
+        value: "grok-4.7-low",
+        variantLabel: "Low",
+        displayLabel: "Grok 4.7 · Low",
+      },
+      {
+        value: "grok-4.7-low-fast",
+        variantLabel: "Low · Fast",
+        displayLabel: "Grok 4.7 · Low · Fast",
+      },
+    ],
+  },
+  {
     id: "cursor-grok-4.6",
     label: "Cursor Grok 4.6",
     variants: [
@@ -59,6 +105,42 @@ export const cursorModelFamilies: CursorModelFamily[] = [
     ],
   },
   {
+    id: "cursor-grok-4.5",
+    label: "Cursor Grok 4.5",
+    variants: [
+      {
+        value: "cursor-grok-4.5-high",
+        variantLabel: "High",
+        displayLabel: "Cursor Grok 4.5 · High",
+      },
+      {
+        value: "cursor-grok-4.5-high-fast",
+        variantLabel: "High · Fast",
+        displayLabel: "Cursor Grok 4.5 · High · Fast",
+      },
+      {
+        value: "cursor-grok-4.5-medium",
+        variantLabel: "Medium",
+        displayLabel: "Cursor Grok 4.5 · Medium",
+      },
+      {
+        value: "cursor-grok-4.5-medium-fast",
+        variantLabel: "Medium · Fast",
+        displayLabel: "Cursor Grok 4.5 · Medium · Fast",
+      },
+      {
+        value: "cursor-grok-4.5-low",
+        variantLabel: "Low",
+        displayLabel: "Cursor Grok 4.5 · Low",
+      },
+      {
+        value: "cursor-grok-4.5-low-fast",
+        variantLabel: "Low · Fast",
+        displayLabel: "Cursor Grok 4.5 · Low · Fast",
+      },
+    ],
+  },
+  {
     id: "composer-2.5",
     label: "Composer 2.5",
     variants: [
@@ -71,6 +153,42 @@ export const cursorModelFamilies: CursorModelFamily[] = [
         value: "composer-2.5-fast",
         variantLabel: "Fast",
         displayLabel: "Composer 2.5 · Fast",
+      },
+    ],
+  },
+  {
+    id: "muse-spark-1.3",
+    label: "Muse Spark 1.3",
+    variants: [
+      {
+        value: "muse-spark-1.3-max",
+        variantLabel: "Max",
+        displayLabel: "Muse Spark 1.3 · Max",
+      },
+      {
+        value: "muse-spark-1.3-xhigh",
+        variantLabel: "Extra high",
+        displayLabel: "Muse Spark 1.3 · Extra high",
+      },
+      {
+        value: "muse-spark-1.3-high",
+        variantLabel: "High",
+        displayLabel: "Muse Spark 1.3 · High",
+      },
+      {
+        value: "muse-spark-1.3-medium",
+        variantLabel: "Medium",
+        displayLabel: "Muse Spark 1.3 · Medium",
+      },
+      {
+        value: "muse-spark-1.3-low",
+        variantLabel: "Low",
+        displayLabel: "Muse Spark 1.3 · Low",
+      },
+      {
+        value: "muse-spark-1.3-minimal",
+        variantLabel: "Minimal",
+        displayLabel: "Muse Spark 1.3 · Minimal",
       },
     ],
   },
@@ -843,6 +961,62 @@ export const cursorModelFamilies: CursorModelFamily[] = [
         value: "claude-opus-5-thinking-low-fast",
         variantLabel: "Thinking · Low · Fast",
         displayLabel: "Claude Opus 5 · Thinking · Low · Fast",
+      },
+    ],
+  },
+  {
+    id: "claude-opus-5-5",
+    label: "Claude Opus 5.5",
+    variants: [
+      {
+        value: "claude-opus-5-5-max",
+        variantLabel: "Max",
+        displayLabel: "Claude Opus 5.5 · Max",
+      },
+      {
+        value: "claude-opus-5-5-max-fast",
+        variantLabel: "Max · Fast",
+        displayLabel: "Claude Opus 5.5 · Max · Fast",
+      },
+      {
+        value: "claude-opus-5-5-xhigh",
+        variantLabel: "Extra high",
+        displayLabel: "Claude Opus 5.5 · Extra high",
+      },
+      {
+        value: "claude-opus-5-5-xhigh-fast",
+        variantLabel: "Extra high · Fast",
+        displayLabel: "Claude Opus 5.5 · Extra high · Fast",
+      },
+      {
+        value: "claude-opus-5-5-high",
+        variantLabel: "High",
+        displayLabel: "Claude Opus 5.5 · High",
+      },
+      {
+        value: "claude-opus-5-5-high-fast",
+        variantLabel: "High · Fast",
+        displayLabel: "Claude Opus 5.5 · High · Fast",
+      },
+      {
+        value: "claude-opus-5-5-medium",
+        variantLabel: "Medium",
+        displayLabel: "Claude Opus 5.5 · Medium",
+      },
+      {
+        value: "claude-opus-5-5-medium-fast",
+        variantLabel: "Medium · Fast",
+        displayLabel: "Claude Opus 5.5 · Medium · Fast",
+      },
+      {
+        value: "claude-opus-5-5-low",
+        variantLabel: "Low",
+        displayLabel: "Claude Opus 5.5 · Low",
+      },
+      {
+        value: "claude-opus-5-5-low-fast",
+        variantLabel: "Low · Fast",
+        displayLabel: "Claude Opus 5.5 · Low · Fast",
       },
     ],
   },
