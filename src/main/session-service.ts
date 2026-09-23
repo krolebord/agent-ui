@@ -133,6 +133,14 @@ const renameClaudeSessionSchema = z.object({
   title: z.string().trim().min(1),
 });
 
+const setClaudeSessionAccountSchema = z.object({
+  sessionId: z.string(),
+  accountId: z.string().optional(),
+});
+type SetClaudeSessionAccountInput = z.infer<
+  typeof setClaudeSessionAccountSchema
+>;
+
 function claudeSessionCwd(
   state: SessionServiceState,
   sessionId: string,
@@ -180,6 +188,11 @@ export const claudeSessionsRouter = {
     .input(renameClaudeSessionSchema)
     .handler(async ({ input, context }) => {
       context.sessionsService.renameSession(input.sessionId, input.title);
+    }),
+  setAccount: procedure
+    .input(setClaudeSessionAccountSchema)
+    .handler(async ({ input, context }) => {
+      return context.sessionsService.setSessionAccount(input);
     }),
   subscribeToSessionTerminal: procedure
     .input(z.object({ sessionId: z.string() }))
@@ -802,6 +815,23 @@ export class SessionsServiceNew {
     });
 
     this.titleGeneration.forget(sessionId);
+  }
+
+  setSessionAccount(input: SetClaudeSessionAccountInput): {
+    requiresRestart: boolean;
+  } {
+    const { sessionId, accountId } = input;
+    this.getSessionState(sessionId);
+
+    this.sessionsState.updateState((state) => {
+      const session = state[sessionId];
+      if (session?.type !== "claude-local-terminal") {
+        return;
+      }
+      session.startupConfig.accountId = accountId;
+    });
+
+    return { requiresRestart: this.liveSessions.has(sessionId) };
   }
 
   getLiveSession(sessionId: string) {

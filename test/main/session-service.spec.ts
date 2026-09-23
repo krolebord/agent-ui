@@ -473,6 +473,65 @@ describe("SessionsServiceNew", () => {
     });
   });
 
+  describe("setSessionAccount", () => {
+    it("records the account without restarting a live session", async () => {
+      const getAccountAuth = vi.fn().mockResolvedValue({
+        type: "setup-token",
+        token: "sk-ant-oat01-work",
+      } satisfies ClaudeAccountAuth);
+      const { service, state } = createService({ getAccountAuth });
+      const sessionId = await service.startNewSession(
+        makeStartInput({ accountId: "account-a" }),
+      );
+      getAccountAuth.mockClear();
+
+      expect(
+        service.setSessionAccount({ sessionId, accountId: "account-b" }),
+      ).toEqual({ requiresRestart: true });
+
+      expect(state[sessionId]?.startupConfig.accountId).toBe("account-b");
+      expect(getAccountAuth).not.toHaveBeenCalled();
+      expect(terminalSessionSpies.stop).not.toHaveBeenCalled();
+      expect(terminalSessionSpies.start).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports no restart is needed for a stopped session", async () => {
+      const { service, state } = createService();
+      const sessionId = await service.startNewSession(makeStartInput());
+      await service.stopLiveSession(sessionId);
+
+      expect(
+        service.setSessionAccount({ sessionId, accountId: "account-b" }),
+      ).toEqual({ requiresRestart: false });
+      expect(state[sessionId]?.startupConfig.accountId).toBe("account-b");
+    });
+
+    it("clears the account when switching back to the default", async () => {
+      const { service, state } = createService({
+        getAccountAuth: vi.fn().mockResolvedValue({
+          type: "setup-token",
+          token: "sk-ant-oat01-work",
+        } satisfies ClaudeAccountAuth),
+      });
+      const sessionId = await service.startNewSession(
+        makeStartInput({ accountId: "account-a" }),
+      );
+      await service.stopLiveSession(sessionId);
+
+      service.setSessionAccount({ sessionId, accountId: undefined });
+
+      expect(state[sessionId]?.startupConfig.accountId).toBeUndefined();
+    });
+
+    it("throws for an unknown session", () => {
+      const { service } = createService();
+
+      expect(() =>
+        service.setSessionAccount({ sessionId: "missing", accountId: "a" }),
+      ).toThrow("Session missing not found");
+    });
+  });
+
   describe("dispose", () => {
     it("stops and cleans up all live sessions", async () => {
       const { service, stateFileManager, titleGeneration } = createService();

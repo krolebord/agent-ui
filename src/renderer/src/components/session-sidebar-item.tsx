@@ -221,6 +221,60 @@ function getSessionInitialPrompt(session: Session): string | undefined {
   return prompt || undefined;
 }
 
+interface SwitchableAccount {
+  id: string;
+  label: string;
+  status: "ok" | "needs-relogin";
+}
+
+function buildSwitchAccountActions(input: {
+  keyPrefix: string;
+  accounts: SwitchableAccount[];
+  currentAccountId: string | undefined;
+  isPending: boolean;
+  onSelect: (accountId: string | undefined) => void;
+}): SessionMenuAction[] {
+  const { keyPrefix, accounts, currentAccountId, isPending, onSelect } = input;
+  if (accounts.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      type: "submenu",
+      key: keyPrefix,
+      label: "Switch account",
+      icon: Users,
+      items: [
+        {
+          type: "item",
+          key: `${keyPrefix}:default`,
+          label: "Default account",
+          trailingLabel: currentAccountId ? undefined : "Current",
+          disabled: !currentAccountId || isPending,
+          onSelect: () => onSelect(undefined),
+        },
+        ...accounts.map<SessionMenuActionItem>((account) => ({
+          type: "item",
+          key: `${keyPrefix}:${account.id}`,
+          label: account.label,
+          trailingLabel:
+            account.id === currentAccountId
+              ? "Current"
+              : account.status === "needs-relogin"
+                ? "Needs re-login"
+                : undefined,
+          disabled:
+            account.id === currentAccountId ||
+            account.status === "needs-relogin" ||
+            isPending,
+          onSelect: () => onSelect(account.id),
+        })),
+      ],
+    },
+  ];
+}
+
 function useSwitchCodexAccountActions(
   session: Session | undefined,
 ): SessionMenuAction[] {
@@ -242,54 +296,61 @@ function useSwitchCodexAccountActions(
     },
   });
 
-  if (session?.type !== "codex-local-terminal" || codexAccounts.length === 0) {
+  if (session?.type !== "codex-local-terminal") {
     return [];
   }
 
-  const currentAccountId = session.startupConfig.accountId;
-  const switchTo = (accountId?: string) => {
-    switchAccountMutation.mutate({ sessionId: session.sessionId, accountId });
-  };
+  const sessionId = session.sessionId;
+  return buildSwitchAccountActions({
+    keyPrefix: "switch-codex-account",
+    accounts: codexAccounts,
+    currentAccountId: session.startupConfig.accountId,
+    isPending: switchAccountMutation.isPending,
+    onSelect: (accountId) =>
+      switchAccountMutation.mutate({ sessionId, accountId }),
+  });
+}
 
-  return [
-    {
-      type: "submenu",
-      key: "switch-codex-account",
-      label: "Switch account",
-      icon: Users,
-      items: [
-        {
-          type: "item",
-          key: "switch-codex-account:default",
-          label: "Default account",
-          trailingLabel: currentAccountId ? undefined : "Current",
-          disabled: !currentAccountId || switchAccountMutation.isPending,
-          onSelect: () => switchTo(undefined),
-        },
-        ...codexAccounts.map<SessionMenuActionItem>((account) => ({
-          type: "item",
-          key: `switch-codex-account:${account.id}`,
-          label: account.label,
-          trailingLabel:
-            account.id === currentAccountId
-              ? "Current"
-              : account.status === "needs-relogin"
-                ? "Needs re-login"
-                : undefined,
-          disabled:
-            account.id === currentAccountId ||
-            account.status === "needs-relogin" ||
-            switchAccountMutation.isPending,
-          onSelect: () => switchTo(account.id),
-        })),
-      ],
+function useSwitchClaudeAccountActions(
+  session: Session | undefined,
+): SessionMenuAction[] {
+  const claudeAccounts = useAppState((s) => s.claudeAccounts.accounts);
+  const switchAccountMutation = useMutation({
+    mutationFn: (input: { sessionId: string; accountId?: string }) =>
+      orpc.sessions.localClaude.setAccount.call(input),
+    onSuccess: ({ requiresRestart }) => {
+      toast.success(
+        requiresRestart
+          ? "Account switched; restart the session to apply"
+          : "Switched account for this session",
+      );
     },
-  ];
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to switch account",
+      );
+    },
+  });
+
+  if (session?.type !== "claude-local-terminal") {
+    return [];
+  }
+
+  const sessionId = session.sessionId;
+  return buildSwitchAccountActions({
+    keyPrefix: "switch-claude-account",
+    accounts: claudeAccounts,
+    currentAccountId: session.startupConfig.accountId,
+    isPending: switchAccountMutation.isPending,
+    onSelect: (accountId) =>
+      switchAccountMutation.mutate({ sessionId, accountId }),
+  });
 }
 
 export function useTypeSpecificSessionMenuActions(
   session: Session | undefined,
 ): SessionMenuAction[] {
+  const switchClaudeAccountActions = useSwitchClaudeAccountActions(session);
   const switchCodexAccountActions = useSwitchCodexAccountActions(session);
   const forkClaudeMutation = useMutation({
     mutationFn: async (sessionId: string) => {
@@ -384,6 +445,7 @@ export function useTypeSpecificSessionMenuActions(
         onSelect: () => toggleRemoteControlMutation.mutate(session.sessionId),
         disabled: toggleRemoteControlMutation.isPending,
       },
+      ...switchClaudeAccountActions,
     ];
   }
 
