@@ -26,8 +26,9 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
 
   const args: string[] = [];
 
-  if (input.remoteWsUrl?.trim()) {
-    args.push("--remote", input.remoteWsUrl.trim());
+  const remoteWsUrl = input.remoteWsUrl?.trim();
+  if (remoteWsUrl) {
+    args.push("--remote", remoteWsUrl);
   }
 
   if (input.resumeSessionId) {
@@ -39,10 +40,14 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
   args.push("--no-alt-screen");
   args.push("--disable apps");
 
-  if (input.permissionMode === "full-auto") {
-    args.push("--full-auto");
-  } else if (input.permissionMode === "yolo") {
-    args.push("--dangerously-bypass-approvals-and-sandbox");
+  const inheritsRemotePermissions =
+    remoteWsUrl && (input.resumeSessionId || input.forkSessionId);
+  if (!inheritsRemotePermissions) {
+    if (input.permissionMode === "full-auto") {
+      args.push("--full-auto");
+    } else if (input.permissionMode === "yolo") {
+      args.push("--dangerously-bypass-approvals-and-sandbox");
+    }
   }
 
   const model = input.model?.trim();

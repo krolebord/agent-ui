@@ -62,6 +62,12 @@ export const claudeCatalogModels: ClaudeCatalogModel[] = [
     supportedEfforts: [],
   },
   {
+    label: "Sonnet 5.5",
+    value: "claude-sonnet-5-5",
+    knowledgeCutoff: "June 2026",
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+  },
+  {
     label: "Sonnet 5",
     value: "claude-sonnet-5",
     knowledgeCutoff: "January 2026",

@@ -585,7 +585,7 @@ describe("CodexSessionsManager", () => {
       cwd: "/tmp",
       modelReasoningEffort: "high",
       fastMode: "off",
-      permissionMode: "default",
+      permissionMode: "yolo",
       initialPrompt: undefined,
     });
 
@@ -794,7 +794,6 @@ describe("CodexSessionsManager", () => {
       "codex-session-1",
       "--no-alt-screen",
       "--disable apps",
-      "--dangerously-bypass-approvals-and-sandbox",
       "--model",
       "gpt-5.3-codex",
       "--enable",

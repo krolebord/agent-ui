@@ -879,6 +879,37 @@ export const cursorModelFamilies: CursorModelFamily[] = [
     ],
   },
   {
+    id: "claude-sonnet-5-5",
+    label: "Claude Sonnet 5.5",
+    variants: [
+      {
+        value: "claude-sonnet-5-5-max",
+        variantLabel: "Max",
+        displayLabel: "Claude Sonnet 5.5 · Max",
+      },
+      {
+        value: "claude-sonnet-5-5-xhigh",
+        variantLabel: "Extra high",
+        displayLabel: "Claude Sonnet 5.5 · Extra high",
+      },
+      {
+        value: "claude-sonnet-5-5-high",
+        variantLabel: "High",
+        displayLabel: "Claude Sonnet 5.5 · High",
+      },
+      {
+        value: "claude-sonnet-5-5-medium",
+        variantLabel: "Medium",
+        displayLabel: "Claude Sonnet 5.5 · Medium",
+      },
+      {
+        value: "claude-sonnet-5-5-low",
+        variantLabel: "Low",
+        displayLabel: "Claude Sonnet 5.5 · Low",
+      },
+    ],
+  },
+  {
     id: "claude-opus-5",
     label: "Claude Opus 5",
     variants: [

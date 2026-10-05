@@ -1,7 +1,57 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexArgs } from "../../src/main/codex-cli";
+import {
+  type BuildCodexArgsInput,
+  buildCodexArgs,
+} from "../../src/main/codex-cli";
 
 describe("buildCodexArgs", () => {
+  describe.each<{
+    permissionMode: BuildCodexArgsInput["permissionMode"];
+    flag: string;
+  }>([
+    { permissionMode: "full-auto", flag: "--full-auto" },
+    {
+      permissionMode: "yolo",
+      flag: "--dangerously-bypass-approvals-and-sandbox",
+    },
+  ])("$permissionMode permissions", ({ permissionMode, flag }) => {
+    it.each([
+      { command: "resume", resumeSessionId: "session-id" },
+      { command: "fork", forkSessionId: "session-id" },
+    ])("omits permission flags for remote $command", (session) => {
+      const { args } = buildCodexArgs({
+        ...session,
+        permissionMode,
+        remoteWsUrl: " ws://127.0.0.1:34567 ",
+      });
+
+      expect(args.slice(0, 4)).toEqual([
+        "--remote",
+        "ws://127.0.0.1:34567",
+        session.command,
+        "session-id",
+      ]);
+      expect(args).not.toContain("--full-auto");
+      expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+    });
+
+    it.each([
+      { command: "local start" },
+      { command: "remote start", remoteWsUrl: "ws://127.0.0.1:34567" },
+      { command: "local resume", resumeSessionId: "session-id" },
+      { command: "local fork", forkSessionId: "session-id" },
+      {
+        command: "resume with a blank remote URL",
+        resumeSessionId: "session-id",
+        remoteWsUrl: " ",
+      },
+    ])("preserves permission flags for $command", (session) => {
+      const { args } = buildCodexArgs({ ...session, permissionMode });
+
+      expect(args).toContain(flag);
+    });
+  });
+
   it("defaults model reasoning effort to high without fast-mode flags", () => {
     const { args } = buildCodexArgs({
       permissionMode: "default",
