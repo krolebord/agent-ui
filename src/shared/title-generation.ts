@@ -1,6 +1,6 @@
 import z from "zod";
 
-export const codexTextGenerationModel = "gpt-5.6-luna";
+export const codexTextGenerationDefaultModel = "gpt-5.6-luna";
 export const cursorTextGenerationDefaultModel = "composer-2.5";
 
 export const titleGenerationProviders = ["codex", "cursor"] as const;
@@ -10,7 +10,7 @@ export type TitleGenerationProvider = (typeof titleGenerationProviders)[number];
 export type TitleGenerationSettings =
   | {
       provider: "codex";
-      model: typeof codexTextGenerationModel;
+      model: string;
     }
   | {
       provider: "cursor";
@@ -19,16 +19,14 @@ export type TitleGenerationSettings =
 
 export const defaultTitleGenerationSettings: TitleGenerationSettings = {
   provider: "codex",
-  model: codexTextGenerationModel,
+  model: codexTextGenerationDefaultModel,
 };
 
 export const titleGenerationSettingsSchema = z
   .discriminatedUnion("provider", [
     z.object({
       provider: z.literal("codex"),
-      model: z
-        .literal(codexTextGenerationModel)
-        .catch(codexTextGenerationModel),
+      model: z.string().trim().min(1).catch(codexTextGenerationDefaultModel),
     }),
     z.object({
       provider: z.literal("cursor"),

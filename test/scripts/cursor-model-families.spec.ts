@@ -69,7 +69,9 @@ describe("groupCursorModels", () => {
   it("collapses the catalog into one row per family", () => {
     expect(new Set(modelIds).size).toBe(modelIds.length);
     expect(families).toEqual(cursorModelFamilies);
-    expect(families).toHaveLength(34);
+    expect(new Set(families.map((family) => family.id)).size).toBe(
+      families.length,
+    );
   });
 
   it("keeps large variant sets under one family and leaves singletons alone", () => {

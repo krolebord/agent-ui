@@ -22,12 +22,12 @@ describe("generateCodexTitle", () => {
 
     const result = await generateCodexTitle(
       "Fix auth + add tests",
-      "gpt-5.6-luna",
+      "gpt-6-luna",
       "/var/tmp/agent-ui-text-generation-test",
     );
 
     expect(result).toBe("Refactor auth flow");
-    expect(createCodexProviderMock).toHaveBeenCalledWith("gpt-5.6-luna", {
+    expect(createCodexProviderMock).toHaveBeenCalledWith("gpt-6-luna", {
       workingDirectory: "/var/tmp/agent-ui-text-generation-test",
       reasoningEffort: "low",
     });

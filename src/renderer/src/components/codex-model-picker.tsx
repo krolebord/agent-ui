@@ -13,6 +13,7 @@ interface CodexModelPickerProps {
   models: CodexModel[];
   onChange: (value: string) => void;
   recentModels?: string[];
+  includeDefault?: boolean;
   disabled?: boolean;
   triggerClassName?: string;
 }
@@ -30,11 +31,14 @@ export function CodexModelPicker({
   models,
   onChange,
   recentModels = [],
+  includeDefault = true,
   disabled,
   triggerClassName,
 }: CodexModelPickerProps) {
   const options: SearchableModelOption[] = [
-    { label: "Codex default", value: CODEX_DEFAULT_MODEL_VALUE },
+    ...(includeDefault
+      ? [{ label: "Codex default", value: CODEX_DEFAULT_MODEL_VALUE }]
+      : []),
     ...models,
   ];
 

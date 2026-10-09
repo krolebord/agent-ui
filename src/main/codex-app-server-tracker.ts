@@ -75,6 +75,10 @@ export interface CodexAppServerTrackerOptions {
   initialThreadId?: string;
   onThreadId?: (threadId: string) => void;
   onStatusChange?: (status: CodexAppServerSessionState) => void;
+  onTurnCompleted?: (
+    threadId: string,
+    outcome: "completed" | "interrupted",
+  ) => void;
   onThreadStatusChange?: (
     threadId: string,
     status: CodexAppServerSessionState,
@@ -227,6 +231,7 @@ export class CodexAppServerTracker {
     threadId: string,
     status: CodexAppServerSessionState,
   ) => void;
+  private readonly onTurnCompleted?: CodexAppServerTrackerOptions["onTurnCompleted"];
   private readonly onSubagentUpdate?: (
     update: CodexAppServerSubagentUpdate,
   ) => void;
@@ -249,6 +254,7 @@ export class CodexAppServerTracker {
     this.threadId = options.initialThreadId;
     this.onThreadId = options.onThreadId;
     this.onStatusChange = options.onStatusChange;
+    this.onTurnCompleted = options.onTurnCompleted;
     this.onThreadStatusChange = options.onThreadStatusChange;
     this.onSubagentUpdate = options.onSubagentUpdate;
     this.onError = options.onError;
@@ -543,9 +549,13 @@ export class CodexAppServerTracker {
         }
 
         if (turn.status === "failed") {
+          this.onTurnCompleted?.(threadId, "interrupted");
           this.emitThreadStatus(threadId, "error");
           return;
         }
+
+        if (turn.status === "completed" || turn.status === "interrupted")
+          this.onTurnCompleted?.(threadId, turn.status);
 
         this.emitThreadStatus(threadId, "awaiting_user_response");
         return;

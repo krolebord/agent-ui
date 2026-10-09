@@ -1,4 +1,8 @@
 import {
+  addRecentCodexModel,
+  CodexModelPicker,
+} from "@renderer/components/codex-model-picker";
+import {
   addRecentCursorModel,
   CursorModelPicker,
 } from "@renderer/components/cursor-model-picker";
@@ -30,9 +34,11 @@ import { Switch } from "@renderer/components/ui/switch";
 import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { orpc } from "@renderer/orpc-client";
+import { codexModels } from "@shared/codex-models";
+import { resolveCodexSessionOptions } from "@shared/last-session-options";
 import {
+  codexTextGenerationDefaultModel,
   cursorTextGenerationDefaultModel,
-  defaultTitleGenerationSettings,
   titleGenerationProviders,
 } from "@shared/title-generation";
 import { useMutation } from "@tanstack/react-query";
@@ -479,6 +485,7 @@ function TitleGenerationSettings() {
     orpc.appSettings.setLastSessionOptions.mutationOptions(),
   );
   const recentCursorModels = lastSessionOptions.cursor?.recentModels ?? [];
+  const recentCodexModels = lastSessionOptions.codex?.recentModels ?? [];
 
   return (
     <div className="space-y-3 py-2.5">
@@ -503,7 +510,12 @@ function TitleGenerationSettings() {
                   },
                 });
               }
-              setTitleGeneration.mutate(defaultTitleGenerationSettings);
+              setTitleGeneration.mutate({
+                provider,
+                model:
+                  lastSessionOptions.codex?.model?.trim() ||
+                  codexTextGenerationDefaultModel,
+              });
               return;
             }
             if (provider === "cursor") {
@@ -554,9 +566,23 @@ function TitleGenerationSettings() {
           />
         ) : (
           <>
-            <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-sm">
-              GPT-5.6 Luna
-            </div>
+            <CodexModelPicker
+              value={titleGeneration.model}
+              models={codexModels}
+              recentModels={recentCodexModels}
+              includeDefault={false}
+              onChange={(model) => {
+                setTitleGeneration.mutate({ provider: "codex", model });
+                setLastSessionOptions.mutate({
+                  ...lastSessionOptions,
+                  codex: {
+                    ...resolveCodexSessionOptions(lastSessionOptions.codex),
+                    model,
+                    recentModels: addRecentCodexModel(recentCodexModels, model),
+                  },
+                });
+              }}
+            />
             <p className="text-xs text-muted-foreground">
               Standard tier. Titles use low reasoning; commit messages use
               medium.

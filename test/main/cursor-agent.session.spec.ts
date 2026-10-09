@@ -238,6 +238,8 @@ describe("CursorAgentSessionsManager", () => {
     ).toBe("chat-1");
 
     monitor?.callbacks.onStatusChange("working");
+    const turnId = sessionsState.state["session-1"].turn?.id;
+    expect(turnId).toBeTruthy();
     expect(
       (sessionsState.state as Record<string, CursorAgentSessionData>)[
         "session-1"
@@ -246,6 +248,10 @@ describe("CursorAgentSessionsManager", () => {
     expect(terminalSessionSpies.write).toHaveBeenLastCalledWith("\u001b[O");
 
     monitor?.callbacks.onStatusChange("awaiting_user_response");
+    expect(sessionsState.state["session-1"].turn).toEqual({
+      id: turnId,
+      status: "completed",
+    });
     expect(
       (sessionsState.state as Record<string, CursorAgentSessionData>)[
         "session-1"

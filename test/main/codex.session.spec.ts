@@ -67,6 +67,10 @@ const trackerSpies = vi.hoisted(() => {
       callbacks: {
         onThreadId?: (threadId: string) => void;
         onStatusChange?: (status: TrackerState) => void;
+        onTurnCompleted?: (
+          threadId: string,
+          outcome: "completed" | "interrupted",
+        ) => void;
         onSubagentUpdate?: (update: CodexAppServerSubagentUpdate) => void;
         onError?: (errorMessage: string) => void;
         onChatgptAuthTokensRefresh?: () => Promise<{
@@ -134,6 +138,7 @@ vi.mock("../../src/main/codex-app-server-tracker", () => ({
       callbacks: {
         onThreadId: options.onThreadId,
         onStatusChange: options.onStatusChange,
+        onTurnCompleted: options.onTurnCompleted,
         onSubagentUpdate: options.onSubagentUpdate,
         onError: options.onError,
         onChatgptAuthTokensRefresh: options.onChatgptAuthTokensRefresh,
@@ -532,6 +537,46 @@ describe("CodexSessionsManager", () => {
 
     callbacks?.onStatusChange("stopped");
     expect(session.status).toBe("stopped");
+  });
+
+  it("requires a main-thread completion event and preserves interrupted outcomes", async () => {
+    const { manager, sessionId, state } = createManager({
+      initialPrompt: undefined,
+    });
+    await manager.startLiveSession({
+      sessionId,
+      cwd: "/var/tmp/project",
+      modelReasoningEffort: "high",
+      fastMode: "off",
+      permissionMode: "default",
+    });
+    terminalSessionSpies.callbacks[0]?.onStatusChange("running");
+    const tracker = trackerSpies.instances[0];
+    tracker?.callbacks.onThreadId?.("main-thread");
+    tracker?.callbacks.onStatusChange?.("running");
+    const firstTurnId = state[sessionId].turn?.id;
+    tracker?.callbacks.onStatusChange?.("awaiting_user_response");
+    expect(state[sessionId].turn).toEqual({
+      id: firstTurnId,
+      status: "running",
+    });
+    tracker?.callbacks.onTurnCompleted?.("subagent-thread", "completed");
+    expect(state[sessionId].turn?.status).toBe("running");
+    tracker?.callbacks.onTurnCompleted?.("main-thread", "completed");
+    expect(state[sessionId].turn).toEqual({
+      id: firstTurnId,
+      status: "completed",
+    });
+    tracker?.callbacks.onStatusChange?.("running");
+    const secondTurnId = state[sessionId].turn?.id;
+    expect(secondTurnId).not.toBe(firstTurnId);
+    tracker?.callbacks.onTurnCompleted?.("main-thread", "interrupted");
+    tracker?.callbacks.onStatusChange?.("awaiting_user_response");
+    expect(state[sessionId].turn).toEqual({
+      id: secondTurnId,
+      status: "interrupted",
+    });
+    await manager.stopLiveSession(sessionId);
   });
 
   it("triggers title generation from the codex thread prompt when the thread becomes idle", async () => {

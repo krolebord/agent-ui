@@ -52,7 +52,15 @@ function hydrateSession(persisted: PersistedSession): Session {
     };
   }
 
-  return { ...persisted, status: "stopped" };
+  return {
+    ...persisted,
+    status: "stopped",
+    turn:
+      persisted.turn?.status === "running" ||
+      persisted.turn?.status === "awaiting_approval"
+        ? { ...persisted.turn, status: "interrupted" }
+        : persisted.turn,
+  };
 }
 
 export const defineSessionServiceState = () =>

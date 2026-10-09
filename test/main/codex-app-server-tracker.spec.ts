@@ -25,6 +25,8 @@ function createTracker(options?: {
 }) {
   const onStatusChange = vi.fn<(status: CodexAppServerSessionState) => void>();
   const onThreadId = vi.fn<(threadId: string) => void>();
+  const onTurnCompleted =
+    vi.fn<(threadId: string, outcome: "completed" | "interrupted") => void>();
   const onSubagentUpdate =
     vi.fn<(update: CodexAppServerSubagentUpdate) => void>();
 
@@ -34,11 +36,18 @@ function createTracker(options?: {
     initialThreadId: options?.initialThreadId,
     onStatusChange,
     onThreadId,
+    onTurnCompleted,
     onSubagentUpdate,
     onChatgptAuthTokensRefresh: options?.onChatgptAuthTokensRefresh,
   });
 
-  return { tracker, onStatusChange, onThreadId, onSubagentUpdate };
+  return {
+    tracker,
+    onStatusChange,
+    onThreadId,
+    onSubagentUpdate,
+    onTurnCompleted,
+  };
 }
 
 function asHarness(tracker: CodexAppServerTracker): TrackerHarness {
@@ -60,6 +69,29 @@ function attachFakeSocket(tracker: CodexAppServerTracker) {
 }
 
 describe("CodexAppServerTracker mappings", () => {
+  it.each(["completed", "interrupted", "failed"])(
+    "reports the actual outcome of a %s turn",
+    (status) => {
+      const { tracker, onTurnCompleted } = createTracker();
+      asHarness(tracker).handleNotification({
+        method: "turn/completed",
+        params: { threadId: "thread-1", turn: { status } },
+      });
+      expect(onTurnCompleted).toHaveBeenCalledWith(
+        "thread-1",
+        status === "completed" ? "completed" : "interrupted",
+      );
+    },
+  );
+
+  it("does not report successful completion from a thread merely becoming idle", () => {
+    const { tracker, onTurnCompleted } = createTracker();
+    asHarness(tracker).handleNotification({
+      method: "thread/status/changed",
+      params: { threadId: "thread-1", status: { type: "idle" } },
+    });
+    expect(onTurnCompleted).not.toHaveBeenCalled();
+  });
   it("maps waitingOnApproval to awaiting_approval", () => {
     const { tracker, onStatusChange, onThreadId } = createTracker();
 

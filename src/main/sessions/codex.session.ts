@@ -31,6 +31,7 @@ import {
   generateUniqueSessionId,
   type SessionStatus,
   sessionStatusSchema,
+  setSessionStatus as updateSessionStatus,
 } from "./common";
 import type { SessionServiceState } from "./state";
 
@@ -798,7 +799,13 @@ export class CodexSessionsManager {
         if (!target) {
           return;
         }
-        target.status = nextStatus;
+        if (
+          nextStatus === "awaiting_user_response" &&
+          (target.turn?.status === "running" ||
+            target.turn?.status === "awaiting_approval")
+        )
+          target.status = nextStatus;
+        else updateSessionStatus(target, nextStatus);
       });
     };
     const setSessionErrorMessage = (errorMessage?: string) => {
@@ -916,6 +923,22 @@ export class CodexSessionsManager {
             void this.maybeGenerateTitleFromCodexThread(sessionId, tracker);
           }
         },
+        onTurnCompleted: (threadId, outcome) => {
+          if (isDisposing) return;
+          state.updateState((state) => {
+            const session = state[sessionId];
+            if (
+              session?.type !== "codex-local-terminal" ||
+              session.codexSessionId !== threadId
+            )
+              return;
+            if (
+              session.turn?.status === "running" ||
+              session.turn?.status === "awaiting_approval"
+            )
+              session.turn.status = outcome;
+          });
+        },
         onSubagentUpdate: updateSubagent,
         onError: (errorMessage) => {
           runtimeErrorMessage = errorMessage;
@@ -997,7 +1020,7 @@ export class CodexSessionsManager {
           }
 
           const errorMessage = payload.errorMessage ?? runtimeErrorMessage;
-          session.status = errorMessage ? "error" : "stopped";
+          updateSessionStatus(session, errorMessage ? "error" : "stopped");
           session.errorMessage = errorMessage;
           if (!payload.stoppedByUser) {
             session.lastActivityAt = Date.now();

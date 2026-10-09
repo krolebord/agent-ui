@@ -29,6 +29,7 @@ import {
   commonSessionSchema,
   generateUniqueSessionId,
   type SessionStatus,
+  setSessionStatus,
 } from "./sessions/common";
 import type { SessionServiceState } from "./sessions/state";
 import { TerminalManager } from "./terminal-manager";
@@ -427,7 +428,10 @@ export class SessionsServiceNew {
     return session;
   }
 
-  async resumeSession(input: ResumeClaudeSessionInput) {
+  async resumeSession(
+    input: ResumeClaudeSessionInput,
+    followup?: { prompt: string },
+  ) {
     const liveSession = this.liveSessions.get(input.sessionId);
     if (liveSession) {
       return input.sessionId;
@@ -458,6 +462,7 @@ export class SessionsServiceNew {
       subagentModelOverride: session.startupConfig.subagentModelOverride,
       systemPrompt: session.startupConfig.systemPrompt,
       remoteControl: input.remoteControl ?? session.startupConfig.remoteControl,
+      initialPrompt: followup?.prompt,
       mcpEnabled: session.startupConfig.mcpEnabled,
       mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
       accountId: session.startupConfig.accountId,
@@ -597,9 +602,9 @@ export class SessionsServiceNew {
         }
 
         state.updateState((state) => {
-          state[opts.sessionId].status = getClaudeSessionStatus(
-            runtime.status,
-            activityMonitor,
+          setSessionStatus(
+            state[opts.sessionId],
+            getClaudeSessionStatus(runtime.status, activityMonitor),
           );
           if (runtime.status === "starting" || runtime.status === "running") {
             state[opts.sessionId].lastActivityAt = Date.now();
@@ -686,9 +691,9 @@ export class SessionsServiceNew {
       },
       onStatusChange: (status) => {
         state.updateState((state) => {
-          state[opts.sessionId].status = getClaudeSessionStatus(
-            status,
-            activityMonitor,
+          setSessionStatus(
+            state[opts.sessionId],
+            getClaudeSessionStatus(status, activityMonitor),
           );
           if (status === "starting" || status === "running") {
             state[opts.sessionId].lastActivityAt = Date.now();
@@ -698,9 +703,10 @@ export class SessionsServiceNew {
       onExit: (payload) => {
         void this.stopLiveSession(opts.sessionId, payload.snapshot);
         state.updateState((state) => {
-          state[opts.sessionId].status = payload.errorMessage
-            ? "error"
-            : "stopped";
+          setSessionStatus(
+            state[opts.sessionId],
+            payload.errorMessage ? "error" : "stopped",
+          );
           state[opts.sessionId].errorMessage = payload.errorMessage;
           if (!payload.stoppedByUser) {
             state[opts.sessionId].lastActivityAt = Date.now();

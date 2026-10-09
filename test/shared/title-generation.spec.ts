@@ -19,4 +19,31 @@ describe("titleGenerationSettingsSchema", () => {
       }),
     ).toEqual({ provider: "cursor", model: "composer-2.5" });
   });
+
+  it.each(["gpt-6-luna", "gpt-6.1-sol", "future-model"])(
+    "preserves the selected Codex model %s",
+    (model) => {
+      expect(
+        titleGenerationSettingsSchema.parse({ provider: "codex", model }),
+      ).toEqual({ provider: "codex", model });
+    },
+  );
+
+  it("trims the selected Codex model", () => {
+    expect(
+      titleGenerationSettingsSchema.parse({
+        provider: "codex",
+        model: " gpt-6-luna ",
+      }),
+    ).toEqual({ provider: "codex", model: "gpt-6-luna" });
+  });
+
+  it.each([undefined, null, 123, "", "   "])(
+    "falls back to the default for invalid Codex model %s",
+    (model) => {
+      expect(
+        titleGenerationSettingsSchema.parse({ provider: "codex", model }),
+      ).toEqual(defaultTitleGenerationSettings);
+    },
+  );
 });

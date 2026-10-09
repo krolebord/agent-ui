@@ -38,6 +38,7 @@ import {
   useProjectBottomPaneView,
 } from "./diff-review-pane";
 import { MobileSidebarTrigger } from "./mobile-sidebar-trigger";
+import { SchedulePromptButton } from "./schedule-prompt-dialog";
 import {
   ClaudeCodeIcon,
   CodexIcon,
@@ -352,6 +353,11 @@ export function SessionHeader({ session }: { session: Session }) {
       {session.type !== "worktree-setup" ? (
         <AttachFileButton terminalId={session.sessionId} />
       ) : null}
+      <SchedulePromptButton
+        key={session.sessionId}
+        session={session}
+        disabled={projectLocked}
+      />
       <div className="flex max-md:hidden shrink-0 items-center">
         {bottomPaneViewItems.map(({ view, icon: ViewIcon, label }, index) => (
           <Button

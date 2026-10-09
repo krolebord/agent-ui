@@ -92,6 +92,12 @@ export const claudeCatalogModels: ClaudeCatalogModel[] = [
     supportedEfforts: [],
   },
   {
+    label: "Haiku 5.5",
+    value: "claude-haiku-5-5",
+    knowledgeCutoff: "June 2026",
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+  },
+  {
     label: "Haiku 4.5",
     value: "claude-haiku-4-5",
     knowledgeCutoff: "February 2025",

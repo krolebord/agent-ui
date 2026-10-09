@@ -56,6 +56,12 @@ import {
   defineProjectTerminalsState,
   ProjectTerminalsManager,
 } from "./project-terminals";
+import { createPromptDelivery } from "./scheduled-prompts/delivery";
+import { ScheduledPromptsService } from "./scheduled-prompts/service";
+import {
+  defineScheduledPromptsPersistence,
+  defineScheduledPromptsState,
+} from "./scheduled-prompts/state";
 import { ScheduledSessionsService } from "./scheduled-sessions/scheduler";
 import {
   defineScheduledSessionsPersistence,
@@ -474,6 +480,31 @@ export async function createServices(options: CreateServicesOptions) {
   });
   scheduledSessionsService.start();
 
+  const scheduledPromptsState = defineScheduledPromptsState();
+  persistenceService.registerAndHydrate(
+    defineScheduledPromptsPersistence(scheduledPromptsState),
+  );
+  const scheduledPromptsService = new ScheduledPromptsService({
+    state: scheduledPromptsState,
+    sessions: sessionsState,
+    usage: usageState,
+    refreshUsage: (key) => usageTracker.refresh(key),
+    deliver: createPromptDelivery({
+      sessions: sessionsState,
+      terminalManager,
+      claude: sessionsService,
+      codex: codexSessionsManager,
+      cursor: cursorAgentSessionsManager,
+      skills: skillsService,
+      isProjectLocked: (path) =>
+        projectsState.state.some(
+          (project) =>
+            project.path === path && project.interactionDisabled === true,
+        ),
+    }),
+  });
+  scheduledPromptsService.start();
+
   const stateService = new StateOrchestrator({
     serviceStates: {
       appSettings: appSettingsState,
@@ -486,6 +517,7 @@ export async function createServices(options: CreateServicesOptions) {
       machineStats: machineStatsState,
       skills: skillsState,
       scheduledSessions: scheduledSessionsState,
+      scheduledPrompts: scheduledPromptsState,
       artifacts: artifactsState,
       usage: usageState,
     },
@@ -522,6 +554,7 @@ export async function createServices(options: CreateServicesOptions) {
     async () => await worktreeSetupSessionsManager.dispose(),
   );
   shutdownDisposable.addDisposable(() => scheduledSessionsService.dispose());
+  shutdownDisposable.addDisposable(() => scheduledPromptsService.dispose());
   shutdownDisposable.addDisposable(() => machineStatsMonitor.dispose());
   shutdownDisposable.addDisposable(() => usageTracker.dispose());
   shutdownDisposable.addDisposable(
@@ -566,6 +599,7 @@ export async function createServices(options: CreateServicesOptions) {
     handoffsService,
     skillsService,
     scheduledSessionsService,
+    scheduledPromptsService,
     mcpSessionTokens,
     getWebAppUrl,
     sessions: {

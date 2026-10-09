@@ -15,6 +15,7 @@ import { moveStoppedSessionToProject } from "./move-stopped-session-to-project";
 import { procedure } from "./orpc";
 import { projectsRouter } from "./project-service";
 import { projectTerminalsRouter } from "./project-terminals";
+import { scheduledPromptsRouter } from "./scheduled-prompts/router";
 import { scheduledSessionsRouter } from "./scheduled-sessions/router";
 import { claudeSessionsRouter } from "./session-service";
 import { codexSessionsRouter } from "./sessions/codex.session";
@@ -303,6 +304,7 @@ export const orpcRouter = {
   skills: skillsRouter,
   globalInstructions: globalInstructionsRouter,
   scheduledSessions: scheduledSessionsRouter,
+  scheduledPrompts: scheduledPromptsRouter,
   usage: usageRouter,
   usageHistory: usageHistoryRouter,
 };

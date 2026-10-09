@@ -23,6 +23,7 @@ import {
   commonSessionSchema,
   generateUniqueSessionId,
   type SessionStatus,
+  setSessionStatus as updateSessionStatus,
 } from "./common";
 import type { SessionServiceState } from "./state";
 
@@ -423,7 +424,7 @@ export class CursorAgentSessionsManager {
         if (!target) {
           return;
         }
-        target.status = nextStatus;
+        updateSessionStatus(target, nextStatus);
         if (opts?.bumpActivity !== false) {
           target.lastActivityAt = Date.now();
         }
@@ -553,7 +554,10 @@ export class CursorAgentSessionsManager {
       onExit: (payload) => {
         void this.stopLiveSession(sessionId, payload.snapshot);
         state.updateState((state) => {
-          state[sessionId].status = payload.errorMessage ? "error" : "stopped";
+          updateSessionStatus(
+            state[sessionId],
+            payload.errorMessage ? "error" : "stopped",
+          );
           state[sessionId].errorMessage = payload.errorMessage;
           if (!payload.stoppedByUser) {
             state[sessionId].lastActivityAt = Date.now();

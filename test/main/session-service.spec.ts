@@ -419,6 +419,45 @@ describe("SessionsServiceNew", () => {
     });
   });
 
+  describe("resumeSession", () => {
+    it("tracks turns from activity hooks and keeps the identity during approval pauses", async () => {
+      const { service, state } = createService();
+      const sessionId = await service.startNewSession(makeStartInput());
+      terminalSessionSpies.callbacks[0]?.onStatusChange("running");
+      const monitor = activityMonitorSpies.callbacks[0];
+      monitor?.onStatusChange("working");
+      const id = state[sessionId].turn?.id;
+      expect(id).toBeTruthy();
+      monitor?.onStatusChange("awaiting_approval");
+      expect(state[sessionId].turn).toEqual({
+        id,
+        status: "awaiting_approval",
+      });
+      monitor?.onStatusChange("working");
+      monitor?.onStatusChange("awaiting_user_response");
+      expect(state[sessionId].turn).toEqual({ id, status: "completed" });
+      await service.stopLiveSession(sessionId);
+    });
+    it("passes a scheduled follow-up to the existing conversation", async () => {
+      const { service } = createService();
+      const sessionId = await service.startNewSession(makeStartInput());
+      await service.stopLiveSession(sessionId);
+      await service.resumeSession(
+        { sessionId },
+        { prompt: "Continue with the next task" },
+      );
+      expect(terminalSessionSpies.start).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          args: expect.arrayContaining([
+            "--resume",
+            `'${sessionId}'`,
+            "'Continue with the next task'",
+          ]),
+        }),
+      );
+    });
+  });
+
   describe("stopLiveSession", () => {
     it("ignores the activity monitor reset while stopping a settled session", async () => {
       const { service, state } = createService();

@@ -1264,6 +1264,62 @@ export const cursorModelFamilies: CursorModelFamily[] = [
     ],
   },
   {
+    id: "claude-haiku-5-5",
+    label: "Claude Haiku 5.5",
+    variants: [
+      {
+        value: "claude-haiku-5-5-max",
+        variantLabel: "Max",
+        displayLabel: "Claude Haiku 5.5 · Max",
+      },
+      {
+        value: "claude-haiku-5-5-xhigh",
+        variantLabel: "Extra high",
+        displayLabel: "Claude Haiku 5.5 · Extra high",
+      },
+      {
+        value: "claude-haiku-5-5-high",
+        variantLabel: "High",
+        displayLabel: "Claude Haiku 5.5 · High",
+      },
+      {
+        value: "claude-haiku-5-5-medium",
+        variantLabel: "Medium",
+        displayLabel: "Claude Haiku 5.5 · Medium",
+      },
+      {
+        value: "claude-haiku-5-5-low",
+        variantLabel: "Low",
+        displayLabel: "Claude Haiku 5.5 · Low",
+      },
+      {
+        value: "claude-haiku-5-5-thinking-max",
+        variantLabel: "Thinking · Max",
+        displayLabel: "Claude Haiku 5.5 · Thinking · Max",
+      },
+      {
+        value: "claude-haiku-5-5-thinking-xhigh",
+        variantLabel: "Thinking · Extra high",
+        displayLabel: "Claude Haiku 5.5 · Thinking · Extra high",
+      },
+      {
+        value: "claude-haiku-5-5-thinking-high",
+        variantLabel: "Thinking · High",
+        displayLabel: "Claude Haiku 5.5 · Thinking · High",
+      },
+      {
+        value: "claude-haiku-5-5-thinking-medium",
+        variantLabel: "Thinking · Medium",
+        displayLabel: "Claude Haiku 5.5 · Thinking · Medium",
+      },
+      {
+        value: "claude-haiku-5-5-thinking-low",
+        variantLabel: "Thinking · Low",
+        displayLabel: "Claude Haiku 5.5 · Thinking · Low",
+      },
+    ],
+  },
+  {
     id: "claude-fable-5",
     label: "Claude Fable 5",
     variants: [

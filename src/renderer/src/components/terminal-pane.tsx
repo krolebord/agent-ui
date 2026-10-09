@@ -333,7 +333,7 @@ export function TerminalPane({
   return (
     <div
       ref={containerRef}
-      className={cn("h-full w-full touch-none", className)}
+      className={cn("h-full w-full touch-none overflow-hidden", className)}
     />
   );
 }

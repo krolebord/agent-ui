@@ -27,7 +27,7 @@ BODY:
 Cover commit message parsing.`);
 
     const result = await generateCommitMessage(
-      { provider: "codex", model: "gpt-5.6-luna" },
+      { provider: "codex", model: "gpt-6.1-sol" },
       "diff --git a/foo.ts b/foo.ts",
       { workingDirectory: "/var/tmp/agent-ui-text-generation-test" },
     );
@@ -38,7 +38,7 @@ Cover commit message parsing.`);
     });
     expect(completeMock).toHaveBeenCalledTimes(1);
     expect(createLlmProviderMock).toHaveBeenCalledWith(
-      { provider: "codex", model: "gpt-5.6-luna" },
+      { provider: "codex", model: "gpt-6.1-sol" },
       {
         timeoutMs: 60_000,
         workingDirectory: "/var/tmp/agent-ui-text-generation-test",

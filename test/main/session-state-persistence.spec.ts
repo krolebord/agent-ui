@@ -121,4 +121,35 @@ describe("session state persistence", () => {
       { status: "pending" },
     ]);
   });
+
+  it.each(["running", "awaiting_approval"])(
+    "hydrates a %s turn as interrupted",
+    (status) => {
+      storeData.set("sessions", {
+        [claudeSession.sessionId]: {
+          ...claudeSession,
+          turn: { id: "turn-1", status },
+        },
+      });
+      const { state } = registerSessions();
+      expect(state.state[claudeSession.sessionId].turn).toEqual({
+        id: "turn-1",
+        status: "interrupted",
+      });
+    },
+  );
+
+  it("preserves completed turn identity across hydration", () => {
+    storeData.set("sessions", {
+      [claudeSession.sessionId]: {
+        ...claudeSession,
+        turn: { id: "turn-1", status: "completed" },
+      },
+    });
+    const { state } = registerSessions();
+    expect(state.state[claudeSession.sessionId].turn).toEqual({
+      id: "turn-1",
+      status: "completed",
+    });
+  });
 });
