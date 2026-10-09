@@ -1,11 +1,10 @@
-import type { Editor, EditorOptions } from "@pierre/diffs/edit";
+import type { EditorFactory, EditorOptions } from "@pierre/diffs/edit";
 import type {
   AnnotationSide,
   DiffLineAnnotation,
-  FileContents,
+  FileDiffEditChangeHandler,
   FileDiffMetadata,
   FileDiffProps,
-  LineAnnotation,
 } from "@pierre/diffs/react";
 import { EditProvider, FileDiff } from "@pierre/diffs/react";
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
@@ -85,15 +84,19 @@ export type BottomPaneView = "terminals" | "diff" | "history";
 
 type EditableDiffDraft = {
   sourceSignature: string;
+  editStateKey: string;
   fileDiff: FileDiffMetadata;
   revision: string;
   initialContents: string;
   contents: string;
   lineAnnotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[];
+  annotationSetKey: string;
   dirty: boolean;
   conflict: boolean;
   error: string | null;
 };
+
+let editStateKeySequence = 0;
 
 function getBottomPaneViewForProject(
   viewsByProject: Record<string, BottomPaneView>,
@@ -306,12 +309,10 @@ function getProjectDiffStore(cwd: string): ProjectDiffStore {
 
 export function ProjectDiffPane({ cwd }: { cwd: string }) {
   const store = getProjectDiffStore(cwd);
-  const [createEditor, setCreateEditor] = useState<
-    | ((
-        options: EditorOptions<DiffReviewAnnotationMetadata>,
-      ) => Editor<DiffReviewAnnotationMetadata>)
-    | null
-  >(null);
+  const [createEditor, setCreateEditor] = useState<EditorFactory<
+    DiffReviewAnnotationMetadata,
+    undefined
+  > | null>(null);
   const [editorLoadError, setEditorLoadError] = useState(false);
   const editorLoaderMounted = useRef(false);
 
@@ -320,9 +321,11 @@ export function ProjectDiffPane({ cwd }: { cwd: string }) {
     void import("@pierre/diffs/edit")
       .then(({ Editor: DiffsEditor }) => {
         if (!editorLoaderMounted.current) return;
-        const factory = (
-          options: EditorOptions<DiffReviewAnnotationMetadata>,
-        ) => new DiffsEditor(options);
+        const factory: EditorFactory<
+          DiffReviewAnnotationMetadata,
+          undefined
+        > = (editorType, options, editStateKey) =>
+          new DiffsEditor(editorType, options, editStateKey);
         setCreateEditor(() => factory);
       })
       .catch(() => {
@@ -391,6 +394,17 @@ function getDiffErrorMessage(error: unknown) {
   return error instanceof Error && error.message.trim()
     ? error.message
     : "Failed to read uncommitted changes.";
+}
+
+function getAnnotationSetKey(
+  annotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[],
+) {
+  return annotations
+    .map(
+      (annotation) =>
+        `${annotation.metadata.type}:${annotation.side}:${annotation.lineNumber}`,
+    )
+    .join("|");
 }
 
 function mergeEditableAnnotations(
@@ -831,8 +845,19 @@ type DiffViewerPanelProps = {
   isLoading: boolean;
   selectedFile: FileDiffMetadata | null;
   renderedFile: FileDiffMetadata | null;
-  diffOptions: FileDiffProps<DiffReviewAnnotationMetadata>["options"];
-  editorOptions: EditorOptions<DiffReviewAnnotationMetadata>;
+  diffOptions: FileDiffProps<
+    DiffReviewAnnotationMetadata,
+    undefined
+  >["options"];
+  editorOptions: EditorOptions<
+    "file-diff",
+    DiffReviewAnnotationMetadata,
+    undefined
+  >;
+  onEditChange: FileDiffEditChangeHandler<
+    DiffReviewAnnotationMetadata,
+    undefined
+  >;
   lineAnnotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[];
   editDraft: EditableDiffDraft | null;
   editUnavailableReason: string | null;
@@ -998,6 +1023,7 @@ function DiffViewerPanel({
   renderedFile,
   diffOptions,
   editorOptions,
+  onEditChange,
   lineAnnotations,
   editDraft,
   editUnavailableReason,
@@ -1024,7 +1050,9 @@ function DiffViewerPanel({
           fileDiff={renderedFile ?? selectedFile}
           options={diffOptions}
           edit={Boolean(editDraft)}
+          editStateKey={editDraft?.editStateKey}
           editorOptions={editorOptions}
+          onEditChange={onEditChange}
           lineAnnotations={lineAnnotations}
           renderHeaderMetadata={() =>
             supportsDiffEditing(selectedFile) ? (
@@ -1543,11 +1571,13 @@ function ProjectDiffPaneContent() {
     }
     initializeEditableDraft(selectedFile.name, {
       sourceSignature: selectedFileSourceSignature,
+      editStateKey: `${projectPath}:${selectedFile.name}:${++editStateKeySequence}`,
       fileDiff: editableFileResult.fileDiff,
       revision: editableFileResult.revision,
       initialContents: editableFileResult.contents,
       contents: editableFileResult.contents,
       lineAnnotations,
+      annotationSetKey: getAnnotationSetKey(lineAnnotations),
       dirty: false,
       conflict: false,
       error: null,
@@ -1563,44 +1593,56 @@ function ProjectDiffPaneContent() {
     selectedFileSourceSignature,
   ]);
 
+  const annotationSetKey = getAnnotationSetKey(lineAnnotations);
   const effectiveLineAnnotations = useMemo(
     () =>
-      editDraft
+      editDraft?.annotationSetKey === annotationSetKey
         ? mergeEditableAnnotations(editDraft.lineAnnotations, lineAnnotations)
         : lineAnnotations,
-    [editDraft, lineAnnotations],
+    [annotationSetKey, editDraft, lineAnnotations],
   );
+  const diffAnnotationsCache = useRef<{
+    key: string;
+    annotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[];
+  } | null>(null);
+  const diffAnnotationsKey = `${editDraft?.editStateKey ?? ""}\n${annotationSetKey}`;
+  if (diffAnnotationsCache.current?.key !== diffAnnotationsKey) {
+    diffAnnotationsCache.current = {
+      key: diffAnnotationsKey,
+      annotations: effectiveLineAnnotations,
+    };
+  }
+  const diffLineAnnotations = diffAnnotationsCache.current.annotations;
 
-  const handleEditorChange: NonNullable<
-    EditorOptions<DiffReviewAnnotationMetadata>["onChange"]
+  const handleEditorChange: FileDiffEditChangeHandler<
+    DiffReviewAnnotationMetadata,
+    undefined
   > = useCallback(
-    (
-      file: FileContents,
-      nextAnnotations?:
-        | DiffLineAnnotation<DiffReviewAnnotationMetadata>[]
-        | LineAnnotation<DiffReviewAnnotationMetadata>[],
-    ) => {
+    ({ file, lineAnnotations: nextAnnotations }) => {
       if (!selectedFile || !editDraft) return;
-      const nextDiffAnnotations = nextAnnotations?.filter(
-        (annotation) => "side" in annotation,
-      ) as DiffLineAnnotation<DiffReviewAnnotationMetadata>[] | undefined;
       updateEditableDraft(selectedFile.name, {
         contents: file.contents,
-        lineAnnotations: nextDiffAnnotations ?? effectiveLineAnnotations,
+        lineAnnotations: nextAnnotations ?? effectiveLineAnnotations,
+        annotationSetKey,
         dirty: file.contents !== editDraft.initialContents,
         error: null,
       });
     },
-    [editDraft, effectiveLineAnnotations, selectedFile, updateEditableDraft],
+    [
+      annotationSetKey,
+      editDraft,
+      effectiveLineAnnotations,
+      selectedFile,
+      updateEditableDraft,
+    ],
   );
 
   const editorOptions = useMemo(
     () => ({
-      onChange: handleEditorChange,
       onFocus: () => setEditorFocusedFilePath(selectedFile?.name ?? null),
       onBlur: () => setEditorFocusedFilePath(null),
     }),
-    [handleEditorChange, selectedFile?.name, setEditorFocusedFilePath],
+    [selectedFile?.name, setEditorFocusedFilePath],
   );
 
   const saveCurrentEdit = useCallback(() => {
@@ -1861,7 +1903,8 @@ function ProjectDiffPaneContent() {
     renderedFile: editDraft?.fileDiff ?? selectedFile,
     diffOptions,
     editorOptions,
-    lineAnnotations: effectiveLineAnnotations,
+    onEditChange: handleEditorChange,
+    lineAnnotations: diffLineAnnotations,
     editDraft,
     editUnavailableReason,
     largeFileReason,
