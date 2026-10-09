@@ -176,6 +176,8 @@ const gitCommitHashSchema = z
 
 const editableFilePathSchema = z.string().trim().min(1);
 
+export const LARGE_EDITABLE_FILE_BYTES = 10_000;
+
 async function getUncommittedFiles(
   projectPath: string,
   context: Pick<Services, "projectGitService">,
@@ -234,9 +236,10 @@ function assertProjectFileEditingAllowed(
   }
 }
 
-async function loadEditableDiffFile(
+export async function loadEditableDiffFile(
   projectPath: string,
   file: FileDiffMetadata,
+  { allowLargeFile = false }: { allowLargeFile?: boolean } = {},
 ) {
   const unavailableReason = editableFileUnavailableReason(file);
   if (unavailableReason) {
@@ -245,6 +248,12 @@ async function loadEditableDiffFile(
 
   try {
     const snapshot = await readEditableFileSnapshot(projectPath, file.name);
+    if (!allowLargeFile && snapshot.size > LARGE_EDITABLE_FILE_BYTES) {
+      return {
+        status: "too-large" as const,
+        reason: `This file is ${Math.round(snapshot.size / 1024)} KB, so it opens read-only. Loading it for editing can make the diff pane slow.`,
+      };
+    }
     const newFile: FileContents = {
       name: file.name,
       contents: snapshot.contents,
@@ -709,6 +718,7 @@ export const projectsRouter = {
       z.object({
         path: projectPathSchema,
         filePath: editableFilePathSchema,
+        allowLargeFile: z.boolean().optional(),
       }),
     )
     .handler(async ({ input, context }) => {
@@ -723,7 +733,9 @@ export const projectsRouter = {
         };
       }
       try {
-        return await loadEditableDiffFile(projectPath, file);
+        return await loadEditableDiffFile(projectPath, file, {
+          allowLargeFile: input.allowLargeFile,
+        });
       } catch (error) {
         const message =
           error instanceof Error && error.message.trim()

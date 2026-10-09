@@ -53,6 +53,7 @@ import {
   GitCommitHorizontal,
   LoaderCircle,
   MoreHorizontal,
+  Pencil,
   RefreshCw,
   RotateCcw,
   Save,
@@ -183,6 +184,7 @@ function createProjectDiffStore(projectPath: string) {
         sidebarSize: 220 as number | string,
         editableDrafts: {} as Record<string, EditableDiffDraft>,
         editorFocusedFilePath: null as string | null,
+        largeFileEditPaths: [] as string[],
       },
       (set) => ({
         selectFile: (filePath: string) => {
@@ -273,6 +275,13 @@ function createProjectDiffStore(projectPath: string) {
         },
         setEditorFocusedFilePath: (filePath: string | null) => {
           set({ editorFocusedFilePath: filePath });
+        },
+        allowLargeFileEditing: (filePath: string) => {
+          set((state) =>
+            state.largeFileEditPaths.includes(filePath)
+              ? state
+              : { largeFileEditPaths: [...state.largeFileEditPaths, filePath] },
+          );
         },
       }),
     ),
@@ -827,6 +836,7 @@ type DiffViewerPanelProps = {
   lineAnnotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[];
   editDraft: EditableDiffDraft | null;
   editUnavailableReason: string | null;
+  largeFileReason: string | null;
   isPreparingEditor: boolean;
   isSavingEdit: boolean;
   projectPath: string;
@@ -834,6 +844,7 @@ type DiffViewerPanelProps = {
   onSaveEdit: () => void;
   onReloadEdit: () => void;
   onCopyEdit: () => void;
+  onLoadLargeFile: () => void;
   startCommentDraft: (args: {
     projectPath: string;
     filePath: string;
@@ -846,21 +857,25 @@ type DiffViewerPanelProps = {
 type DiffEditHeaderControlsProps = {
   editDraft: EditableDiffDraft | null;
   editUnavailableReason: string | null;
+  largeFileReason: string | null;
   isPreparingEditor: boolean;
   isSavingEdit: boolean;
   onSaveEdit: () => void;
   onReloadEdit: () => void;
   onCopyEdit: () => void;
+  onLoadLargeFile: () => void;
 };
 
 function DiffEditHeaderControls({
   editDraft,
   editUnavailableReason,
+  largeFileReason,
   isPreparingEditor,
   isSavingEdit,
   onSaveEdit,
   onReloadEdit,
   onCopyEdit,
+  onLoadLargeFile,
 }: DiffEditHeaderControlsProps) {
   if (editDraft?.conflict) {
     return (
@@ -928,6 +943,21 @@ function DiffEditHeaderControls({
         >
           Read-only
         </span>
+      ) : largeFileReason ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-5 gap-1 rounded-sm px-1.5 text-[10px] text-zinc-400 hover:text-zinc-200"
+          onClick={(event) => {
+            event.stopPropagation();
+            onLoadLargeFile();
+          }}
+          title={largeFileReason}
+        >
+          <Pencil className="size-3" />
+          Load for editing
+        </Button>
       ) : null}
       <Button
         type="button"
@@ -971,6 +1001,7 @@ function DiffViewerPanel({
   lineAnnotations,
   editDraft,
   editUnavailableReason,
+  largeFileReason,
   isPreparingEditor,
   isSavingEdit,
   projectPath,
@@ -978,6 +1009,7 @@ function DiffViewerPanel({
   onSaveEdit,
   onReloadEdit,
   onCopyEdit,
+  onLoadLargeFile,
   startCommentDraft,
 }: DiffViewerPanelProps) {
   return (
@@ -999,11 +1031,13 @@ function DiffViewerPanel({
               <DiffEditHeaderControls
                 editDraft={editDraft}
                 editUnavailableReason={editUnavailableReason}
+                largeFileReason={largeFileReason}
                 isPreparingEditor={isPreparingEditor}
                 isSavingEdit={isSavingEdit}
                 onSaveEdit={onSaveEdit}
                 onReloadEdit={onReloadEdit}
                 onCopyEdit={onCopyEdit}
+                onLoadLargeFile={onLoadLargeFile}
               />
             ) : null
           }
@@ -1397,6 +1431,12 @@ function ProjectDiffPaneContent() {
   const setEditorFocusedFilePath = useProjectDiffStore(
     (state) => state.setEditorFocusedFilePath,
   );
+  const largeFileEditPaths = useProjectDiffStore(
+    (state) => state.largeFileEditPaths,
+  );
+  const allowLargeFileEditing = useProjectDiffStore(
+    (state) => state.allowLargeFileEditing,
+  );
   const commentDraft = useDiffCommentStore(
     (state) => state.commentDraftByProject[projectPath] ?? null,
   );
@@ -1431,6 +1471,9 @@ function ProjectDiffPaneContent() {
       input: {
         path: projectPath,
         filePath: selectedFile?.name ?? "__no_selected_file__",
+        allowLargeFile: selectedFile
+          ? largeFileEditPaths.includes(selectedFile.name)
+          : false,
       },
     }),
     enabled: supportsDiffEditing(selectedFile),
@@ -1643,6 +1686,10 @@ function ProjectDiffPaneContent() {
       : editableFileQuery.isError
         ? getDiffErrorMessage(editableFileQuery.error)
         : null;
+  const largeFileReason =
+    editableFileResult?.status === "too-large" && !editDraft
+      ? editableFileResult.reason
+      : null;
   const isPreparingEditor =
     supportsDiffEditing(selectedFile) &&
     !editDraft &&
@@ -1817,6 +1864,7 @@ function ProjectDiffPaneContent() {
     lineAnnotations: effectiveLineAnnotations,
     editDraft,
     editUnavailableReason,
+    largeFileReason,
     isPreparingEditor,
     isSavingEdit: saveEditMutation.isPending,
     projectPath,
@@ -1824,6 +1872,9 @@ function ProjectDiffPaneContent() {
     onSaveEdit: saveCurrentEdit,
     onReloadEdit: reloadCurrentEdit,
     onCopyEdit: copyCurrentEdit,
+    onLoadLargeFile: () => {
+      if (selectedFile) allowLargeFileEditing(selectedFile.name);
+    },
     startCommentDraft,
   };
 

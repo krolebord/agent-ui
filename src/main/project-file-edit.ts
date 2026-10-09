@@ -22,6 +22,7 @@ export class UnsupportedEditableFileError extends Error {
 export type EditableFileSnapshot = {
   contents: string;
   revision: string;
+  size: number;
 };
 
 function hashContents(contents: Uint8Array): string {
@@ -97,6 +98,7 @@ export async function readEditableFileSnapshot(
   return {
     contents: decodeTextFile(bytes),
     revision: hashContents(bytes),
+    size: bytes.byteLength,
   };
 }
 

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parsePatchFiles } from "@pierre/diffs";
@@ -9,6 +9,8 @@ import {
   assignDiffCacheKeys,
   commitSelectedChangesWithGeneratedMessage,
   defineProjectState,
+  LARGE_EDITABLE_FILE_BYTES,
+  loadEditableDiffFile,
   pullProjectFromRemote,
   pushProjectToRemote,
   refreshTrackedProject,
@@ -674,5 +676,65 @@ describe("project-service assignDiffCacheKeys", () => {
     expect(file.prevObjectId).toBeUndefined();
     expect(file.newObjectId).toBeUndefined();
     expect(file.cacheKey).toContain("@@ -1,2 +1,3 @@");
+  });
+});
+
+describe("project-service loadEditableDiffFile", () => {
+  let projectPath: string;
+
+  beforeEach(async () => {
+    projectPath = await mkdtemp(path.join(tmpdir(), "agent-ui-editable-"));
+  });
+
+  afterEach(async () => {
+    await rm(projectPath, { recursive: true, force: true });
+  });
+
+  async function writeNewFile(contents: string) {
+    await writeFile(path.join(projectPath, "big.ts"), contents);
+    const [file] = parsePatchFiles(
+      [
+        "diff --git a/big.ts b/big.ts",
+        "new file mode 100644",
+        "index 0000000..3114a09",
+        "--- /dev/null",
+        "+++ b/big.ts",
+        "@@ -0,0 +1 @@",
+        "+const x = 1;",
+        "",
+      ].join("\n"),
+    ).flatMap((patch) => patch.files);
+    return file;
+  }
+
+  const largeContents = "const x = 1;\n".repeat(
+    Math.ceil(LARGE_EDITABLE_FILE_BYTES / 13) + 1,
+  );
+
+  it("keeps large files read-only unless loading them is requested", async () => {
+    const file = await writeNewFile(largeContents);
+
+    const result = await loadEditableDiffFile(projectPath, file);
+
+    expect(result.status).toBe("too-large");
+  });
+
+  it("loads a large file for editing when explicitly allowed", async () => {
+    const file = await writeNewFile(largeContents);
+
+    const result = await loadEditableDiffFile(projectPath, file, {
+      allowLargeFile: true,
+    });
+
+    expect(result.status).toBe("ready");
+    expect(result.status === "ready" && result.contents).toBe(largeContents);
+  });
+
+  it("loads files under the size limit without opting in", async () => {
+    const file = await writeNewFile("const x = 1;\n");
+
+    const result = await loadEditableDiffFile(projectPath, file);
+
+    expect(result.status).toBe("ready");
   });
 });
