@@ -67,12 +67,17 @@ function isMcpRequest(req: IncomingMessage) {
   return pathname === MCP_PATH;
 }
 
-function getArtifactDownloadId(req: IncomingMessage): string | null {
-  const pathname = new URL(req.url ?? "/", "http://agent-ui.local").pathname;
-  const match = pathname.match(/^\/artifacts\/([^/]+)\/download$/);
+function getArtifactDownloadRequest(
+  req: IncomingMessage,
+): { artifactId: string; preview: boolean } | null {
+  const url = new URL(req.url ?? "/", "http://agent-ui.local");
+  const match = url.pathname.match(/^\/artifacts\/([^/]+)\/download$/);
   if (!match?.[1]) return null;
   try {
-    return decodeURIComponent(match[1]);
+    return {
+      artifactId: decodeURIComponent(match[1]),
+      preview: url.searchParams.get("preview") === "1",
+    };
   } catch {
     return null;
   }
@@ -92,6 +97,7 @@ async function serveArtifact(
   res: ServerResponse,
   services: Services,
   artifactId: string,
+  preview: boolean,
 ) {
   const artifact = services.artifactsService.state.state[artifactId];
   if (!artifact) {
@@ -106,13 +112,20 @@ async function serveArtifact(
     return;
   }
 
-  const headers = {
-    "content-type": artifact.mimeType ?? "application/octet-stream",
+  const contentType = artifact.mimeType ?? "application/octet-stream";
+  const headers: Record<string, string | number> = {
+    "content-type": contentType,
     "content-length": stats.size,
-    "content-disposition": contentDispositionAttachment(artifact.name),
+    "content-disposition": preview
+      ? "inline"
+      : contentDispositionAttachment(artifact.name),
     "cache-control": "private, no-store",
     "x-content-type-options": "nosniff",
   };
+  // Chrome refuses to render PDFs in sandboxed documents.
+  if (preview && contentType !== "application/pdf") {
+    headers["content-security-policy"] = "sandbox";
+  }
   if (req.method === "HEAD") {
     res.writeHead(200, headers);
     res.end();
@@ -307,14 +320,20 @@ export async function startWebAppServer(options: WebAppServerOptions) {
       return;
     }
 
-    const artifactId = getArtifactDownloadId(req);
-    if (artifactId) {
+    const artifactRequest = getArtifactDownloadRequest(req);
+    if (artifactRequest) {
       const services = options.getServices();
       if (!services) {
         sendText(res, 503, "Service unavailable");
         return;
       }
-      void serveArtifact(req, res, services, artifactId);
+      void serveArtifact(
+        req,
+        res,
+        services,
+        artifactRequest.artifactId,
+        artifactRequest.preview,
+      );
       return;
     }
 

@@ -114,6 +114,7 @@ function App() {
         highlighterOptions={{
           theme: { dark: "pierre-dark", light: "pierre-light" },
           langs: ["typescript", "javascript", "css", "html"],
+          useTokenTransformer: true,
         }}
       >
         <div className="h-dvh overflow-hidden">

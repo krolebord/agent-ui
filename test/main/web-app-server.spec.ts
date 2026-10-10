@@ -268,6 +268,57 @@ describe("web app server", () => {
     expect(await response.text()).toBe("agent output");
   });
 
+  it.each([
+    { mimeType: "text/html", sandboxed: true },
+    { mimeType: "application/pdf", sandboxed: false },
+  ])(
+    "serves $mimeType artifacts inline for previews",
+    async ({ mimeType, sandboxed }) => {
+      const reservation = await reservePort();
+      await new Promise<void>((resolve) =>
+        reservation.server.close(() => resolve()),
+      );
+      process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+      const artifactPath = path.join(rendererDist, "preview-artifact");
+      await writeFile(artifactPath, "agent output");
+      const services = {
+        artifactsService: {
+          state: {
+            state: {
+              artifact1: {
+                id: "artifact1",
+                sessionId: "session1",
+                path: artifactPath,
+                name: "preview-artifact",
+                size: 12,
+                mimeType,
+                createdAt: Date.now(),
+                available: true,
+              },
+            },
+          },
+          markUnavailable() {},
+        },
+      } as unknown as Services;
+
+      const server = await startWebAppServer({
+        rendererDist,
+        getServices: () => services,
+      });
+      servers.push(server);
+
+      const response = await fetch(
+        `${server.url}/artifacts/artifact1/download?preview=1`,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-disposition")).toBe("inline");
+      expect(response.headers.get("content-security-policy")).toBe(
+        sandboxed ? "sandbox" : null,
+      );
+      expect(await response.text()).toBe("agent output");
+    },
+  );
+
   it("uses an ASCII fallback for artifact names with Unicode characters", async () => {
     const reservation = await reservePort();
     await new Promise<void>((resolve) =>

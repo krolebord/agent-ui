@@ -163,12 +163,7 @@ function SchedulePromptDialog({
         await orpc.scheduledPrompts.update.call({ ...input, id: editingId });
       else await orpc.scheduledPrompts.create.call(input);
     },
-    onSuccess: () => {
-      resetForm();
-      toast.success(
-        editingId ? "Scheduled prompt updated" : "Prompt scheduled",
-      );
-    },
+    onSuccess: resetForm,
     onError: (err) => setError(err.message),
   });
   const remove = useMutation({

@@ -3,19 +3,36 @@ import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigge
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@renderer/components/ui/dialog";
 import { Input } from "@renderer/components/ui/input";
+import { useMainViewStore } from "@renderer/hooks/use-main-view";
+import {
+  formatTextPreview,
+  getArtifactPreviewKind,
+  MAX_TEXT_PREVIEW_BYTES,
+  readTextPreview,
+} from "@renderer/lib/artifact-preview";
 import { orpc } from "@renderer/orpc-client";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Archive,
   Copy,
   Download,
+  Eye,
   File,
   FileImage,
   FileText,
   PackageOpen,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -57,6 +74,13 @@ function ArtifactIcon({ artifact }: { artifact: Artifact }) {
 
 export function ArtifactsPage() {
   const artifactsById = useAppState((state) => state.artifacts);
+  const sessionId = useMainViewStore((state) => state.artifactsSessionId);
+  const clearSessionFilter = useMainViewStore(
+    (state) => state.clearArtifactsSessionFilter,
+  );
+  const sessionTitle = useAppState((state) =>
+    sessionId ? (state.sessions[sessionId]?.title ?? null) : null,
+  );
   const [query, setQuery] = useState("");
   const refreshAvailability = useMutation(
     orpc.artifacts.refreshAvailability.mutationOptions(),
@@ -75,13 +99,14 @@ export function ArtifactsPage() {
     const normalizedQuery = query.trim().toLowerCase();
     return Object.values(artifactsById)
       .filter((artifact) => {
+        if (sessionId && artifact.sessionId !== sessionId) return false;
         if (!normalizedQuery) return true;
         return [artifact.name, artifact.description, artifact.path].some(
           (value) => value?.toLowerCase().includes(normalizedQuery),
         );
       })
       .sort((left, right) => right.createdAt - left.createdAt);
-  }, [artifactsById, query]);
+  }, [artifactsById, query, sessionId]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -90,7 +115,11 @@ export function ArtifactsPage() {
         <PackageOpen className="size-3.5 text-muted-foreground max-md:hidden" />
         <span className="text-sm font-medium">Artifacts</span>
         <Badge variant="secondary" className="ml-1 tabular-nums">
-          {Object.keys(artifactsById).length}
+          {sessionId
+            ? Object.values(artifactsById).filter(
+                (artifact) => artifact.sessionId === sessionId,
+              ).length
+            : Object.keys(artifactsById).length}
         </Badge>
       </div>
 
@@ -106,15 +135,38 @@ export function ArtifactsPage() {
                 currently at the published path.
               </p>
             </div>
-            <div className="relative w-full md:w-64">
-              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Filter artifacts"
-                aria-label="Filter artifacts"
-                className="h-8 pl-8"
-              />
+            <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+              {sessionId ? (
+                <Badge
+                  variant="outline"
+                  className="h-8 max-w-full gap-1 pr-1 md:max-w-56"
+                >
+                  <span className="truncate" title={sessionTitle ?? undefined}>
+                    Session: {sessionTitle ?? "Deleted session"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="size-5 shrink-0 px-0"
+                    aria-label="Show artifacts from all sessions"
+                    title="Show all sessions"
+                    onClick={clearSessionFilter}
+                  >
+                    <X className="size-3" />
+                  </Button>
+                </Badge>
+              ) : null}
+              <div className="relative w-full md:w-64">
+                <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Filter artifacts"
+                  aria-label="Filter artifacts"
+                  className="h-8 pl-8"
+                />
+              </div>
             </div>
           </div>
 
@@ -123,14 +175,16 @@ export function ArtifactsPage() {
               <div className="flex min-h-48 flex-col items-center justify-center gap-2 px-6 text-center">
                 <PackageOpen className="size-7 text-muted-foreground/60" />
                 <p className="text-sm font-medium">
-                  {query
+                  {query || sessionId
                     ? "No artifacts match this filter"
                     : "No artifacts yet"}
                 </p>
                 <p className="max-w-sm text-xs text-muted-foreground">
                   {query
                     ? "Try a file name, description, or remote path."
-                    : "When an agent publishes a file, it will appear here and you’ll get a notification."}
+                    : sessionId
+                      ? "This session hasn’t published any artifacts."
+                      : "When an agent publishes a file, it will appear here and you’ll get a notification."}
                 </p>
               </div>
             ) : (
@@ -147,8 +201,16 @@ export function ArtifactsPage() {
   );
 }
 
+function resolveArtifactHref(destination: { path: string; url: string }) {
+  return navigator.userAgent.includes("Electron")
+    ? destination.url
+    : destination.path;
+}
+
 function ArtifactRow({ artifact }: { artifact: Artifact }) {
   const [downloading, setDownloading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const previewKind = getArtifactPreviewKind(artifact.mimeType);
   const removeArtifact = useMutation(
     orpc.artifacts.remove.mutationOptions({
       onSuccess: () => toast.success("Artifact removed"),
@@ -161,11 +223,8 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
       const destination = await orpc.artifacts.getDownloadUrl.call({
         id: artifact.id,
       });
-      const href = navigator.userAgent.includes("Electron")
-        ? destination.url
-        : destination.path;
       const anchor = document.createElement("a");
-      anchor.href = href;
+      anchor.href = resolveArtifactHref(destination);
       anchor.download = artifact.name;
       if (navigator.userAgent.includes("Electron")) anchor.target = "_blank";
       anchor.click();
@@ -221,6 +280,18 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
       </div>
 
       <div className="flex items-start gap-1">
+        {previewKind ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5"
+            disabled={!artifact.available}
+            onClick={() => setPreviewOpen(true)}
+          >
+            <Eye className="size-3.5" />
+            <span className="max-sm:hidden">Preview</span>
+          </Button>
+        ) : null}
         <Button
           variant="outline"
           size="sm"
@@ -257,6 +328,122 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
           <Trash2 className="size-3.5" />
         </Button>
       </div>
+      {previewKind ? (
+        <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+          <DialogContent className="flex flex-col sm:max-w-4xl">
+            <DialogHeader className="min-w-0 pr-6">
+              <DialogTitle className="truncate" title={artifact.name}>
+                {artifact.name}
+              </DialogTitle>
+              <DialogDescription>
+                {formatBytes(artifact.size)}
+                {artifact.mimeType ? ` · ${artifact.mimeType}` : null}
+              </DialogDescription>
+            </DialogHeader>
+            {previewOpen ? (
+              <ArtifactPreview artifact={artifact} kind={previewKind} />
+            ) : null}
+            <DialogFooter>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5"
+                disabled={!artifact.available || downloading}
+                onClick={() => void download()}
+              >
+                <Download className="size-3.5" />
+                Download
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </li>
+  );
+}
+
+function ArtifactPreview({
+  artifact,
+  kind,
+}: {
+  artifact: Artifact;
+  kind: NonNullable<ReturnType<typeof getArtifactPreviewKind>>;
+}) {
+  const [mediaFailed, setMediaFailed] = useState(false);
+  const destination = useQuery(
+    orpc.artifacts.getDownloadUrl.queryOptions({ input: { id: artifact.id } }),
+  );
+  const previewHref = destination.data
+    ? `${resolveArtifactHref(destination.data)}?preview=1`
+    : null;
+  const text = useQuery({
+    queryKey: ["artifact-text-preview", previewHref],
+    queryFn: async () => {
+      if (!previewHref) throw new Error("Preview URL is not available");
+      const response = await fetch(previewHref);
+      if (!response.ok) throw new Error(await response.text());
+      return readTextPreview(response);
+    },
+    enabled: kind === "text" && previewHref !== null,
+    gcTime: 0,
+  });
+
+  const error =
+    destination.error ??
+    text.error ??
+    (mediaFailed ? new Error("Failed to load artifact") : null);
+  if (error) {
+    return (
+      <PreviewMessage>
+        {error.message || "Failed to load artifact"}
+      </PreviewMessage>
+    );
+  }
+  if (!previewHref) return <PreviewMessage>Loading preview…</PreviewMessage>;
+
+  if (kind === "image") {
+    return (
+      <div className="flex min-h-48 items-center justify-center overflow-auto rounded-md border border-border/60 bg-black/20 p-2">
+        <img
+          src={previewHref}
+          alt={artifact.name}
+          className="max-h-[70vh] max-w-full object-contain"
+          onError={() => setMediaFailed(true)}
+        />
+      </div>
+    );
+  }
+
+  if (kind === "pdf") {
+    return (
+      <iframe
+        src={previewHref}
+        title={artifact.name}
+        className="h-[70vh] w-full rounded-md border border-border/60 bg-white"
+      />
+    );
+  }
+
+  if (!text.data) return <PreviewMessage>Loading preview…</PreviewMessage>;
+  return (
+    <div className="flex min-h-0 flex-col gap-2">
+      <pre className="max-h-[65vh] overflow-auto rounded-md border border-border/60 bg-black/35 p-3 font-mono text-xs leading-5 whitespace-pre-wrap break-words">
+        <code>{formatTextPreview(text.data.text, artifact.mimeType)}</code>
+      </pre>
+      {text.data.truncated ? (
+        <p className="text-xs text-muted-foreground">
+          Showing the first {formatBytes(MAX_TEXT_PREVIEW_BYTES)}. Download the
+          file to see the rest.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function PreviewMessage({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-48 items-center justify-center rounded-md border border-border/60 bg-black/20 px-6 text-center text-sm text-muted-foreground">
+      {children}
+    </div>
   );
 }

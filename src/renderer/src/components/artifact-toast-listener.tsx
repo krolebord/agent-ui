@@ -1,4 +1,5 @@
 import { useAppState } from "@renderer/components/sync-state-provider";
+import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -14,12 +15,18 @@ export function ArtifactToastListener() {
       return;
     }
 
+    const sessionInView =
+      useMainViewStore.getState().view === "sessions"
+        ? useActiveSessionStore.getState().activeSessionId
+        : null;
     for (const artifact of Object.values(artifacts)) {
       if (knownIds.current.has(artifact.id)) continue;
+      if (artifact.sessionId === sessionInView) continue;
       toast.success(`Artifact created: ${artifact.name}`, {
         action: {
           label: "View artifacts",
-          onClick: () => useMainViewStore.getState().showArtifacts(),
+          onClick: () =>
+            useMainViewStore.getState().showArtifacts(artifact.sessionId),
         },
       });
     }

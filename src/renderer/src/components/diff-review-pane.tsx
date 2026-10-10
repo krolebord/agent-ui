@@ -6,7 +6,7 @@ import type {
   FileDiffMetadata,
   FileDiffProps,
 } from "@pierre/diffs/react";
-import { EditProvider, FileDiff } from "@pierre/diffs/react";
+import { EditProvider, FileDiff, useWorkerPool } from "@pierre/diffs/react";
 import { useConfirmDialogStore } from "@renderer/components/confirm-dialog";
 import {
   AddCommentGutterButton,
@@ -1546,6 +1546,27 @@ function ProjectDiffPaneContent() {
     ? (editableDrafts[selectedFile.name] ?? null)
     : null;
   const editableFileResult = editableFileQuery.data;
+  const workerPool = useWorkerPool();
+  const diffToPrime =
+    editableFileResult?.status === "ready" &&
+    !editDraft &&
+    workerPool?.isWorkingPool()
+      ? editableFileResult.fileDiff
+      : null;
+  const primeHighlightQuery = useQuery({
+    queryKey: ["diff-highlight-prime", diffToPrime?.cacheKey],
+    queryFn: async () => {
+      if (diffToPrime) await workerPool?.primeDiffHighlightCache(diffToPrime);
+      return null;
+    },
+    enabled: diffToPrime !== null,
+    gcTime: 0,
+    retry: false,
+  });
+  const highlightPrimed =
+    diffToPrime === null ||
+    primeHighlightQuery.isSuccess ||
+    primeHighlightQuery.isError;
 
   useEffect(() => {
     if (
@@ -1565,7 +1586,8 @@ function ProjectDiffPaneContent() {
       !selectedFile ||
       !selectedFileSourceSignature ||
       editableFileResult?.status !== "ready" ||
-      editableFileResult.sourceSignature !== selectedFileSourceSignature
+      editableFileResult.sourceSignature !== selectedFileSourceSignature ||
+      !highlightPrimed
     ) {
       return;
     }
@@ -1584,6 +1606,7 @@ function ProjectDiffPaneContent() {
     });
   }, [
     editableFileResult,
+    highlightPrimed,
     initializeEditableDraft,
     lineAnnotations,
     projectPath,
@@ -1736,7 +1759,7 @@ function ProjectDiffPaneContent() {
     supportsDiffEditing(selectedFile) &&
     !editDraft &&
     !editUnavailableReason &&
-    editableFileQuery.isFetching;
+    (editableFileQuery.isFetching || !highlightPrimed);
   const requestDiscardAll = () => {
     if (!files || files.length === 0) return;
     const filePaths = gitPathsForConfirmedFiles(
