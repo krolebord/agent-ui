@@ -13,6 +13,7 @@ import {
   useDiffViewMode,
 } from "@renderer/components/diff-view-mode";
 import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
+import { useGitPush } from "@renderer/hooks/use-git-push";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -54,7 +55,6 @@ import { createStore, type ExtractState } from "zustand";
 import { combine } from "zustand/middleware";
 import { useStore } from "zustand/react";
 import { useConfirmDialogStore } from "./confirm-dialog";
-import { useAppState } from "./sync-state-provider";
 import { Button } from "./ui/button";
 import {
   ResizableHandle,
@@ -554,36 +554,9 @@ function ProjectGitHistoryPaneContent() {
     }),
   );
 
-  const activeProject = useAppState((state) =>
-    state.projects.find((project) => project.path === projectPath),
-  );
-  const upstreamStats = activeProject?.gitUpstreamDiffStats;
-  const hasUpstream = Boolean(upstreamStats);
-  const aheadCommits = upstreamStats?.aheadCommits ?? 0;
+  const gitPush = useGitPush(projectPath);
+  const { upstreamStats, hasUpstream, aheadCommits, projectLocked } = gitPush;
   const behindCommits = upstreamStats?.behindCommits ?? 0;
-  const projectLocked = activeProject?.interactionDisabled === true;
-
-  const pushMutation = useMutation(
-    orpc.projects.pushToRemote.mutationOptions({
-      onSuccess: () => {
-        toast.success(
-          upstreamStats
-            ? `Pushed to ${upstreamStats.upstreamBranch}`
-            : "Branch published to remote",
-        );
-        void queryClient.invalidateQueries({
-          queryKey: orpc.projects.getCommitHistory.key(),
-        });
-      },
-      onError: (error) => {
-        toast.error(
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "Git push failed",
-        );
-      },
-    }),
-  );
 
   const pullMutation = useMutation(
     orpc.projects.pullFromRemote.mutationOptions({
@@ -636,7 +609,7 @@ function ProjectGitHistoryPaneContent() {
   const confirmUndo = useConfirmDialogStore((state) => state.confirm);
 
   const remoteSyncPending =
-    pushMutation.isPending || pullMutation.isPending || undoMutation.isPending;
+    gitPush.isPending || pullMutation.isPending || undoMutation.isPending;
 
   const commits = useMemo(
     () => historyQuery.data?.pages.flatMap((page) => page.commits) ?? [],
@@ -916,21 +889,15 @@ function ProjectGitHistoryPaneContent() {
             commits.length === 0 ||
             (hasUpstream && aheadCommits === 0)
           }
-          onClick={() => pushMutation.mutate({ path: projectPath })}
-          title={
-            upstreamStats
-              ? `Push to ${upstreamStats.upstreamBranch}`
-              : "Publish the current branch to origin"
-          }
+          onClick={gitPush.push}
+          title={gitPush.title}
         >
-          {pushMutation.isPending ? (
+          {gitPush.isPending ? (
             <LoaderCircle className="size-3 animate-spin" />
           ) : (
             <ArrowUp className="size-3" />
           )}
-          {hasUpstream
-            ? `Push${aheadCommits > 0 ? ` (${aheadCommits})` : ""}`
-            : "Publish branch"}
+          {gitPush.label}
         </Button>
       </div>
     </aside>

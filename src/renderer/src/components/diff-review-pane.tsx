@@ -35,6 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@renderer/components/ui/dropdown-menu";
+import { useGitPush } from "@renderer/hooks/use-git-push";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -42,6 +43,7 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  ArrowUp,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -61,6 +63,7 @@ import {
 } from "lucide-react";
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
@@ -87,6 +90,7 @@ type EditableDiffDraft = {
   editStateKey: string;
   fileDiff: FileDiffMetadata;
   revision: string;
+  baseRevision: string | null;
   initialContents: string;
   contents: string;
   lineAnnotations: DiffLineAnnotation<DiffReviewAnnotationMetadata>[];
@@ -231,10 +235,26 @@ function createProjectDiffStore(projectPath: string) {
         ) => {
           set((state) => {
             const current = state.editableDrafts[filePath];
+            if (current?.sourceSignature === draft.sourceSignature) {
+              return state;
+            }
             if (
-              current?.dirty ||
-              current?.sourceSignature === draft.sourceSignature
+              current &&
+              !current.conflict &&
+              current.revision === draft.revision &&
+              current.baseRevision === draft.baseRevision
             ) {
+              return {
+                editableDrafts: {
+                  ...state.editableDrafts,
+                  [filePath]: {
+                    ...current,
+                    sourceSignature: draft.sourceSignature,
+                  },
+                },
+              };
+            }
+            if (current?.dirty) {
               return state;
             }
             return {
@@ -256,6 +276,28 @@ function createProjectDiffStore(projectPath: string) {
               editableDrafts: {
                 ...state.editableDrafts,
                 [filePath]: { ...current, ...patch },
+              },
+            };
+          });
+        },
+        markEditableDraftSaved: (
+          filePath: string,
+          saved: { revision: string; contents: string },
+        ) => {
+          set((state) => {
+            const current = state.editableDrafts[filePath];
+            if (!current) return state;
+            return {
+              editableDrafts: {
+                ...state.editableDrafts,
+                [filePath]: {
+                  ...current,
+                  revision: saved.revision,
+                  initialContents: saved.contents,
+                  dirty: current.contents !== saved.contents,
+                  conflict: false,
+                  error: null,
+                },
               },
             };
           });
@@ -1046,7 +1088,7 @@ function DiffViewerPanel({
         </div>
       ) : selectedFile ? (
         <FileDiff<DiffReviewAnnotationMetadata>
-          key={editDraft?.revision ?? getFileDiffSignature(selectedFile)}
+          key={editDraft?.editStateKey ?? getFileDiffSignature(selectedFile)}
           fileDiff={renderedFile ?? selectedFile}
           options={diffOptions}
           edit={Boolean(editDraft)}
@@ -1107,15 +1149,13 @@ type DiffFilesSidebarProps = {
   someFilesConfirmed: boolean;
   isRefreshing: boolean;
   refreshErrorMessage: string | null;
-  canCommit: boolean;
-  hasUnsavedEdits: boolean;
+  actionButton: ReactNode;
   showDiffViewModeToggle: boolean;
   showMobileMenu: boolean;
   requestDiscardAll: () => void;
   isDiscardAllPending: boolean;
   onRefresh: () => void;
   onToggleAllFilesConfirmation: () => void;
-  onCommit: () => void;
   onOpenFile?: () => void;
   containerClassName?: string;
   headerClassName?: string;
@@ -1129,15 +1169,13 @@ function DiffFilesSidebar({
   someFilesConfirmed,
   isRefreshing,
   refreshErrorMessage,
-  canCommit,
-  hasUnsavedEdits,
+  actionButton,
   showDiffViewModeToggle,
   showMobileMenu,
   requestDiscardAll,
   isDiscardAllPending,
   onRefresh,
   onToggleAllFilesConfirmation,
-  onCommit,
   onOpenFile,
   containerClassName,
   headerClassName,
@@ -1274,22 +1312,7 @@ function DiffFilesSidebar({
       </ContextMenu>
 
       <div className="shrink-0 space-y-1 border-t border-border/70 p-1.5 pointer-coarse:p-2">
-        <Button
-          type="button"
-          variant="default"
-          size="sm"
-          className="h-7 w-full px-2 text-xs pointer-coarse:h-11 pointer-coarse:text-sm"
-          disabled={!canCommit}
-          onClick={onCommit}
-          title={
-            hasUnsavedEdits
-              ? "Save your diff edits before committing"
-              : undefined
-          }
-        >
-          <GitCommitHorizontal className="size-3" />
-          Commit
-        </Button>
+        {actionButton}
       </div>
     </div>
   );
@@ -1384,6 +1407,8 @@ function ProjectDiffPaneContent() {
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
   const projectPath = useProjectDiffStore((state) => state.projectPath);
+  const gitPush = useGitPush(projectPath);
+  const { upstreamStats, aheadCommits } = gitPush;
   const {
     data: files,
     isLoading,
@@ -1394,6 +1419,13 @@ function ProjectDiffPaneContent() {
   } = useQuery(
     orpc.projects.getUncommittedDiff.queryOptions({
       input: { path: projectPath },
+      staleTime: 0,
+    }),
+  );
+  const publishHistoryQuery = useQuery(
+    orpc.projects.getCommitHistory.queryOptions({
+      input: { path: projectPath, limit: 1 },
+      enabled: files?.length === 0 && !upstreamStats && !isError,
       staleTime: 0,
     }),
   );
@@ -1449,6 +1481,9 @@ function ProjectDiffPaneContent() {
   );
   const removeEditableDraft = useProjectDiffStore(
     (state) => state.removeEditableDraft,
+  );
+  const markEditableDraftSaved = useProjectDiffStore(
+    (state) => state.markEditableDraftSaved,
   );
   const removeEditableDrafts = useProjectDiffStore(
     (state) => state.removeEditableDrafts,
@@ -1596,6 +1631,7 @@ function ProjectDiffPaneContent() {
       editStateKey: `${projectPath}:${selectedFile.name}:${++editStateKeySequence}`,
       fileDiff: editableFileResult.fileDiff,
       revision: editableFileResult.revision,
+      baseRevision: editableFileResult.baseRevision,
       initialContents: editableFileResult.contents,
       contents: editableFileResult.contents,
       lineAnnotations,
@@ -1680,7 +1716,7 @@ function ProjectDiffPaneContent() {
         expectedRevision: editDraft.revision,
       },
       {
-        onSuccess: (result) => {
+        onSuccess: (result, variables) => {
           if (result.status === "conflict") {
             updateEditableDraft(selectedFile.name, {
               conflict: true,
@@ -1693,8 +1729,10 @@ function ProjectDiffPaneContent() {
             selectedFile.name,
             effectiveLineAnnotations,
           );
-          removeEditableDraft(selectedFile.name);
-          setEditorFocusedFilePath(null);
+          markEditableDraftSaved(selectedFile.name, {
+            revision: result.revision,
+            contents: variables.contents,
+          });
           void queryClient.invalidateQueries({
             queryKey: orpc.projects.getUncommittedDiff.queryKey({
               input: { path: projectPath },
@@ -1714,13 +1752,12 @@ function ProjectDiffPaneContent() {
     applyEditedAnnotationPositions,
     editDraft,
     effectiveLineAnnotations,
+    markEditableDraftSaved,
     projectPath,
     queryClient,
     refetchEditableFile,
-    removeEditableDraft,
     saveEditMutation,
     selectedFile,
-    setEditorFocusedFilePath,
     updateEditableDraft,
   ]);
 
@@ -1896,6 +1933,53 @@ function ProjectDiffPaneContent() {
 
   if (!files) return null;
 
+  const showPush =
+    files.length === 0 &&
+    !hasUnsavedEdits &&
+    (aheadCommits > 0 ||
+      (!upstreamStats && Boolean(publishHistoryQuery.data?.commits.length)));
+  const actionButton = (
+    <Button
+      type="button"
+      variant="default"
+      size="sm"
+      className="h-7 w-full px-2 text-xs pointer-coarse:h-11 pointer-coarse:text-sm"
+      disabled={
+        showPush ? gitPush.isPending || gitPush.projectLocked : !canCommit
+      }
+      onClick={() => {
+        if (showPush) {
+          gitPush.push();
+        } else {
+          openCommitDialog({
+            projectPath,
+            pathsToCommit,
+            selectedFileCount,
+            onCommitted: clearConfirmations,
+          });
+        }
+      }}
+      title={
+        showPush
+          ? gitPush.title
+          : hasUnsavedEdits
+            ? "Save your diff edits before committing"
+            : undefined
+      }
+    >
+      {showPush ? (
+        gitPush.isPending ? (
+          <LoaderCircle className="size-3 animate-spin" />
+        ) : (
+          <ArrowUp className="size-3" />
+        )
+      ) : (
+        <GitCommitHorizontal className="size-3" />
+      )}
+      {showPush ? gitPush.label : "Commit"}
+    </Button>
+  );
+
   const sidebarProps = {
     files,
     isLoading,
@@ -1904,20 +1988,12 @@ function ProjectDiffPaneContent() {
     someFilesConfirmed,
     isRefreshing,
     refreshErrorMessage: isError ? getDiffErrorMessage(error) : null,
-    canCommit,
-    hasUnsavedEdits,
+    actionButton,
     requestDiscardAll,
     isDiscardAllPending: discardAllMutation.isPending,
     onRefresh: refreshProjectDiff,
     onToggleAllFilesConfirmation: () =>
       toggleAllFilesConfirmation(files.map((file) => file.name)),
-    onCommit: () =>
-      openCommitDialog({
-        projectPath,
-        pathsToCommit,
-        selectedFileCount,
-        onCommitted: clearConfirmations,
-      }),
   };
 
   const diffViewerProps = {

@@ -282,6 +282,7 @@ export async function loadEditableDiffFile(
       status: "ready" as const,
       sourceSignature: getFileDiffSourceSignature(file),
       revision: snapshot.revision,
+      baseRevision: oldFile?.cacheKey ?? null,
       contents: snapshot.contents,
       fileDiff: parseDiffFromFile(oldFile, newFile, undefined, true),
     };
