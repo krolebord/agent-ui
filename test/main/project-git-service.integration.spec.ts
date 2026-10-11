@@ -1,9 +1,83 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import simpleGit from "simple-git";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectGitService } from "../../src/main/project-git-service";
 import { defineProjectState } from "../../src/main/project-service";
+
+describe("pushes with real Git", () => {
+  let root: string;
+  let service: ProjectGitService;
+
+  beforeEach(async () => {
+    vi.stubEnv("GIT_EDITOR", undefined);
+    vi.stubEnv("PAGER", undefined);
+    vi.stubEnv("GIT_PAGER", undefined);
+    root = await mkdtemp("/var/tmp/agent-ui-push-");
+    service = new ProjectGitService(defineProjectState());
+  });
+
+  afterEach(async () => {
+    await service?.dispose();
+    vi.unstubAllEnvs();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it.each(["publish branch", "push commit", "push tags without new commits"])(
+    "%s includes annotated and lightweight tags",
+    async (mode) => {
+      const repo = path.join(root, "repo");
+      const remote = path.join(root, "remote.git");
+      await mkdir(repo);
+      await mkdir(remote);
+      const git = simpleGit({
+        baseDir: repo,
+        unsafe: { allowUnsafeHooksPath: true },
+      });
+      const remoteGit = simpleGit(remote);
+      await remoteGit.init(true);
+      await git.init(["--initial-branch=main"]);
+      await git.addConfig("user.name", "Test");
+      await git.addConfig("user.email", "test@example.com");
+      await git.addConfig("commit.gpgsign", "false");
+      await git.addConfig("core.hooksPath", "/dev/null");
+      await git.commit("Initial commit", ["--allow-empty"]);
+
+      const hasUpstream = mode !== "publish branch";
+      const remoteName = hasUpstream ? "upstream" : "origin";
+      const remoteBranch = hasUpstream ? "published" : "main";
+      await git.addRemote(remoteName, remote);
+      if (hasUpstream) {
+        await git.push(["--set-upstream", remoteName, "main:published"]);
+        await git.addConfig("push.default", "upstream");
+      }
+      if (mode !== "push tags without new commits") {
+        await git.commit("New commit", ["--allow-empty"]);
+      }
+      await git.raw(["tag", "v1-lightweight"]);
+      await git.raw([
+        "tag",
+        "--annotate",
+        "--no-sign",
+        "v1-annotated",
+        "--message",
+        "Release",
+      ]);
+
+      await service.pushToRemote(repo);
+
+      expect(await remoteGit.revparse([`refs/heads/${remoteBranch}`])).toBe(
+        await git.revparse(["HEAD"]),
+      );
+      expect(await remoteGit.raw(["show-ref", "--tags"])).toBe(
+        await git.raw(["show-ref", "--tags"]),
+      );
+      expect(await git.revparse(["--abbrev-ref", "@{upstream}"])).toBe(
+        `${remoteName}/${remoteBranch}`,
+      );
+    },
+  );
+});
 
 describe("selected changes with real Git", () => {
   let repo: string;

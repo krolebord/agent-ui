@@ -1994,7 +1994,7 @@ describe("ProjectGitService", () => {
   });
 
   describe("pushToRemote", () => {
-    it("pushes to the configured upstream", async () => {
+    it("pushes the branch and tags to the configured upstream", async () => {
       checkIsRepoMock.mockResolvedValue(true);
       branchLocalMock.mockResolvedValue({ current: "main" });
       pushMock.mockResolvedValue(undefined);
@@ -2019,10 +2019,12 @@ describe("ProjectGitService", () => {
       const service = new ProjectGitService(defineProjectState());
       await service.pushToRemote("/repo-one");
 
-      expect(pushMock).toHaveBeenCalledWith("/repo-one", undefined);
+      expect(pushMock).toHaveBeenCalledTimes(2);
+      expect(pushMock).toHaveBeenNthCalledWith(1, "/repo-one", undefined);
+      expect(pushMock).toHaveBeenNthCalledWith(2, "/repo-one", ["--tags"]);
     });
 
-    it("publishes the branch when no upstream is configured", async () => {
+    it("publishes the branch and tags when no upstream is configured", async () => {
       checkIsRepoMock.mockResolvedValue(true);
       branchLocalMock.mockResolvedValue({ current: "feature/new-ui" });
       pushMock.mockResolvedValue(undefined);
@@ -2048,6 +2050,7 @@ describe("ProjectGitService", () => {
       await service.pushToRemote("/repo-one");
 
       expect(pushMock).toHaveBeenCalledWith("/repo-one", [
+        "--tags",
         "--set-upstream",
         "origin",
         "feature/new-ui",

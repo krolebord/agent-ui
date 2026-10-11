@@ -1189,8 +1189,9 @@ export class ProjectGitService {
     try {
       if (upstreamBranch) {
         await git.push();
+        await git.push(["--tags"]);
       } else {
-        await git.push(["--set-upstream", "origin", branch]);
+        await git.push(["--tags", "--set-upstream", "origin", branch]);
       }
     } catch (error) {
       const raw = error instanceof Error ? error.message : "";
