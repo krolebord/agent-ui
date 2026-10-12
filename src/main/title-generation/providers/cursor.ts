@@ -8,8 +8,9 @@ import { sanitizeGeneratedTitle } from "../sanitize-title";
 export async function generateCursorTitle(
   userPrompt: string,
   model: string,
+  workingDirectory: string,
 ): Promise<string | null> {
-  const provider = createCursorProvider(model);
+  const provider = createCursorProvider(model, { workingDirectory });
   const prompt = [systemPrompt, generateTitleGenerationPrompt(userPrompt)]
     .filter(Boolean)
     .join("\n\n");

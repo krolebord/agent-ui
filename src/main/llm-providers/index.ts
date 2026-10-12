@@ -19,6 +19,7 @@ export function createLlmProvider(
       return createCodexProvider(settings.model, options);
     case "cursor":
       return createCursorProvider(settings.model, {
+        workingDirectory: options.workingDirectory,
         timeoutMs: options.timeoutMs,
       });
   }

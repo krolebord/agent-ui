@@ -1,14 +1,16 @@
+import { mkdir } from "node:fs/promises";
 import spawn from "nano-spawn";
 import log from "../logger";
 import type { LlmProvider } from "./types";
 
 export interface CursorProviderOptions {
+  workingDirectory: string;
   timeoutMs?: number;
 }
 
 export function createCursorProvider(
   model: string,
-  options?: CursorProviderOptions,
+  options: CursorProviderOptions,
 ): LlmProvider {
   return {
     async complete(prompt: string): Promise<string | null> {
@@ -26,9 +28,11 @@ export function createCursorProvider(
       ];
 
       try {
+        await mkdir(options.workingDirectory, { recursive: true });
         const { output } = await spawn("cursor-agent", args, {
+          cwd: options.workingDirectory,
           preferLocal: true,
-          timeout: options?.timeoutMs ?? 30_000,
+          timeout: options.timeoutMs ?? 30_000,
           stdin: "ignore",
         });
         const trimmed = output.trim();

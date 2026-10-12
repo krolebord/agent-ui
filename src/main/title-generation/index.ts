@@ -11,6 +11,6 @@ export async function generateTitle(
     case "codex":
       return generateCodexTitle(userPrompt, settings.model, workingDirectory);
     case "cursor":
-      return generateCursorTitle(userPrompt, settings.model);
+      return generateCursorTitle(userPrompt, settings.model, workingDirectory);
   }
 }
