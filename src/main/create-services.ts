@@ -99,6 +99,15 @@ import {
   defineUsageState,
   UsageTracker,
 } from "./usage-tracking";
+import {
+  createAgentBrowserCli,
+  detectAgentBrowser,
+} from "./visuals/agent-browser";
+import {
+  AgentBrowserService,
+  defineAgentBrowserState,
+} from "./visuals/agent-browser-service";
+import { createHtmlPreviewer } from "./visuals/html-preview";
 
 const STORAGE_SCHEMA_VERSION = 3;
 
@@ -281,7 +290,19 @@ export async function createServices(options: CreateServicesOptions) {
   persistenceService.registerAndHydrate(
     defineArtifactsPersistence(artifactsState),
   );
-  const artifactsService = new ArtifactsService(artifactsState);
+  const artifactsService = new ArtifactsService(artifactsState, {
+    visualsDir: path.join(userDataPath, "visuals"),
+  });
+
+  const agentBrowserState = defineAgentBrowserState();
+  const agentBrowserService = new AgentBrowserService(agentBrowserState, () =>
+    detectAgentBrowser(),
+  );
+  void agentBrowserService.refresh();
+  const htmlPreviewer = createHtmlPreviewer({
+    runner: createAgentBrowserCli({ cwd: userDataPath }),
+    screenshotDir: path.join(userDataPath, "visual-previews"),
+  });
 
   const projectTerminalsState = defineProjectTerminalsState();
   persistenceService.registerAndHydrate(
@@ -547,6 +568,7 @@ export async function createServices(options: CreateServicesOptions) {
       scheduledSessions: scheduledSessionsState,
       scheduledPrompts: scheduledPromptsState,
       artifacts: artifactsState,
+      agentBrowser: agentBrowserState,
       usage: usageState,
       sessionMemory: sessionMemoryState,
     },
@@ -605,6 +627,8 @@ export async function createServices(options: CreateServicesOptions) {
   return {
     appSettingsState,
     artifactsService,
+    agentBrowser: agentBrowserService,
+    htmlPreviewer,
     claudeAccounts: claudeAccountsService,
     claudeAccountLogin,
     codexAccounts: codexAccountsService,

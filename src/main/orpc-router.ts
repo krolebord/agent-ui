@@ -28,6 +28,7 @@ import { stateSyncRouter } from "./state-orchestrator";
 import { terminalsRouter } from "./terminal-manager";
 import { usageHistoryRouter } from "./usage-history/service";
 import { usageRouter } from "./usage-tracking";
+import { agentBrowserRouter } from "./visuals/agent-browser-service";
 
 export const sessionsRouter = {
   markSeen: procedure
@@ -293,6 +294,7 @@ export const sessionsRouter = {
 
 export const orpcRouter = {
   artifacts: artifactsRouter,
+  agentBrowser: agentBrowserRouter,
   appSettings: appSettingsRouter,
   claudeAccounts: claudeAccountsRouter,
   codexAccounts: codexAccountsRouter,

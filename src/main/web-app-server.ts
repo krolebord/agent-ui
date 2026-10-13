@@ -92,6 +92,19 @@ function getArtifactDownloadRequest(
   }
 }
 
+export const VISUAL_PREVIEW_CSP =
+  "sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox";
+
+export function visualFileName(title: string): string {
+  const name = title
+    .replace(/[\\/:*?"<>|\p{Cc}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120)
+    .trim();
+  return `${name || "Visual"}.html`;
+}
+
 function contentDispositionAttachment(filename: string): string {
   const unsafeFallbackCharacters = /[^\u0020-\u007e]|["\\]/gu;
   const fallback = path
@@ -127,13 +140,18 @@ async function serveArtifact(
     "content-length": stats.size,
     "content-disposition": preview
       ? "inline"
-      : contentDispositionAttachment(artifact.name),
+      : contentDispositionAttachment(
+          artifact.kind === "visual"
+            ? visualFileName(artifact.name)
+            : artifact.name,
+        ),
     "cache-control": "private, no-store",
     "x-content-type-options": "nosniff",
   };
   // Chrome refuses to render PDFs in sandboxed documents.
   if (preview && contentType !== "application/pdf") {
-    headers["content-security-policy"] = "sandbox";
+    headers["content-security-policy"] =
+      artifact.kind === "visual" ? VISUAL_PREVIEW_CSP : "sandbox";
   }
   if (req.method === "HEAD") {
     res.writeHead(200, headers);

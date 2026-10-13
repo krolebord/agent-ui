@@ -32,7 +32,12 @@ import {
 } from "@renderer/components/ui/select";
 import { Switch } from "@renderer/components/ui/switch";
 import { SHORTCUT_DEFINITIONS } from "@renderer/hooks/use-app-shortcuts";
+import {
+  AGENT_BROWSER_INSTALL_URL,
+  describeAgentBrowserStatus,
+} from "@renderer/lib/agent-browser-status";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
+import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { codexModels } from "@shared/codex-models";
 import { resolveCodexSessionOptions } from "@shared/last-session-options";
@@ -131,6 +136,7 @@ export function SettingsDialog() {
             <AccordionContent className="divide-y divide-border/40">
               <TitleGenerationSettings />
               <SkillsSettingsItem onNavigate={closeSettingsDialog} />
+              <AgentBrowserSettingsItem />
             </AccordionContent>
           </AccordionItem>
 
@@ -589,6 +595,60 @@ function TitleGenerationSettings() {
             </p>
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function AgentBrowserSettingsItem() {
+  const agentBrowser = useAppState((s) => s.agentBrowser);
+  const { mutate, isPending } = useMutation(
+    orpc.agentBrowser.refresh.mutationOptions(),
+  );
+  const isChecking = isPending || agentBrowser.status === "checking";
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <div className="min-w-0 space-y-0.5">
+        <div className="text-sm font-medium">HTML previews (agent-browser)</div>
+        <div
+          className={cn(
+            "text-xs break-words",
+            agentBrowser.status === "unavailable"
+              ? "text-rose-300"
+              : "text-muted-foreground",
+          )}
+        >
+          {describeAgentBrowserStatus(agentBrowser)}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Lets agents screenshot HTML visuals before publishing them.
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {agentBrowser.status === "unavailable" ? (
+          <Button variant="outline" size="sm" asChild>
+            <a
+              href={AGENT_BROWSER_INSTALL_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Install
+            </a>
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={isChecking}
+          onClick={() => mutate(undefined)}
+        >
+          {isChecking ? (
+            <LoaderCircle className="mr-1.5 size-3.5 animate-spin" />
+          ) : null}
+          Check again
+        </Button>
       </div>
     </div>
   );

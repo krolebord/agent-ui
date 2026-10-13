@@ -28,6 +28,7 @@ const listScheduledSessions = vi.fn(() => []);
 const sessionMemoryEnabled = vi.fn(() => false);
 const services = {
   mcpSessionTokens,
+  agentBrowser: { isUnavailable: true },
   sessionMemory: { isEnabled: sessionMemoryEnabled },
   skillsService: { listSkillsForPath },
   scheduledSessionsService: {

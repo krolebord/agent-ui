@@ -6,7 +6,11 @@ import path from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Services } from "../../src/main/create-services";
-import { startWebAppServer } from "../../src/main/web-app-server";
+import {
+  startWebAppServer,
+  VISUAL_PREVIEW_CSP,
+  visualFileName,
+} from "../../src/main/web-app-server";
 
 const fsMockState = vi.hoisted(() => ({ failReadStream: false }));
 
@@ -290,11 +294,12 @@ describe("web app server", () => {
   });
 
   it.each([
-    { mimeType: "text/html", sandboxed: true },
-    { mimeType: "application/pdf", sandboxed: false },
+    { kind: "file", mimeType: "text/html", csp: "sandbox" },
+    { kind: "file", mimeType: "application/pdf", csp: null },
+    { kind: "visual", mimeType: "text/html", csp: VISUAL_PREVIEW_CSP },
   ])(
-    "serves $mimeType artifacts inline for previews",
-    async ({ mimeType, sandboxed }) => {
+    "serves $kind $mimeType artifacts inline for previews",
+    async ({ kind, mimeType, csp }) => {
       const reservation = await reservePort();
       await new Promise<void>((resolve) =>
         reservation.server.close(() => resolve()),
@@ -308,6 +313,7 @@ describe("web app server", () => {
             state: {
               artifact1: {
                 id: "artifact1",
+                kind,
                 sessionId: "session1",
                 path: artifactPath,
                 name: "preview-artifact",
@@ -333,12 +339,62 @@ describe("web app server", () => {
       );
       expect(response.status).toBe(200);
       expect(response.headers.get("content-disposition")).toBe("inline");
-      expect(response.headers.get("content-security-policy")).toBe(
-        sandboxed ? "sandbox" : null,
-      );
+      expect(response.headers.get("content-security-policy")).toBe(csp);
       expect(await response.text()).toBe("agent output");
     },
   );
+
+  it("downloads a visual as an HTML file named after its title", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    const artifactPath = path.join(rendererDist, "visual-id.html");
+    await writeFile(artifactPath, "<p>chart</p>");
+    const services = {
+      artifactsService: {
+        state: {
+          state: {
+            visual1: {
+              id: "visual1",
+              kind: "visual",
+              sessionId: "session1",
+              path: artifactPath,
+              name: "Revenue: Q1/Q2",
+              size: 12,
+              mimeType: "text/html",
+              createdAt: Date.now(),
+              available: true,
+            },
+          },
+        },
+        markUnavailable() {},
+      },
+    } as unknown as Services;
+
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => services,
+    });
+    servers.push(server);
+
+    const response = await fetch(`${server.url}/artifacts/visual1/download`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe(
+      `attachment; filename="Revenue Q1 Q2.html"; filename*=UTF-8''${encodeURIComponent("Revenue Q1 Q2.html")}`,
+    );
+    expect(response.headers.get("content-security-policy")).toBeNull();
+    expect(await response.text()).toBe("<p>chart</p>");
+  });
+
+  it.each([
+    ["Revenue: Q1/Q2", "Revenue Q1 Q2.html"],
+    ["  \u0007 ", "Visual.html"],
+    ["x".repeat(200), `${"x".repeat(120)}.html`],
+  ])("names visual downloads %j as %j", (title, fileName) => {
+    expect(visualFileName(title)).toBe(fileName);
+  });
 
   it("uses an ASCII fallback for artifact names with Unicode characters", async () => {
     const reservation = await reservePort();

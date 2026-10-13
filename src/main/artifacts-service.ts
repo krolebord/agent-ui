@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { defineServiceState } from "@shared/service-state";
+import { HTML_RENDER_MAX_TITLE_LENGTH } from "@shared/visuals";
 import { z } from "zod";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
 
 export const artifactSchema = z.object({
   id: z.string(),
+  kind: z.enum(["file", "visual"]).default("file"),
   sessionId: z.string(),
   path: z.string(),
   name: z.string(),
@@ -55,7 +57,14 @@ function inferMimeType(filePath: string): string | undefined {
 }
 
 export class ArtifactsService {
-  constructor(readonly state: ArtifactsState) {}
+  private readonly visualsDir: string;
+
+  constructor(
+    readonly state: ArtifactsState,
+    options: { visualsDir: string },
+  ) {
+    this.visualsDir = path.resolve(options.visualsDir);
+  }
 
   async publish(input: {
     sessionId: string;
@@ -75,6 +84,7 @@ export class ArtifactsService {
 
     const artifact: Artifact = {
       id: randomUUID(),
+      kind: "file",
       sessionId: input.sessionId,
       path: resolvedPath,
       name: input.name?.trim() || path.basename(resolvedPath),
@@ -91,10 +101,55 @@ export class ArtifactsService {
     return artifact;
   }
 
-  remove(id: string): void {
+  async publishVisual(input: {
+    sessionId: string;
+    html: string;
+    title: string;
+    description?: string;
+  }): Promise<Artifact> {
+    const id = randomUUID();
+    const filePath = path.join(this.visualsDir, `${id}.html`);
+    await mkdir(this.visualsDir, { recursive: true });
+    await writeFile(filePath, input.html, "utf8");
+
+    const artifact: Artifact = {
+      id,
+      kind: "visual",
+      sessionId: input.sessionId,
+      path: filePath,
+      name:
+        input.title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH).trim() ||
+        "Visual",
+      description: input.description?.trim() || undefined,
+      size: Buffer.byteLength(input.html, "utf8"),
+      mimeType: "text/html",
+      createdAt: Date.now(),
+      available: true,
+    };
+
+    this.state.updateState((artifacts) => {
+      artifacts[artifact.id] = artifact;
+    });
+    return artifact;
+  }
+
+  async remove(id: string): Promise<void> {
+    const artifact = this.state.state[id];
     this.state.updateState((artifacts) => {
       delete artifacts[id];
     });
+    if (artifact?.kind === "visual" && this.isInVisualsDir(artifact.path)) {
+      await rm(artifact.path, { force: true }).catch(() => {});
+    }
+  }
+
+  private isInVisualsDir(filePath: string): boolean {
+    const relative = path.relative(this.visualsDir, path.resolve(filePath));
+    return (
+      relative !== "" &&
+      !relative.startsWith("..") &&
+      !path.isAbsolute(relative)
+    );
   }
 
   async refreshAvailability(): Promise<void> {
@@ -125,8 +180,8 @@ export const artifactsRouter = {
   }),
   remove: procedure
     .input(z.object({ id: z.string() }))
-    .handler(({ input, context }) => {
-      context.artifactsService.remove(input.id);
+    .handler(async ({ input, context }) => {
+      await context.artifactsService.remove(input.id);
     }),
   getDownloadUrl: procedure
     .input(z.object({ id: z.string() }))

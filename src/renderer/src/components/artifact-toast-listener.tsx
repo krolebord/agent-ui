@@ -1,6 +1,10 @@
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
+import {
+  getNewArtifactToastTitle,
+  shouldToastNewArtifact,
+} from "@renderer/lib/artifact-preview";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
@@ -21,12 +25,15 @@ export function ArtifactToastListener() {
         : null;
     for (const artifact of Object.values(artifacts)) {
       if (knownIds.current.has(artifact.id)) continue;
-      if (artifact.sessionId === sessionInView) continue;
-      toast.success(`Artifact created: ${artifact.name}`, {
+      if (!shouldToastNewArtifact(artifact, sessionInView)) continue;
+      const isVisual = artifact.kind === "visual";
+      toast.success(getNewArtifactToastTitle(artifact), {
         action: {
-          label: "View artifacts",
+          label: isVisual ? "View" : "View artifacts",
           onClick: () =>
-            useMainViewStore.getState().showArtifacts(artifact.sessionId),
+            useMainViewStore
+              .getState()
+              .showArtifacts(artifact.sessionId, isVisual ? artifact.id : null),
         },
       });
     }

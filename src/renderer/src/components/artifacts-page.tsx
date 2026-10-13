@@ -16,10 +16,14 @@ import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import {
   formatTextPreview,
   getArtifactPreviewKind,
+  getHtmlPreviewSandbox,
+  getVisualFrameHeight,
   MAX_TEXT_PREVIEW_BYTES,
   readTextPreview,
 } from "@renderer/lib/artifact-preview";
+import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
+import { readVisualContentHeight } from "@shared/visuals";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Archive,
@@ -29,6 +33,7 @@ import {
   File,
   FileImage,
   FileText,
+  LayoutDashboard,
   PackageOpen,
   Search,
   Trash2,
@@ -57,6 +62,9 @@ function formatCreatedAt(createdAt: number): string {
 }
 
 function ArtifactIcon({ artifact }: { artifact: Artifact }) {
+  if (artifact.kind === "visual") {
+    return <LayoutDashboard className="size-4" />;
+  }
   if (artifact.mimeType?.startsWith("image/")) {
     return <FileImage className="size-4" />;
   }
@@ -211,6 +219,18 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
   const [downloading, setDownloading] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const previewKind = getArtifactPreviewKind(artifact.mimeType);
+  const isFocused = useMainViewStore(
+    (state) => state.focusedArtifactId === artifact.id,
+  );
+  const clearFocusedArtifact = useMainViewStore(
+    (state) => state.clearFocusedArtifact,
+  );
+
+  useEffect(() => {
+    if (!isFocused) return;
+    if (previewKind && artifact.available) setPreviewOpen(true);
+    clearFocusedArtifact();
+  }, [isFocused, previewKind, artifact.available, clearFocusedArtifact]);
   const removeArtifact = useMutation(
     orpc.artifacts.remove.mutationOptions({
       onSuccess: () => toast.success("Artifact removed"),
@@ -251,6 +271,11 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
             >
               {artifact.name}
             </span>
+            {artifact.kind === "visual" ? (
+              <Badge variant="secondary" className="shrink-0">
+                Visual
+              </Badge>
+            ) : null}
             {!artifact.available ? (
               <Badge variant="destructive" className="shrink-0">
                 Missing
@@ -424,6 +449,19 @@ function ArtifactPreview({
     );
   }
 
+  if (kind === "html") {
+    return artifact.kind === "visual" ? (
+      <VisualFrame src={previewHref} title={artifact.name} />
+    ) : (
+      <iframe
+        src={previewHref}
+        title={artifact.name}
+        sandbox={getHtmlPreviewSandbox(artifact.kind)}
+        className="h-[70vh] w-full rounded-md border border-border/60 bg-white"
+      />
+    );
+  }
+
   if (!text.data) return <PreviewMessage>Loading preview…</PreviewMessage>;
   return (
     <div className="flex min-h-0 flex-col gap-2">
@@ -445,5 +483,32 @@ function PreviewMessage({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-48 items-center justify-center rounded-md border border-border/60 bg-black/20 px-6 text-center text-sm text-muted-foreground">
       {children}
     </div>
+  );
+}
+
+function VisualFrame({ src, title }: { src: string; title: string }) {
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const [contentHeight, setContentHeight] = useState<number>();
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== frameRef.current?.contentWindow) return;
+      const height = readVisualContentHeight(event.data);
+      if (height !== undefined) setContentHeight(height);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  const height = getVisualFrameHeight(contentHeight);
+  return (
+    <iframe
+      ref={frameRef}
+      src={src}
+      title={title}
+      sandbox={getHtmlPreviewSandbox("visual")}
+      className={cn("w-full bg-background", !height && "h-[70vh]")}
+      style={height ? { height } : undefined}
+    />
   );
 }

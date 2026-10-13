@@ -29,18 +29,19 @@ export async function handleMcpHttpRequest(
     requestUrl.searchParams.get("token"),
   ) ?? { cwd: null, canScheduleSessions: false };
 
-  const server = createMcpServer(services, context);
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
     enableJsonResponse: true,
   });
+  let server: McpServer | null = null;
 
   res.on("close", () => {
     void transport.close();
-    void server.close();
+    void server?.close();
   });
 
   try {
+    server = createMcpServer(services, context);
     await server.connect(transport);
     await transport.handleRequest(req, res);
   } catch (error) {

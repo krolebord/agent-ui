@@ -1,4 +1,6 @@
-export type ArtifactPreviewKind = "image" | "pdf" | "text";
+import type { Artifact } from "@main/artifacts-service";
+
+export type ArtifactPreviewKind = "image" | "pdf" | "html" | "text";
 
 export const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024;
 
@@ -8,10 +10,43 @@ export function getArtifactPreviewKind(
   if (!mimeType) return null;
   if (mimeType.startsWith("image/")) return "image";
   if (mimeType === "application/pdf") return "pdf";
+  if (mimeType === "text/html") return "html";
   if (mimeType.startsWith("text/") || mimeType === "application/json") {
     return "text";
   }
   return null;
+}
+
+// Never allow-same-origin: the frame must not reach the app's origin.
+export function getHtmlPreviewSandbox(kind: Artifact["kind"]): string {
+  return kind === "visual"
+    ? "allow-scripts allow-popups allow-popups-to-escape-sandbox"
+    : "";
+}
+
+const MIN_VISUAL_FRAME_HEIGHT = 120;
+
+export function getVisualFrameHeight(
+  contentHeight: number | undefined,
+): string | undefined {
+  if (contentHeight === undefined) return undefined;
+  const height = Math.max(MIN_VISUAL_FRAME_HEIGHT, Math.ceil(contentHeight));
+  return `min(${height}px, 70vh)`;
+}
+
+export function shouldToastNewArtifact(
+  artifact: Pick<Artifact, "kind" | "sessionId">,
+  sessionInView: string | null,
+): boolean {
+  return artifact.kind === "visual" || artifact.sessionId !== sessionInView;
+}
+
+export function getNewArtifactToastTitle(
+  artifact: Pick<Artifact, "kind" | "name">,
+): string {
+  return artifact.kind === "visual"
+    ? `Visual ready: ${artifact.name}`
+    : `Artifact created: ${artifact.name}`;
 }
 
 export async function readTextPreview(
