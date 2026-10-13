@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, type OutgoingHttpHeaders, request } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
@@ -36,6 +37,26 @@ async function reservePort() {
     throw new Error("Failed to reserve test port");
   }
   return { server, port: address.port };
+}
+
+function statusOf(
+  serverUrl: string,
+  options: { path?: string; method?: string; headers: OutgoingHttpHeaders },
+) {
+  const { hostname, port } = new URL(serverUrl);
+  return new Promise<number>((resolve, reject) => {
+    const req = request({ host: hostname, port, ...options });
+    req.once("upgrade", (res, socket) => {
+      socket.destroy();
+      resolve(res.statusCode ?? 0);
+    });
+    req.once("response", (res) => {
+      res.resume();
+      resolve(res.statusCode ?? 0);
+    });
+    req.once("error", reject);
+    req.end();
+  });
 }
 
 describe("web app server", () => {
@@ -402,5 +423,47 @@ describe("web app server", () => {
     expect(response.status).toBe(404);
     expect(await response.text()).toBe("Artifact file is no longer available");
     expect(markUnavailable).toHaveBeenCalledWith("artifact1");
+  });
+
+  it("checks Host on every request and Origin on /rpc and /mcp", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => ({}) as Services,
+    });
+    servers.push(server);
+    const host = new URL(server.url).host;
+    const upgrade = {
+      path: "/rpc",
+      headers: {
+        host,
+        connection: "Upgrade",
+        upgrade: "websocket",
+        "sec-websocket-version": "13",
+        "sec-websocket-key": randomBytes(16).toString("base64"),
+      },
+    };
+
+    expect(await statusOf(server.url, upgrade)).toBe(101);
+    expect(
+      await statusOf(server.url, { headers: { host: "attacker.example" } }),
+    ).toBe(403);
+    expect(
+      await statusOf(server.url, {
+        ...upgrade,
+        headers: { ...upgrade.headers, origin: "https://evil.com" },
+      }),
+    ).toBe(403);
+    expect(
+      await statusOf(server.url, {
+        path: "/mcp",
+        method: "POST",
+        headers: { host, origin: "null" },
+      }),
+    ).toBe(403);
   });
 });

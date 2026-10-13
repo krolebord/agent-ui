@@ -13,7 +13,7 @@ pnpm exec vitest run test/main/session-service.spec.ts
 
 Packaging and model-extraction scripts are in `package.json`.
 
-Electron is macOS-only (`src/main/index.ts` throws elsewhere), so on Linux run headless. Headless binds `127.0.0.1` from port 3420 upward; `AGENT_UI_WEB_PORT` and `AGENT_UI_DATA_DIR` override. Typecheck and build use the native TypeScript 7 compiler.
+Electron is macOS-only (`src/main/index.ts` throws elsewhere), so on Linux run headless. Headless binds `127.0.0.1` from port 3420 upward; `AGENT_UI_WEB_PORT` and `AGENT_UI_DATA_DIR` override. The web server rejects a `Host` (and, on `/rpc` and `/mcp`, an `Origin`) that isn't loopback or listed in the comma-separated `AGENT_UI_ALLOWED_HOSTS`, so proxied hostnames such as a tailnet name must go there. Typecheck and build use the native TypeScript 7 compiler.
 
 ## Hosts
 

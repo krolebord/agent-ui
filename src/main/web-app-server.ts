@@ -14,6 +14,11 @@ import type { Services } from "./create-services";
 import log from "./logger";
 import { handleMcpHttpRequest, MCP_PATH } from "./mcp/server";
 import { orpcRouter } from "./orpc-router";
+import {
+  isAllowedHost,
+  isAllowedOrigin,
+  parseAllowedHosts,
+} from "./web-access-policy";
 
 interface WebAppServerOptions {
   rendererDist: string;
@@ -46,7 +51,11 @@ function getConfig() {
     Number.isInteger(requestedPort) && requestedPort > 0
       ? requestedPort
       : DEFAULT_PORT;
-  return { host: DEFAULT_HOST, port };
+  return {
+    host: DEFAULT_HOST,
+    port,
+    allowedHosts: parseAllowedHosts(process.env.AGENT_UI_ALLOWED_HOSTS),
+  };
 }
 
 function sendText(
@@ -305,12 +314,21 @@ export async function startWebAppServer(options: WebAppServerOptions) {
 
   let boundPort = config.port;
   const server = createServer((req, res) => {
+    if (!isAllowedHost(req.headers.host, config.allowedHosts)) {
+      sendText(res, 403, "Forbidden");
+      return;
+    }
+
     if (req.url?.startsWith("/rpc")) {
       sendText(res, 426, "WebSocket upgrade required");
       return;
     }
 
     if (isMcpRequest(req)) {
+      if (!isAllowedOrigin(req.headers.origin, config.allowedHosts)) {
+        sendText(res, 403, "Forbidden");
+        return;
+      }
       const services = options.getServices();
       if (!services) {
         sendText(res, 503, "Service unavailable");
@@ -346,6 +364,16 @@ export async function startWebAppServer(options: WebAppServerOptions) {
   });
 
   server.on("upgrade", (req, socket, head) => {
+    if (
+      !isAllowedHost(req.headers.host, config.allowedHosts) ||
+      !isAllowedOrigin(req.headers.origin, config.allowedHosts)
+    ) {
+      socket.end(
+        "HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+      );
+      return;
+    }
+
     const url = new URL(
       req.url ?? "/",
       `http://${req.headers.host ?? "localhost"}`,

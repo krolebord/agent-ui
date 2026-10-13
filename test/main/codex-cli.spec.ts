@@ -7,14 +7,14 @@ import {
 describe("buildCodexArgs", () => {
   describe.each<{
     permissionMode: BuildCodexArgsInput["permissionMode"];
-    flag: string;
+    flags: string[];
   }>([
-    { permissionMode: "full-auto", flag: "--full-auto" },
+    { permissionMode: "full-auto", flags: ["--full-auto"] },
     {
       permissionMode: "yolo",
-      flag: "--dangerously-bypass-approvals-and-sandbox",
+      flags: ["--sandbox", "danger-full-access", "--ask-for-approval", "never"],
     },
-  ])("$permissionMode permissions", ({ permissionMode, flag }) => {
+  ])("$permissionMode permissions", ({ permissionMode, flags }) => {
     it.each([
       { command: "resume", resumeSessionId: "session-id" },
       { command: "fork", forkSessionId: "session-id" },
@@ -32,6 +32,8 @@ describe("buildCodexArgs", () => {
         "session-id",
       ]);
       expect(args).not.toContain("--full-auto");
+      expect(args).not.toContain("--sandbox");
+      expect(args).not.toContain("--ask-for-approval");
       expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
     });
 
@@ -48,7 +50,8 @@ describe("buildCodexArgs", () => {
     ])("preserves permission flags for $command", (session) => {
       const { args } = buildCodexArgs({ ...session, permissionMode });
 
-      expect(args).toContain(flag);
+      expect(args.join(" ")).toContain(flags.join(" "));
+      expect(args).not.toContain("--dangerously-bypass-approvals-and-sandbox");
     });
   });
 

@@ -46,7 +46,12 @@ export function buildCodexArgs(input: BuildCodexArgsInput): { args: string[] } {
     if (input.permissionMode === "full-auto") {
       args.push("--full-auto");
     } else if (input.permissionMode === "yolo") {
-      args.push("--dangerously-bypass-approvals-and-sandbox");
+      args.push(
+        "--sandbox",
+        "danger-full-access",
+        "--ask-for-approval",
+        "never",
+      );
     }
   }
 
