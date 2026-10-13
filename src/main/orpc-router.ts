@@ -17,6 +17,7 @@ import { projectsRouter } from "./project-service";
 import { projectTerminalsRouter } from "./project-terminals";
 import { scheduledPromptsRouter } from "./scheduled-prompts/router";
 import { scheduledSessionsRouter } from "./scheduled-sessions/router";
+import { sessionMemoryRouter } from "./session-memory/service";
 import { claudeSessionsRouter } from "./session-service";
 import { codexSessionsRouter } from "./sessions/codex.session";
 import { cursorAgentSessionsRouter } from "./sessions/cursor-agent.session";
@@ -307,4 +308,5 @@ export const orpcRouter = {
   scheduledPrompts: scheduledPromptsRouter,
   usage: usageRouter,
   usageHistory: usageHistoryRouter,
+  sessionMemory: sessionMemoryRouter,
 };

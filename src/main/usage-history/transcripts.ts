@@ -3,6 +3,12 @@ import {
   type UsageHistoryProvider,
   type UsageTokenTotals,
 } from "@shared/usage-history";
+import {
+  CODEX_FORK_COPY_MAX_GAP_MS,
+  codexSessionId,
+  isForkedSessionMeta,
+} from "../agent-transcripts/codex-session-meta";
+import { asRecord, parseTimestampMs } from "../agent-transcripts/json";
 
 export interface UsageRecord {
   provider: UsageHistoryProvider;
@@ -19,20 +25,6 @@ function int(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.trunc(value)
     : 0;
-}
-
-function parseTimestampMs(value: unknown): number | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
 }
 
 export function mightCarryUsage(
@@ -123,17 +115,6 @@ export function initialCodexScanState(): CodexScanState {
 
 export const UNKNOWN_CODEX_MODEL = "unknown";
 
-const FORK_COPY_MAX_GAP_MS = 1000;
-
-function isForkedSessionMeta(payload: Record<string, unknown>): boolean {
-  if (typeof payload.forked_from_id === "string") {
-    return true;
-  }
-  const subagent = asRecord(asRecord(payload.source)?.subagent);
-  const spawn = asRecord(subagent?.thread_spawn);
-  return typeof spawn?.parent_thread_id === "string";
-}
-
 interface CodexUsageFields {
   input_tokens?: unknown;
   cached_input_tokens?: unknown;
@@ -177,8 +158,8 @@ export function parseCodexLine(
       return null;
     }
     state.sawSessionMeta = true;
-    const id = payload.id ?? payload.session_id;
-    if (typeof id === "string") {
+    const id = codexSessionId(payload);
+    if (id !== null) {
       state.sessionId = id;
     }
     if (typeof payload.model === "string" && state.model.length === 0) {
@@ -221,7 +202,7 @@ export function parseCodexLine(
   state.lastUsageSignature = signature;
 
   if (state.suppressingForkCopies) {
-    if (timestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS) {
+    if (timestampMs - state.forkCopyAnchorMs < CODEX_FORK_COPY_MAX_GAP_MS) {
       state.forkCopyAnchorMs = timestampMs;
       return null;
     }

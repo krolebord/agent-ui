@@ -17,6 +17,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart3,
+  Brain,
   CalendarClock,
   FileText,
   Gauge,
@@ -45,6 +46,7 @@ const navPageIcons: Record<
   artifacts: PackageOpen,
   usage: BarChart3,
   limits: Gauge,
+  memory: Brain,
 };
 
 const pageSlotHiddenClasses: Record<"withSwitch" | "withoutSwitch", string[]> =
@@ -57,6 +59,7 @@ const pageSlotHiddenClasses: Record<"withSwitch" | "withoutSwitch", string[]> =
       "@max-[276px]:hidden",
       "@max-[308px]:hidden",
       "@max-[340px]:hidden",
+      "@max-[372px]:hidden",
     ],
     withoutSwitch: [
       "@max-[112px]:hidden",
@@ -66,6 +69,7 @@ const pageSlotHiddenClasses: Record<"withSwitch" | "withoutSwitch", string[]> =
       "@max-[240px]:hidden",
       "@max-[272px]:hidden",
       "@max-[304px]:hidden",
+      "@max-[336px]:hidden",
     ],
   };
 

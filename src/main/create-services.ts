@@ -67,6 +67,15 @@ import {
   defineScheduledSessionsPersistence,
   defineScheduledSessionsState,
 } from "./scheduled-sessions/state";
+import { EmbeddingHost } from "./session-memory/embedding/embedding-host";
+import {
+  getEmbeddingModelDir,
+  ModelFilesManager,
+} from "./session-memory/embedding/model-files";
+import {
+  defineSessionMemoryState,
+  SessionMemoryService,
+} from "./session-memory/service";
 import { SessionsServiceNew } from "./session-service";
 import { SessionStateFileManager } from "./session-state-file-manager";
 import { CodexSessionsManager } from "./sessions/codex.session";
@@ -505,6 +514,25 @@ export async function createServices(options: CreateServicesOptions) {
   });
   scheduledPromptsService.start();
 
+  const sessionMemoryState = defineSessionMemoryState();
+  const embeddingModelDir = getEmbeddingModelDir(userDataPath);
+  const sessionMemoryService = new SessionMemoryService({
+    userDataPath,
+    state: sessionMemoryState,
+    appSettingsState,
+    projectsState,
+    sessionsState,
+    embedding:
+      host.mode === "headless"
+        ? {
+            modelFiles: new ModelFilesManager({ modelDir: embeddingModelDir }),
+            createEmbedder: () =>
+              new EmbeddingHost({ modelDir: embeddingModelDir }),
+          }
+        : undefined,
+  });
+  sessionMemoryService.start();
+
   const stateService = new StateOrchestrator({
     serviceStates: {
       appSettings: appSettingsState,
@@ -520,6 +548,7 @@ export async function createServices(options: CreateServicesOptions) {
       scheduledPrompts: scheduledPromptsState,
       artifacts: artifactsState,
       usage: usageState,
+      sessionMemory: sessionMemoryState,
     },
   });
 
@@ -560,6 +589,9 @@ export async function createServices(options: CreateServicesOptions) {
   shutdownDisposable.addDisposable(
     async () => await usageHistoryService.dispose(),
   );
+  shutdownDisposable.addDisposable(
+    async () => await sessionMemoryService.dispose(),
+  );
   shutdownDisposable.addDisposable(() => handoffsService.dispose());
   shutdownDisposable.addDisposable(() => skillsService.dispose());
   shutdownDisposable.addDisposable(() => stateService.dispose());
@@ -581,6 +613,7 @@ export async function createServices(options: CreateServicesOptions) {
     usageState,
     usageTracker,
     usageHistory: usageHistoryService,
+    sessionMemory: sessionMemoryService,
     projectsState,
     projectTerminalsState,
     projectGitService,

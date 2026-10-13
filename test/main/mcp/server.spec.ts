@@ -25,8 +25,10 @@ const updateScheduledSession = vi.fn();
 const deleteScheduledSession = vi.fn();
 const getScheduledSession = vi.fn();
 const listScheduledSessions = vi.fn(() => []);
+const sessionMemoryEnabled = vi.fn(() => false);
 const services = {
   mcpSessionTokens,
+  sessionMemory: { isEnabled: sessionMemoryEnabled },
   skillsService: { listSkillsForPath },
   scheduledSessionsService: {
     create: createScheduledSession,
@@ -65,6 +67,8 @@ describe("mcp server", () => {
     deleteScheduledSession.mockClear();
     getScheduledSession.mockReset();
     listScheduledSessions.mockClear();
+    sessionMemoryEnabled.mockReset();
+    sessionMemoryEnabled.mockReturnValue(false);
   });
 
   async function connectClient(token?: string) {
@@ -429,6 +433,46 @@ describe("mcp server", () => {
       expect(listSkillsForPath).toHaveBeenCalledWith(null);
     } finally {
       await client.close();
+    }
+  });
+
+  it("offers past-session tools only while session memory is enabled", async () => {
+    const pastSessionTools = [
+      "search_past_sessions",
+      "list_past_sessions",
+      "read_past_session",
+    ];
+    const disabledClient = await connectClient();
+    try {
+      const { tools } = await disabledClient.listTools();
+      const names = tools.map((tool) => tool.name);
+      for (const name of pastSessionTools) {
+        expect(names).not.toContain(name);
+      }
+    } finally {
+      await disabledClient.close();
+    }
+
+    sessionMemoryEnabled.mockReturnValue(true);
+    const enabledClient = await connectClient();
+    try {
+      const { tools } = await enabledClient.listTools();
+      const search = tools.find((tool) => tool.name === "search_past_sessions");
+      expect(tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(pastSessionTools),
+      );
+      expect(search?.annotations?.readOnlyHint).toBe(true);
+
+      sessionMemoryEnabled.mockReturnValue(false);
+      const result = await enabledClient.callTool({
+        name: "list_past_sessions",
+        arguments: {},
+      });
+      expect(result.isError).toBe(true);
+      const [content] = result.content as [{ type: string; text: string }];
+      expect(content.text).toContain("list_past_sessions not found");
+    } finally {
+      await enabledClient.close();
     }
   });
 });

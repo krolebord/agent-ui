@@ -18,14 +18,19 @@ export default defineConfig({
     },
   },
   build: {
-    ssr: "src/headless/index.ts",
+    ssr: true,
     outDir: "dist-headless",
     emptyOutDir: true,
     sourcemap: true,
     rolldownOptions: {
+      input: {
+        index: "src/headless/index.ts",
+        "embedding-worker": "src/main/session-memory/embedding/worker.ts",
+      },
       external: externalDependencies,
       output: {
-        entryFileNames: "index.js",
+        entryFileNames: "[name].js",
+        chunkFileNames: "chunks/[name]-[hash].js",
       },
     },
   },

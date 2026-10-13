@@ -2,12 +2,10 @@ import * as fsp from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { listTranscriptFiles } from "../../../src/main/agent-transcripts/files";
 import { UsageHistoryAggregator } from "../../../src/main/usage-history/aggregation";
 import { dedupeWithinFile } from "../../../src/main/usage-history/scan-cache";
-import {
-  listTranscriptFiles,
-  readTranscriptRecords,
-} from "../../../src/main/usage-history/transcript-reader";
+import { readTranscriptRecords } from "../../../src/main/usage-history/transcript-reader";
 
 let root: string;
 

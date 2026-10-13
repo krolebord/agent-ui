@@ -6,6 +6,7 @@ export const navPageIds = [
   "artifacts",
   "usage",
   "limits",
+  "memory",
 ] as const;
 
 export type NavPageId = (typeof navPageIds)[number];
@@ -18,6 +19,7 @@ export const navPageLabels: Record<NavPageId, string> = {
   artifacts: "Artifacts",
   usage: "Usage",
   limits: "Limits",
+  memory: "Memory",
 };
 
 export const pinnableItemIds = ["sidebarView", ...navPageIds] as const;

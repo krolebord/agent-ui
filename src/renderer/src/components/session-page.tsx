@@ -36,6 +36,7 @@ import { AccountsPage } from "./accounts-page";
 import { ArtifactsPage } from "./artifacts-page";
 import { GlobalInstructionsPage } from "./global-instructions-page";
 import { LimitsPage } from "./limits-page";
+import { MemoryPage } from "./memory-page";
 import { ScheduledSessionsPage } from "./scheduled-sessions-page";
 import { SkillsPage } from "./skills-page";
 import { useAppState } from "./sync-state-provider";
@@ -103,6 +104,10 @@ export function SessionPage() {
 
   if (mainView === "limits") {
     return <LimitsPage />;
+  }
+
+  if (mainView === "memory") {
+    return <MemoryPage />;
   }
 
   if (!session) {

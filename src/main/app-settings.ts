@@ -59,6 +59,25 @@ export const machineStatsSettingsSchema = z
   })
   .catch(defaultMachineStatsSettings);
 
+export interface SessionMemorySettings {
+  enabled: boolean;
+  embeddingPaused: boolean;
+}
+
+export const defaultSessionMemorySettings: SessionMemorySettings = {
+  enabled: false,
+  embeddingPaused: false,
+};
+
+const sessionMemorySettingsSchema = z
+  .object({
+    enabled: z.boolean().catch(defaultSessionMemorySettings.enabled),
+    embeddingPaused: z
+      .boolean()
+      .catch(defaultSessionMemorySettings.embeddingPaused),
+  })
+  .catch(defaultSessionMemorySettings);
+
 export interface AppSettings {
   sidebarView: SidebarView;
   pinnedHeaderItems: PinnableItemId[];
@@ -68,6 +87,7 @@ export interface AppSettings {
   machineStats: MachineStatsSettings;
   lastSessionOptions: z.infer<typeof lastSessionOptionsSchema>;
   titleGeneration: TitleGenerationSettings;
+  sessionMemory: SessionMemorySettings;
 }
 
 const defaults: AppSettings = {
@@ -79,6 +99,7 @@ const defaults: AppSettings = {
   machineStats: defaultMachineStatsSettings,
   lastSessionOptions: {},
   titleGeneration: defaultTitleGenerationSettings,
+  sessionMemory: defaultSessionMemorySettings,
 };
 
 export type AppSettingsState = ReturnType<typeof defineAppSettingsState>;
@@ -107,6 +128,7 @@ const appSettingsPersistenceSchema = z
     titleGeneration: titleGenerationSettingsSchema.catch(
       defaultTitleGenerationSettings,
     ),
+    sessionMemory: sessionMemorySettingsSchema,
   })
   .transform(({ preventSleep, sleepBlockMode, ...settings }) => ({
     ...settings,
