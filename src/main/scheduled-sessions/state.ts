@@ -30,7 +30,7 @@ const codexScheduledConfigSchema = startCodexSessionSchema
   .omit({ cols: true, rows: true, mcpCanScheduleSessions: true })
   .extend({ type: z.literal("codex") });
 const cursorScheduledConfigSchema = startCursorAgentSessionSchema
-  .omit({ cols: true, rows: true })
+  .omit({ cols: true, rows: true, mcpCanScheduleSessions: true })
   .extend({ type: z.literal("cursorAgent") });
 
 export const scheduledSessionConfigSchema = z.discriminatedUnion("type", [

@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { createInMemorySessionBufferStore } from "../../src/main/database/session-buffer-store";
+import { scheduledSessionConfigSchema } from "../../src/main/scheduled-sessions/state";
 import {
   type CursorAgentSessionData,
   CursorAgentSessionsManager,
+  cursorAgentSessionSchema,
+  startCursorAgentSessionSchema,
 } from "../../src/main/sessions/cursor-agent.session";
 import type { SessionServiceState } from "../../src/main/sessions/state";
 import { TerminalManager } from "../../src/main/terminal-manager";
@@ -135,6 +139,17 @@ function createState(): SessionServiceState {
   } as SessionServiceState;
 }
 
+const MCP_PLUGIN_DIR = "/var/tmp/agent-ui/cursor-mcp-plugin";
+
+function getLaunch(callIndex: number) {
+  return z
+    .object({
+      args: z.array(z.string()),
+      env: z.record(z.string(), z.string()),
+    })
+    .parse(terminalSessionSpies.start.mock.calls[callIndex]?.[0]);
+}
+
 describe("CursorAgentSessionsManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -143,6 +158,182 @@ describe("CursorAgentSessionsManager", () => {
     terminalSessionSpies.callbacks = [];
     activityMonitorSpies.instances = [];
     activityMonitorSpies.state = "unknown";
+  });
+
+  it("passes each session its own MCP URL through the shared plugin", async () => {
+    const sessionsState = createState();
+    const getMcpServerUrl = vi.fn(
+      ({ sessionId }: { sessionId?: string | null }) =>
+        `http://127.0.0.1:3420/mcp?token=${sessionId}`,
+    );
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      getMcpServerUrl,
+      mcpPluginDir: MCP_PLUGIN_DIR,
+    });
+    const firstId = await manager.createSession({
+      cwd: "/var/tmp/project",
+      permissionMode: "default",
+      mcpCanScheduleSessions: false,
+      sessionName: undefined,
+      initialPrompt: undefined,
+    });
+    const secondId = await manager.createSession({
+      cwd: "/var/tmp/project",
+      permissionMode: "default",
+      sessionName: undefined,
+      initialPrompt: undefined,
+    });
+
+    try {
+      await manager.startLiveSession({
+        ...cursorAgentSessionSchema.parse(sessionsState.state[firstId])
+          .startupConfig,
+        sessionId: firstId,
+      });
+      await manager.startLiveSession({
+        cwd: "/var/tmp/project",
+        permissionMode: "default",
+        sessionId: secondId,
+      });
+
+      for (const [callIndex, sessionId] of [firstId, secondId].entries()) {
+        const { args, env } = getLaunch(callIndex);
+        expect(args[args.indexOf("--plugin-dir") + 1]).toBe(
+          `'${MCP_PLUGIN_DIR}'`,
+        );
+        expect(env.AGENT_UI_MCP_URL).toBe(
+          `http://127.0.0.1:3420/mcp?token=${sessionId}`,
+        );
+      }
+      expect(getMcpServerUrl).toHaveBeenNthCalledWith(1, {
+        sessionId: firstId,
+        cwd: "/var/tmp/project",
+        canScheduleSessions: false,
+      });
+      expect(getMcpServerUrl).toHaveBeenNthCalledWith(2, {
+        sessionId: secondId,
+        cwd: "/var/tmp/project",
+        canScheduleSessions: true,
+      });
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it.each([
+    { mcpEnabled: false, mcpUrl: "http://127.0.0.1:3420/mcp?token=t" },
+    { mcpEnabled: undefined, mcpUrl: null },
+  ])(
+    "skips the MCP plugin when disabled or unavailable (%o)",
+    async ({ mcpEnabled, mcpUrl }) => {
+      const sessionsState = createState();
+      const getMcpServerUrl = vi.fn(() => mcpUrl);
+      const manager = new CursorAgentSessionsManager({
+        state: sessionsState,
+        getMcpServerUrl,
+        mcpPluginDir: MCP_PLUGIN_DIR,
+      });
+      const sessionId = await manager.createSession({
+        cwd: "/var/tmp/project",
+        permissionMode: "default",
+        mcpEnabled,
+        sessionName: undefined,
+        initialPrompt: undefined,
+      });
+      try {
+        await manager.startLiveSession({
+          ...cursorAgentSessionSchema.parse(sessionsState.state[sessionId])
+            .startupConfig,
+          sessionId,
+        });
+        const { args, env } = getLaunch(0);
+        expect(args).not.toContain("--plugin-dir");
+        expect(env).not.toHaveProperty("AGENT_UI_MCP_URL");
+        expect(getMcpServerUrl).toHaveBeenCalledTimes(
+          mcpEnabled === false ? 0 : 1,
+        );
+      } finally {
+        await manager.dispose();
+      }
+    },
+  );
+
+  it("skips MCP when the shared plugin could not be created", async () => {
+    const sessionsState = createState();
+    const getMcpServerUrl = vi.fn(() => "http://127.0.0.1:3420/mcp?token=t");
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      getMcpServerUrl,
+      mcpPluginDir: null,
+    });
+    const sessionId = await manager.createSession({
+      cwd: "/var/tmp/project",
+      permissionMode: "default",
+      sessionName: undefined,
+      initialPrompt: undefined,
+    });
+    try {
+      await manager.startLiveSession({
+        sessionId,
+        cwd: "/var/tmp/project",
+        permissionMode: "default",
+      });
+      const { args, env } = getLaunch(0);
+      expect(args).not.toContain("--plugin-dir");
+      expect(env).not.toHaveProperty("AGENT_UI_MCP_URL");
+      expect(getMcpServerUrl).not.toHaveBeenCalled();
+    } finally {
+      await manager.dispose();
+    }
+  });
+
+  it("cleans up when launching the terminal fails", async () => {
+    const sessionsState = createState();
+    const terminalManager = new TerminalManager();
+    vi.spyOn(terminalManager, "startTerminal").mockRejectedValueOnce(
+      new Error("launch failed"),
+    );
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      terminalManager,
+    });
+    const sessionId = await manager.createSession({
+      cwd: "/var/tmp/project",
+      permissionMode: "default",
+      sessionName: undefined,
+      initialPrompt: undefined,
+    });
+    await expect(
+      manager.startLiveSession({
+        sessionId,
+        cwd: "/var/tmp/project",
+        permissionMode: "default",
+      }),
+    ).rejects.toThrow("launch failed");
+    expect(
+      activityMonitorSpies.instances[0]?.stopMonitoring,
+    ).toHaveBeenCalled();
+    expect(manager.liveSessions.size).toBe(0);
+  });
+
+  it("keeps scheduling permissions out of scheduled Cursor config", () => {
+    const input = {
+      type: "cursorAgent",
+      cwd: "/var/tmp/project",
+      mcpEnabled: false,
+      mcpCanScheduleSessions: true,
+    };
+    expect(startCursorAgentSessionSchema.parse(input)).toMatchObject({
+      mcpEnabled: false,
+      mcpCanScheduleSessions: true,
+    });
+    expect(scheduledSessionConfigSchema.parse(input)).toMatchObject({
+      mcpEnabled: false,
+    });
+    expect(scheduledSessionConfigSchema.parse(input)).not.toHaveProperty(
+      "mcpCanScheduleSessions",
+    );
   });
 
   it("creates sessions with an undefined cursor chat id by default", async () => {

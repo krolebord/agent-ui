@@ -122,6 +122,24 @@ export class ArtifactsService {
       throw new Error("Only regular files can be published as artifacts");
     }
 
+    const existing = Object.values(this.state.state).find(
+      (artifact) =>
+        artifact.kind === "file" &&
+        artifact.sessionId === input.sessionId &&
+        artifact.path === resolvedPath,
+    );
+    if (existing) {
+      this.state.updateState((artifacts) => {
+        const draft = artifacts[existing.id];
+        if (!draft) return;
+        draft.name = input.name?.trim() || draft.name;
+        draft.description = input.description?.trim() || draft.description;
+        draft.size = stats.size;
+        draft.available = true;
+      });
+      return this.state.state[existing.id] ?? existing;
+    }
+
     const artifact: Artifact = {
       id: randomUUID(),
       kind: "file",

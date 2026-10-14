@@ -51,6 +51,7 @@ export interface LastCursorSessionOptions {
   recentModels: string[];
   mode?: CursorAgentMode;
   permissionMode: CursorAgentPermissionMode;
+  mcpEnabled?: boolean;
 }
 
 export interface LastSessionOptions {
@@ -104,6 +105,7 @@ export const lastCursorSessionOptionsSchema = z.object({
     .transform((models) => [...new Set(models)].slice(0, 8)),
   mode: cursorAgentModeSchema.optional().catch(undefined),
   permissionMode: cursorAgentPermissionModeSchema.catch("default"),
+  mcpEnabled: z.boolean().optional().catch(undefined),
 });
 
 export const lastSessionOptionsSchema = z.object({
@@ -147,6 +149,7 @@ export function defaultCursorSessionOptions(): LastCursorSessionOptions {
     recentModels: [],
     mode: undefined,
     permissionMode: "default",
+    mcpEnabled: undefined,
   };
 }
 

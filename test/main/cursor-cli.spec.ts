@@ -2,6 +2,25 @@ import { describe, expect, it } from "vitest";
 import { buildCursorAgentArgs } from "../../src/main/cursor-cli";
 
 describe("buildCursorAgentArgs", () => {
+  it("quotes the MCP plugin path before prompt arguments", () => {
+    const { args } = buildCursorAgentArgs({
+      cwd: "/var/tmp/project",
+      permissionMode: "default",
+      pluginDir: "/var/tmp/Agent UI's plugin",
+      initialPrompt: "- use Agent UI tools",
+    });
+
+    expect(args).toEqual([
+      "agent",
+      "--workspace",
+      "/var/tmp/project",
+      "--plugin-dir",
+      "'/var/tmp/Agent UI'\"'\"'s plugin'",
+      "--",
+      "'- use Agent UI tools'",
+    ]);
+  });
+
   it("passes regular initial prompts as the final argument", () => {
     const { args } = buildCursorAgentArgs({
       cwd: "/tmp/project",

@@ -319,6 +319,7 @@ function cursorConfigToOptions(
     model: config.model,
     mode: config.mode,
     permissionMode: config.permissionMode,
+    mcpEnabled: config.mcpEnabled,
   };
 }
 
@@ -1600,6 +1601,7 @@ function CursorAgentSessionForm({
     model: options.model || undefined,
     mode: options.mode,
     permissionMode: options.permissionMode,
+    mcpEnabled: options.mcpEnabled,
     initialPrompt: initialPrompt || undefined,
   });
 
@@ -1737,17 +1739,30 @@ function CursorAgentSessionForm({
       </div>
 
       <Collapsible>
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="flex w-full items-center justify-between px-2"
-          >
-            <span className="text-sm font-medium">Advanced settings</span>
-            <ChevronsUpDown className="size-4" />
-          </Button>
-        </CollapsibleTrigger>
+        <div className="flex items-center justify-between gap-2">
+          <SessionOptionToggle
+            pressed={options.mcpEnabled ?? true}
+            onPressedChange={(pressed) => {
+              setOptions((current) => ({
+                ...current,
+                mcpEnabled: pressed ? undefined : false,
+              }));
+            }}
+            label="MCP"
+            description="Let this session use Agent UI tools over MCP"
+            icon={<Plug className="size-3.5 shrink-0" />}
+          />
+          <CollapsibleTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className={cn(optionPillClassName, "text-muted-foreground")}
+            >
+              Advanced
+              <ChevronsUpDown className="size-3.5" />
+            </Button>
+          </CollapsibleTrigger>
+        </div>
         <CollapsibleContent className="space-y-4 pt-2">
           <div className="space-y-2">
             <Label htmlFor="new-cursor-agent-session-name">

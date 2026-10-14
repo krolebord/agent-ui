@@ -129,7 +129,7 @@ export function SessionSidePane({ session }: { session: Session }) {
   );
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-y-auto border-l border-border/70 bg-black/15">
+    <aside className="flex h-full min-h-0 flex-col overflow-y-auto border-border/70 bg-black/15 md:border-l">
       {supportsScheduledPrompts(session) ? (
         <ScheduledPromptsSection session={session} disabled={projectLocked} />
       ) : null}
@@ -400,15 +400,13 @@ function ArtifactsSection({ sessionId }: { sessionId: string }) {
         title="Artifacts"
         count={artifacts.length}
       >
-        {artifacts.length ? (
-          <Button
-            variant="flat"
-            className="h-full shrink-0 px-2 text-[11px] text-muted-foreground"
-            onClick={() => showArtifacts(sessionId)}
-          >
-            View all
-          </Button>
-        ) : null}
+        <Button
+          variant="flat"
+          className="h-full shrink-0 px-2 text-[11px] text-muted-foreground"
+          onClick={() => showArtifacts(sessionId)}
+        >
+          View all
+        </Button>
       </SectionHeader>
       {artifacts.length ? (
         <ul>

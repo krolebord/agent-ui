@@ -72,6 +72,40 @@ describe("ArtifactsService", () => {
     expect(artifact.name).toBe("outside.txt");
   });
 
+  it("updates the existing artifact when a session republishes a file", async () => {
+    const filePath = path.join(tempRoot, "report.md");
+    await writeFile(filePath, "draft");
+    const first = await service.publish({
+      sessionId: "session-123",
+      cwd: tempRoot,
+      filePath: "report.md",
+      name: "Report",
+      description: "Draft",
+    });
+
+    await writeFile(filePath, "final version");
+    const second = await service.publish({
+      sessionId: "session-123",
+      cwd: tempRoot,
+      filePath,
+    });
+
+    expect(second).toMatchObject({
+      id: first.id,
+      name: "Report",
+      description: "Draft",
+      size: 13,
+    });
+    expect(Object.keys(service.state.state)).toEqual([first.id]);
+
+    const other = await service.publish({
+      sessionId: "session-456",
+      cwd: tempRoot,
+      filePath,
+    });
+    expect(other.id).not.toBe(first.id);
+  });
+
   it("marks artifacts missing without removing their metadata", async () => {
     const filePath = path.join(tempRoot, "temporary.pdf");
     await writeFile(filePath, "pdf");

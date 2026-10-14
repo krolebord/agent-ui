@@ -14,6 +14,7 @@ export interface BuildCursorAgentArgsInput {
   permissionMode: CursorAgentPermissionMode;
   initialPrompt?: string;
   plan?: boolean;
+  pluginDir?: string;
 }
 
 export function buildCursorAgentArgs(input: BuildCursorAgentArgsInput): {
@@ -25,6 +26,10 @@ export function buildCursorAgentArgs(input: BuildCursorAgentArgsInput): {
     args.push("--resume", input.cursorChatId);
   }
   args.push("--workspace", input.cwd);
+
+  if (input.pluginDir) {
+    args.push("--plugin-dir", shellQuote(input.pluginDir));
+  }
 
   if (input.model?.trim()) {
     args.push("--model", input.model.trim());

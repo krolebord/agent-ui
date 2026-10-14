@@ -10,11 +10,13 @@ import {
   type CursorAgentPermissionMode,
 } from "../cursor-cli";
 import { CursorFocusReporter } from "../cursor-focus-reporter";
+import { CURSOR_MCP_URL_ENV } from "../cursor-mcp-plugin";
 import {
   createInMemorySessionBufferStore,
   type SessionBufferStore,
 } from "../database/session-buffer-store";
 import log from "../logger";
+import type { McpRequestContext } from "../mcp/session-token";
 import { procedure } from "../orpc";
 import { TerminalManager } from "../terminal-manager";
 import type { TerminalSessionStatus } from "../terminal-session";
@@ -42,6 +44,8 @@ export const cursorAgentSessionSchema = commonSessionSchema.extend({
     model: z.string().optional(),
     mode: cursorAgentModeSchema,
     permissionMode: cursorAgentPermissionModeSchema,
+    mcpEnabled: z.boolean().optional().catch(undefined),
+    mcpCanScheduleSessions: z.boolean().optional().catch(undefined),
   }),
   cursorChatId: z.string().optional().catch(undefined),
   initialPromptSent: z.boolean().optional().catch(false),
@@ -59,6 +63,8 @@ export const startCursorAgentSessionSchema = z.object({
   model: z.string().optional(),
   mode: cursorAgentModeSchema,
   permissionMode: cursorAgentPermissionModeSchema,
+  mcpEnabled: z.boolean().optional(),
+  mcpCanScheduleSessions: z.boolean().optional(),
   initialPrompt: z
     .string()
     .optional()
@@ -124,6 +130,8 @@ export const cursorAgentSessionsRouter = {
         initialPrompt,
         plan,
         cursorChatId: session.cursorChatId,
+        mcpEnabled: session.startupConfig.mcpEnabled,
+        mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
         cols: input.cols,
         rows: input.rows,
       });
@@ -198,6 +206,8 @@ interface CursorAgentSessionsManagerOptions {
   sessionLogFileManager?: CursorSessionLogFileStore | null;
   cursorHooksWarning?: string | null;
   sessionBuffers?: SessionBufferStore;
+  getMcpServerUrl?: (context: McpRequestContext) => string | null;
+  mcpPluginDir?: string | null;
 }
 
 interface CursorSessionLogFileStore {
@@ -230,6 +240,10 @@ export class CursorAgentSessionsManager {
   private readonly sessionLogFileManager: CursorSessionLogFileStore | null;
   private readonly cursorHooksWarning: string | null;
   private readonly sessionBuffers: SessionBufferStore;
+  private readonly getMcpServerUrl:
+    | ((context: McpRequestContext) => string | null)
+    | undefined;
+  private readonly mcpPluginDir: string | null;
 
   constructor(
     options: CursorAgentSessionsManagerOptions | SessionServiceState,
@@ -241,6 +255,8 @@ export class CursorAgentSessionsManager {
       this.sessionLogFileManager = null;
       this.cursorHooksWarning = null;
       this.sessionBuffers = createInMemorySessionBufferStore();
+      this.getMcpServerUrl = undefined;
+      this.mcpPluginDir = null;
       for (const [sessionId, session] of Object.entries(
         this.sessionsState.state,
       )) {
@@ -258,6 +274,8 @@ export class CursorAgentSessionsManager {
     this.cursorHooksWarning = options.cursorHooksWarning ?? null;
     this.sessionBuffers =
       options.sessionBuffers ?? createInMemorySessionBufferStore();
+    this.getMcpServerUrl = options.getMcpServerUrl;
+    this.mcpPluginDir = options.mcpPluginDir ?? null;
     for (const [sessionId, session] of Object.entries(
       this.sessionsState.state,
     )) {
@@ -304,6 +322,8 @@ export class CursorAgentSessionsManager {
         model: input.model,
         mode: input.mode,
         permissionMode: input.permissionMode,
+        mcpEnabled: input.mcpEnabled,
+        mcpCanScheduleSessions: input.mcpCanScheduleSessions,
       },
       cursorChatId: undefined,
     };
@@ -377,6 +397,8 @@ export class CursorAgentSessionsManager {
     initialPrompt,
     plan,
     cursorChatId,
+    mcpEnabled,
+    mcpCanScheduleSessions,
     cols,
     rows,
   }: {
@@ -388,6 +410,8 @@ export class CursorAgentSessionsManager {
     initialPrompt?: string;
     plan?: boolean;
     cursorChatId?: string;
+    mcpEnabled?: boolean;
+    mcpCanScheduleSessions?: boolean;
     cols?: number;
     rows?: number;
   }) {
@@ -494,16 +518,6 @@ export class CursorAgentSessionsManager {
 
     let activityState: ClaudeActivityState | null = activityMonitor.getState();
 
-    const { args: finalArgs } = buildCursorAgentArgs({
-      cursorChatId,
-      cwd,
-      model,
-      mode,
-      permissionMode,
-      initialPrompt,
-      plan,
-    });
-
     const beginDispose = () => {
       if (isDisposing) {
         return;
@@ -512,83 +526,109 @@ export class CursorAgentSessionsManager {
       activityMonitor.stopMonitoring({ preserveState: true });
     };
     disposable.addDisposable(beginDispose);
-    if (hookLogFilePath) {
-      await activityMonitor.startMonitoring({
-        stateFilePath: hookLogFilePath,
-      });
-    }
-
-    const terminal = await this.terminalManager.startTerminal({
-      terminalId: sessionId,
-      launch: {
-        file: "cursor-agent",
-        args: finalArgs,
-        runWithShell: true,
+    try {
+      const mcpServerUrl =
+        mcpEnabled === false || !this.mcpPluginDir
+          ? null
+          : (this.getMcpServerUrl?.({
+              sessionId,
+              cwd,
+              canScheduleSessions: mcpCanScheduleSessions !== false,
+            }) ?? null);
+      const { args: finalArgs } = buildCursorAgentArgs({
+        cursorChatId,
         cwd,
-        cols,
-        rows,
-        env: {
-          ...(hookLogFilePath
-            ? { AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath }
-            : {}),
-          TERM_PROGRAM: "vscode",
-          TERM_PROGRAM_VERSION: "1.0",
-        },
-      },
-      transformInput: (data) => {
-        if (injectingFocus) {
-          return data;
-        }
-        return focusReporter.transformInput(data);
-      },
-      onData: (chunk) => {
-        if (!isDisposing) {
-          activityMonitor.handleTerminalOutput(chunk);
-        }
-        focusReporter.handleOutput(chunk);
-      },
-      onStatusChange: (status) => {
-        setSessionStatus(getCursorSessionStatus(status, activityState), {
-          bumpActivity: status === "starting" || status === "running",
+        model,
+        mode,
+        permissionMode,
+        initialPrompt,
+        plan,
+        pluginDir: mcpServerUrl ? (this.mcpPluginDir ?? undefined) : undefined,
+      });
+
+      if (hookLogFilePath) {
+        await activityMonitor.startMonitoring({
+          stateFilePath: hookLogFilePath,
         });
-      },
-      onExit: (payload) => {
-        void this.stopLiveSession(sessionId, payload.snapshot);
+      }
+
+      const terminal = await this.terminalManager.startTerminal({
+        terminalId: sessionId,
+        launch: {
+          file: "cursor-agent",
+          args: finalArgs,
+          runWithShell: true,
+          cwd,
+          cols,
+          rows,
+          env: {
+            ...(hookLogFilePath
+              ? { AGENT_UI_CURSOR_STATE_FILE: hookLogFilePath }
+              : {}),
+            ...(mcpServerUrl ? { [CURSOR_MCP_URL_ENV]: mcpServerUrl } : {}),
+            TERM_PROGRAM: "vscode",
+            TERM_PROGRAM_VERSION: "1.0",
+          },
+        },
+        transformInput: (data) => {
+          if (injectingFocus) {
+            return data;
+          }
+          return focusReporter.transformInput(data);
+        },
+        onData: (chunk) => {
+          if (!isDisposing) {
+            activityMonitor.handleTerminalOutput(chunk);
+          }
+          focusReporter.handleOutput(chunk);
+        },
+        onStatusChange: (status) => {
+          setSessionStatus(getCursorSessionStatus(status, activityState), {
+            bumpActivity: status === "starting" || status === "running",
+          });
+        },
+        onExit: (payload) => {
+          void this.stopLiveSession(sessionId, payload.snapshot);
+          state.updateState((state) => {
+            updateSessionStatus(
+              state[sessionId],
+              payload.errorMessage ? "error" : "stopped",
+            );
+            state[sessionId].errorMessage = payload.errorMessage;
+            if (!payload.stoppedByUser) {
+              state[sessionId].lastActivityAt = Date.now();
+            }
+          });
+        },
+      });
+      disposable.addDisposable(() => terminal.stop());
+
+      if (initialPrompt) {
         state.updateState((state) => {
-          updateSessionStatus(
-            state[sessionId],
-            payload.errorMessage ? "error" : "stopped",
-          );
-          state[sessionId].errorMessage = payload.errorMessage;
-          if (!payload.stoppedByUser) {
-            state[sessionId].lastActivityAt = Date.now();
+          const session = state[sessionId];
+          if (session?.type === "cursor-agent") {
+            session.initialPromptSent = true;
           }
         });
-      },
-    });
-    disposable.addDisposable(() => terminal.stop());
+      }
 
-    if (initialPrompt) {
-      state.updateState((state) => {
-        const session = state[sessionId];
-        if (session?.type === "cursor-agent") {
-          session.initialPromptSent = true;
-        }
-      });
-    }
+      const session: CursorAgentSessionRecord = {
+        terminalId: sessionId,
+        activityMonitor,
+        beginDispose,
+        dispose: disposable.dispose,
+      };
+      this.liveSessions.set(sessionId, session);
+      disposable.addDisposable(() => this.liveSessions.delete(sessionId));
 
-    const session: CursorAgentSessionRecord = {
-      terminalId: sessionId,
-      activityMonitor,
-      beginDispose,
-      dispose: disposable.dispose,
-    };
-    this.liveSessions.set(sessionId, session);
-    disposable.addDisposable(() => this.liveSessions.delete(sessionId));
-
-    if (!this.terminalManager.getRuntime(sessionId)) {
-      session.beginDispose();
+      if (!this.terminalManager.getRuntime(sessionId)) {
+        session.beginDispose();
+        await disposable.dispose();
+      }
+    } catch (error) {
+      beginDispose();
       await disposable.dispose();
+      throw error;
     }
   }
 

@@ -5,7 +5,9 @@ export const publishArtifactTool = defineMcpTool({
   name: "publish_artifact",
   description:
     "Publishes a file created by this agent to Agent UI. The file appears on " +
-    "the Artifacts page and can be downloaded from the machine running Agent UI.",
+    "the Artifacts page and can be downloaded from the machine running Agent UI. " +
+    "Artifacts are served live from disk, so editing a published file updates " +
+    "it; don't publish it again or copy it to a new file for a revision.",
   inputSchema: {
     path: z
       .string()

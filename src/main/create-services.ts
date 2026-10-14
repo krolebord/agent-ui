@@ -28,6 +28,7 @@ import {
   defineCodexAccountsPublicState,
 } from "./codex-accounts";
 import type { CursorAgentMode, CursorAgentPermissionMode } from "./cursor-cli";
+import { ensureCursorMcpPlugin } from "./cursor-mcp-plugin";
 import { CursorSessionLogFileManager } from "./cursor-session-log-file-manager";
 import { ensureManagedCursorStateHooks } from "./cursor-state-hooks";
 import { DatabaseService } from "./database/database-service";
@@ -188,6 +189,17 @@ async function initializeManagedCursorHooks(
   }
 }
 
+async function initializeCursorMcpPlugin(
+  userDataPath: string,
+): Promise<string | null> {
+  try {
+    return await ensureCursorMcpPlugin(userDataPath);
+  } catch (error) {
+    log.error("Cursor MCP plugin setup failed", error);
+    return null;
+  }
+}
+
 export type CreateServicesResult = Awaited<ReturnType<typeof createServices>>;
 
 export async function createServices(options: CreateServicesOptions) {
@@ -199,10 +211,12 @@ export async function createServices(options: CreateServicesOptions) {
     { managedPluginDir, pluginWarning },
     { cursorHooksWarning },
     { shellIntegrationEnv },
+    cursorMcpPluginDir,
   ] = await Promise.all([
     initializeManagedPlugin(userDataPath),
     initializeManagedCursorHooks(userDataPath),
     initializeShellIntegration(userDataPath),
+    initializeCursorMcpPlugin(userDataPath),
   ]);
 
   let handoffsDir = path.join(userDataPath, "handoffs");
@@ -436,6 +450,8 @@ export async function createServices(options: CreateServicesOptions) {
     sessionLogFileManager: cursorSessionLogFileManager,
     cursorHooksWarning,
     sessionBuffers,
+    getMcpServerUrl,
+    mcpPluginDir: cursorMcpPluginDir,
   });
   const worktreeSetupSessionsManager = new WorktreeSetupSessionsManager(
     sessionsState,
@@ -498,8 +514,10 @@ export async function createServices(options: CreateServicesOptions) {
         }
         case "cursorAgent": {
           const { type: _type, ...input } = config;
-          const sessionId =
-            await cursorAgentSessionsManager.createSession(input);
+          const sessionId = await cursorAgentSessionsManager.createSession({
+            ...input,
+            mcpCanScheduleSessions,
+          });
 
           let plan = false;
           let initialPrompt = input.initialPrompt;
@@ -517,6 +535,8 @@ export async function createServices(options: CreateServicesOptions) {
             permissionMode: input.permissionMode as CursorAgentPermissionMode,
             initialPrompt,
             plan,
+            mcpEnabled: input.mcpEnabled,
+            mcpCanScheduleSessions,
             cols: SCHEDULED_SESSION_COLS,
             rows: SCHEDULED_SESSION_ROWS,
           });
