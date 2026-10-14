@@ -1,3 +1,5 @@
+import type { Generated } from "kysely";
+
 export interface AppMetadataTable {
   key: string;
   value: string;
@@ -7,6 +9,7 @@ export interface AppMetadataTable {
 export interface SessionBuffersTable {
   session_id: string;
   offline_buffer: string;
+  initial_prompt: Generated<string | null>;
   updated_at: number;
 }
 

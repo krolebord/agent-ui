@@ -7,6 +7,8 @@ const DELETE_CHUNK_SIZE = 500;
 export interface SessionBufferStore {
   get(sessionId: string): Promise<string | undefined>;
   set(sessionId: string, offlineBuffer: string): Promise<void>;
+  getInitialPrompt(sessionId: string): Promise<string | undefined>;
+  setInitialPrompt(sessionId: string, initialPrompt: string): Promise<void>;
   delete(sessionId: string): Promise<void>;
   deleteOrphans(knownSessionIds: string[]): Promise<number>;
 }
@@ -62,6 +64,38 @@ export class SqliteSessionBufferStore implements SessionBufferStore {
     }
   }
 
+  async getInitialPrompt(sessionId: string): Promise<string | undefined> {
+    const row = await this.db
+      .selectFrom("session_buffers")
+      .select("initial_prompt")
+      .where("session_id", "=", sessionId)
+      .executeTakeFirst();
+
+    return row?.initial_prompt ?? undefined;
+  }
+
+  async setInitialPrompt(
+    sessionId: string,
+    initialPrompt: string,
+  ): Promise<void> {
+    const updatedAt = Date.now();
+    await this.db
+      .insertInto("session_buffers")
+      .values({
+        session_id: sessionId,
+        offline_buffer: "",
+        initial_prompt: initialPrompt,
+        updated_at: updatedAt,
+      })
+      .onConflict((conflict) =>
+        conflict.column("session_id").doUpdateSet({
+          initial_prompt: initialPrompt,
+          updated_at: updatedAt,
+        }),
+      )
+      .execute();
+  }
+
   async deleteOrphans(knownSessionIds: string[]): Promise<number> {
     if (knownSessionIds.length === 0) {
       return 0;
@@ -96,6 +130,7 @@ export class SqliteSessionBufferStore implements SessionBufferStore {
 
 export function createInMemorySessionBufferStore(): SessionBufferStore {
   const buffers = new Map<string, string>();
+  const prompts = new Map<string, string>();
 
   return {
     async get(sessionId) {
@@ -104,8 +139,18 @@ export function createInMemorySessionBufferStore(): SessionBufferStore {
     async set(sessionId, offlineBuffer) {
       buffers.set(sessionId, offlineBuffer);
     },
+    async getInitialPrompt(sessionId) {
+      return prompts.get(sessionId);
+    },
+    async setInitialPrompt(sessionId, initialPrompt) {
+      if (!buffers.has(sessionId)) {
+        buffers.set(sessionId, "");
+      }
+      prompts.set(sessionId, initialPrompt);
+    },
     async delete(sessionId) {
       buffers.delete(sessionId);
+      prompts.delete(sessionId);
     },
     async deleteOrphans(knownSessionIds) {
       if (knownSessionIds.length === 0) {
@@ -113,9 +158,10 @@ export function createInMemorySessionBufferStore(): SessionBufferStore {
       }
       const known = new Set(knownSessionIds);
       let deleted = 0;
-      for (const sessionId of [...buffers.keys()]) {
+      for (const sessionId of buffers.keys()) {
         if (!known.has(sessionId)) {
           buffers.delete(sessionId);
+          prompts.delete(sessionId);
           deleted++;
         }
       }

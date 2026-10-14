@@ -4,7 +4,13 @@ import { LiveTerminalSurface } from "@renderer/components/live-terminal-surface"
 import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigger";
 import { ProjectBottomPane } from "@renderer/components/project-bottom-pane";
 import { ProjectTerminalPane } from "@renderer/components/project-terminal-pane";
+import { useScheduledPromptComposerStore } from "@renderer/components/scheduled-prompt-composer";
 import { SessionHeader } from "@renderer/components/session-header";
+import {
+  SESSION_SIDE_PANE_ID,
+  SessionSidePane,
+  useSessionSidePaneStore,
+} from "@renderer/components/session-side-pane";
 import { TerminalKeyBar } from "@renderer/components/terminal-key-bar";
 import {
   Collapsible,
@@ -28,10 +34,11 @@ import {
   FileDiff,
   History,
   LoaderCircle,
+  PanelRight,
   SquareTerminal,
   TerminalSquare,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { AccountsPage } from "./accounts-page";
 import { ArtifactsPage } from "./artifacts-page";
 import { GlobalInstructionsPage } from "./global-instructions-page";
@@ -51,7 +58,7 @@ function useActiveSession() {
 
 type Session = Exclude<ReturnType<typeof useActiveSession>, null>;
 
-type MobileTab = "session" | "diff" | "history" | "terminals";
+type MobileTab = "session" | "details" | "diff" | "history" | "terminals";
 
 const mobileTabItems: Array<{
   tab: MobileTab;
@@ -59,6 +66,7 @@ const mobileTabItems: Array<{
   label: string;
 }> = [
   { tab: "session", icon: SquareTerminal, label: "Session" },
+  { tab: "details", icon: PanelRight, label: "Details" },
   { tab: "diff", icon: FileDiff, label: "Diff" },
   { tab: "history", icon: History, label: "History" },
   { tab: "terminals", icon: TerminalSquare, label: "Shell" },
@@ -223,6 +231,9 @@ function TerminalPage({
   cwd: string | null;
 }) {
   const isMobile = useIsMobile();
+  const sidePaneOpen = useSessionSidePaneStore((state) => state.open);
+  const sidePaneSize = useSessionSidePaneStore((state) => state.size);
+  const setSidePaneSize = useSessionSidePaneStore((state) => state.setSize);
   const errorMessage = session.errorMessage || session.warningMessage || "";
   const terminalAttachmentState =
     session.status === "stopped" || session.status === "error"
@@ -232,6 +243,7 @@ function TerminalPage({
   return (
     <SessionPageLayout
       cwd={cwd}
+      sidePane={<SessionSidePane session={session} />}
       topPane={
         <div className="flex h-full min-h-0 flex-col">
           <SessionHeader session={session} />
@@ -244,11 +256,36 @@ function TerminalPage({
           ) : null}
 
           <div className="min-h-0 flex-1 overflow-hidden">
-            <LiveTerminalSurface
-              terminalId={session.sessionId}
-              readOnly={readOnly}
-              attachKey={`${session.sessionId}:${terminalAttachmentState}`}
-            />
+            <ResizablePanelGroup
+              orientation="horizontal"
+              className="h-full min-h-0"
+              onLayoutChanged={(layout) => {
+                if (SESSION_SIDE_PANE_ID in layout) {
+                  setSidePaneSize(`${layout[SESSION_SIDE_PANE_ID]}`);
+                }
+              }}
+            >
+              <ResizablePanel minSize="40">
+                <LiveTerminalSurface
+                  terminalId={session.sessionId}
+                  readOnly={readOnly}
+                  attachKey={`${session.sessionId}:${terminalAttachmentState}`}
+                />
+              </ResizablePanel>
+              {sidePaneOpen && !isMobile ? (
+                <>
+                  <ResizableHandle />
+                  <ResizablePanel
+                    id={SESSION_SIDE_PANE_ID}
+                    defaultSize={sidePaneSize}
+                    minSize={200}
+                    maxSize="45"
+                  >
+                    <SessionSidePane session={session} />
+                  </ResizablePanel>
+                </>
+              ) : null}
+            </ResizablePanelGroup>
           </div>
           {isMobile ? (
             <TerminalKeyBar
@@ -264,13 +301,23 @@ function TerminalPage({
 
 function SessionPageLayout({
   topPane,
+  sidePane,
   cwd,
 }: {
   topPane: ReactNode;
+  sidePane?: ReactNode;
   cwd: string | null;
 }) {
   const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState<MobileTab>("session");
+  const hasSidePane = sidePane !== undefined;
+  const composerNonce = useScheduledPromptComposerStore(
+    (state) => state.target?.nonce,
+  );
+
+  useEffect(() => {
+    if (hasSidePane && composerNonce !== undefined) setActiveTab("details");
+  }, [hasSidePane, composerNonce]);
 
   if (isMobile) {
     if (!cwd) {
@@ -288,6 +335,9 @@ function SessionPageLayout({
           >
             {topPane}
           </div>
+          {activeTab === "details" && sidePane ? (
+            <div className="min-h-0 h-full">{sidePane}</div>
+          ) : null}
           {activeTab === "diff" ? (
             <div className="min-h-0 h-full">
               <ProjectDiffPane cwd={cwd} />
@@ -306,23 +356,25 @@ function SessionPageLayout({
         </div>
         <nav className="shrink-0 border-t border-border/70 bg-background pb-[env(safe-area-inset-bottom)]">
           <div className="flex h-12">
-            {mobileTabItems.map(({ tab, icon: TabIcon, label }) => (
-              <button
-                key={tab}
-                type="button"
-                className={cn(
-                  "flex flex-1 flex-col items-center justify-center gap-0.5",
-                  activeTab === tab
-                    ? "text-foreground"
-                    : "text-muted-foreground",
-                )}
-                aria-pressed={activeTab === tab}
-                onClick={() => setActiveTab(tab)}
-              >
-                <TabIcon className="size-4" />
-                <span className="text-[10px]">{label}</span>
-              </button>
-            ))}
+            {mobileTabItems
+              .filter(({ tab }) => tab !== "details" || sidePane)
+              .map(({ tab, icon: TabIcon, label }) => (
+                <button
+                  key={tab}
+                  type="button"
+                  className={cn(
+                    "flex flex-1 flex-col items-center justify-center gap-0.5",
+                    activeTab === tab
+                      ? "text-foreground"
+                      : "text-muted-foreground",
+                  )}
+                  aria-pressed={activeTab === tab}
+                  onClick={() => setActiveTab(tab)}
+                >
+                  <TabIcon className="size-4" />
+                  <span className="text-[10px]">{label}</span>
+                </button>
+              ))}
           </div>
         </nav>
       </div>

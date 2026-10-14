@@ -80,6 +80,7 @@ import { SessionsServiceNew } from "./session-service";
 import { SessionStateFileManager } from "./session-state-file-manager";
 import { CodexSessionsManager } from "./sessions/codex.session";
 import { CursorAgentSessionsManager } from "./sessions/cursor-agent.session";
+import { migrateSessionInitialPrompts } from "./sessions/initial-prompt-migration";
 import { LocalTerminalSessionsManager } from "./sessions/local-terminal.session";
 import {
   defineSessionServiceState,
@@ -229,9 +230,20 @@ export async function createServices(options: CreateServicesOptions) {
     store: new SqliteGlobalInstructionsStore(databaseService.db),
   });
 
+  const persistenceStore = createPersistenceStore(userDataPath);
+  try {
+    await migrateSessionInitialPrompts({
+      store: persistenceStore,
+      sessionBuffers,
+    });
+  } catch (error) {
+    await databaseService.close();
+    throw error;
+  }
+
   const persistenceService = new PersistenceOrchestrator({
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    store: createPersistenceStore(userDataPath),
+    store: persistenceStore,
   });
 
   const appSettingsState = defineAppSettingsState();
@@ -458,7 +470,7 @@ export async function createServices(options: CreateServicesOptions) {
         }
         case "codex": {
           const { type: _type, ...input } = config;
-          const sessionId = codexSessionsManager.createSession({
+          const sessionId = await codexSessionsManager.createSession({
             ...input,
             mcpCanScheduleSessions,
           });

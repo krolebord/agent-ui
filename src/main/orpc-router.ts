@@ -31,6 +31,19 @@ import { usageRouter } from "./usage-tracking";
 import { agentBrowserRouter } from "./visuals/agent-browser-service";
 
 export const sessionsRouter = {
+  getInitialPrompt: procedure
+    .input(z.object({ sessionId: z.string() }))
+    .handler(async ({ input, context }) => {
+      const session = context.sessions.state.state[input.sessionId];
+      if (
+        !session ||
+        !("hasInitialPrompt" in session) ||
+        !session.hasInitialPrompt
+      ) {
+        return undefined;
+      }
+      return await context.sessionBuffers.getInitialPrompt(input.sessionId);
+    }),
   markSeen: procedure
     .input(
       z.object({

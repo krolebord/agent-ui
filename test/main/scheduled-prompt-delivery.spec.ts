@@ -116,6 +116,31 @@ describe("scheduled prompt delivery", () => {
     },
   );
 
+  it.each([
+    "claude-local-terminal",
+    "codex-local-terminal",
+    "cursor-agent",
+  ] satisfies Session["type"][])(
+    "submits the existing composer text of a live %s session for an empty prompt",
+    async (type) => {
+      const target = session(type);
+      const { deliver, writeToTerminal } = setup(target);
+      await deliver(target, "");
+      expect(writeToTerminal).toHaveBeenCalledExactlyOnceWith(
+        "session",
+        type === "codex-local-terminal" ? "\x1b[13u" : "\r",
+      );
+    },
+  );
+
+  it("rejects an empty prompt for a stopped session without resuming it", async () => {
+    const target = session("claude-local-terminal", "stopped");
+    const { deliver, resumeSession, ensureFreshForPath } = setup(target);
+    await expect(deliver(target, "")).rejects.toThrow("no composer text");
+    expect(ensureFreshForPath).not.toHaveBeenCalled();
+    expect(resumeSession).not.toHaveBeenCalled();
+  });
+
   it("resumes Claude with a follow-up prompt in the same conversation", async () => {
     const target = session("claude-local-terminal", "stopped");
     const { deliver, resumeSession, ensureFreshForPath, writeToTerminal } =

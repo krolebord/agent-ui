@@ -121,7 +121,6 @@ function seedCursorSession(
     startupConfig: {
       cwd: "/tmp/project",
       permissionMode: "default",
-      initialPrompt: undefined,
     },
     cursorChatId: undefined,
     ...overrides,
@@ -167,6 +166,34 @@ describe("CursorAgentSessionsManager", () => {
       (sessionsState.state as Record<string, CursorAgentSessionData>)[sessionId]
         ?.cursorChatId,
     ).toBeUndefined();
+  });
+
+  it("stores the initial prompt before publishing state and deletes it with the session", async () => {
+    const sessionsState = createState();
+    const sessionBuffers = createInMemorySessionBufferStore();
+    const manager = new CursorAgentSessionsManager({
+      state: sessionsState,
+      sessionBuffers,
+    });
+    const sessionId = await manager.createSession({
+      cwd: "/project",
+      sessionName: undefined,
+      permissionMode: "default",
+      initialPrompt: "  Cursor prompt  ",
+    });
+    expect(sessionsState.state[sessionId]).toMatchObject({
+      hasInitialPrompt: true,
+    });
+    expect(sessionsState.state[sessionId]?.startupConfig).not.toHaveProperty(
+      "initialPrompt",
+    );
+    await expect(sessionBuffers.getInitialPrompt(sessionId)).resolves.toBe(
+      "Cursor prompt",
+    );
+    await manager.deleteSession(sessionId);
+    await expect(
+      sessionBuffers.getInitialPrompt(sessionId),
+    ).resolves.toBeUndefined();
   });
 
   it("derives status from terminal + cursor hook activity", async () => {

@@ -1,10 +1,17 @@
 import { call } from "@orpc/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Services } from "../../src/main/create-services";
+import { createInMemorySessionBufferStore } from "../../src/main/database/session-buffer-store";
 import { sessionsRouter } from "../../src/main/orpc-router";
 import type { ClaudeLocalTerminalSessionData } from "../../src/main/session-service";
-import type { CodexLocalTerminalSessionData } from "../../src/main/sessions/codex.session";
-import type { CursorAgentSessionData } from "../../src/main/sessions/cursor-agent.session";
+import {
+  type CodexLocalTerminalSessionData,
+  codexSessionsRouter,
+} from "../../src/main/sessions/codex.session";
+import {
+  type CursorAgentSessionData,
+  cursorAgentSessionsRouter,
+} from "../../src/main/sessions/cursor-agent.session";
 import type { LocalTerminalSessionData } from "../../src/main/sessions/local-terminal.session";
 import type {
   Session,
@@ -35,7 +42,6 @@ function claudeSession(
       cwd: "/proj/claude",
       permissionMode: "default",
       model: "opus",
-      initialPrompt: undefined,
     },
     ...settledFields(),
     ...overrides,
@@ -82,7 +88,6 @@ function cursorSession(
     startupConfig: {
       cwd: "/proj/cursor",
       permissionMode: "default",
-      initialPrompt: undefined,
     },
     ...settledFields(),
     ...overrides,
@@ -114,8 +119,10 @@ function buildContext(session?: Session) {
   const startCodex = vi.fn(async () => undefined);
   const startCursor = vi.fn(async () => undefined);
   const ensureFreshForPath = vi.fn(async () => undefined);
+  const sessionBuffers = createInMemorySessionBufferStore();
 
   const context = {
+    sessionBuffers,
     skillsService: { ensureFreshForPath },
     sessionsService: { resumeSession },
     sessions: {
@@ -139,6 +146,7 @@ function buildContext(session?: Session) {
     startCodex,
     startCursor,
     ensureFreshForPath,
+    sessionBuffers,
   };
 }
 
@@ -268,5 +276,126 @@ describe("sessions.unsettle", () => {
     await unsettle(context, "missing");
 
     expect(resumeSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("session initial prompt access", () => {
+  it("fetches prompts on demand and never reads orphaned or absent prompts", async () => {
+    const session = claudeSession({ hasInitialPrompt: true });
+    const { context, sessionsMap, sessionBuffers } = buildContext(session);
+    await sessionBuffers.setInitialPrompt(session.sessionId, "saved prompt");
+    const read = vi.spyOn(sessionBuffers, "getInitialPrompt");
+    await expect(
+      call(
+        sessionsRouter.getInitialPrompt,
+        { sessionId: session.sessionId },
+        { context },
+      ),
+    ).resolves.toBe("saved prompt");
+    expect(sessionsMap[session.sessionId]?.startupConfig).not.toHaveProperty(
+      "initialPrompt",
+    );
+    await expect(
+      call(
+        sessionsRouter.getInitialPrompt,
+        { sessionId: "missing" },
+        { context },
+      ),
+    ).resolves.toBeUndefined();
+    sessionsMap[session.sessionId] = claudeSession({ hasInitialPrompt: false });
+    await expect(
+      call(
+        sessionsRouter.getInitialPrompt,
+        { sessionId: session.sessionId },
+        { context },
+      ),
+    ).resolves.toBeUndefined();
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads Codex prompts only until the native session exists", async () => {
+    const session = codexSession({ hasInitialPrompt: true });
+    const { context, sessionsMap, sessionBuffers, startCodex } =
+      buildContext(session);
+    await sessionBuffers.setInitialPrompt(
+      session.sessionId,
+      "/plan saved prompt",
+    );
+    const read = vi.spyOn(sessionBuffers, "getInitialPrompt");
+    await call(
+      codexSessionsRouter.resumeSession,
+      { sessionId: session.sessionId },
+      { context },
+    );
+    expect(startCodex).toHaveBeenLastCalledWith(
+      expect.objectContaining({ initialPrompt: "/plan saved prompt" }),
+    );
+    sessionsMap[session.sessionId] = codexSession({
+      hasInitialPrompt: true,
+      codexSessionId: "native-thread",
+    });
+    await call(
+      codexSessionsRouter.resumeSession,
+      { sessionId: session.sessionId },
+      { context },
+    );
+    expect(startCodex).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        initialPrompt: undefined,
+        codexSessionId: "native-thread",
+      }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads pending Cursor prompts and preserves plan mode without resending delivered prompts", async () => {
+    const session = cursorSession({
+      hasInitialPrompt: true,
+      initialPromptSent: false,
+    });
+    const { context, sessionsMap, sessionBuffers, startCursor } =
+      buildContext(session);
+    await sessionBuffers.setInitialPrompt(
+      session.sessionId,
+      "/plan saved prompt",
+    );
+    const read = vi.spyOn(sessionBuffers, "getInitialPrompt");
+    await call(
+      cursorAgentSessionsRouter.resumeSession,
+      { sessionId: session.sessionId },
+      { context },
+    );
+    expect(startCursor).toHaveBeenLastCalledWith(
+      expect.objectContaining({ initialPrompt: "saved prompt", plan: true }),
+    );
+    sessionsMap[session.sessionId] = cursorSession({
+      hasInitialPrompt: true,
+      initialPromptSent: true,
+    });
+    await call(
+      cursorAgentSessionsRouter.resumeSession,
+      { sessionId: session.sessionId },
+      { context },
+    );
+    expect(startCursor).toHaveBeenLastCalledWith(
+      expect.objectContaining({ initialPrompt: undefined, plan: false }),
+    );
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails pending launches when SQLite cannot read the prompt", async () => {
+    const session = codexSession({ hasInitialPrompt: true });
+    const { context, sessionBuffers, startCodex } = buildContext(session);
+    vi.spyOn(sessionBuffers, "getInitialPrompt").mockRejectedValue(
+      new Error("database unavailable"),
+    );
+    await expect(
+      call(
+        codexSessionsRouter.resumeSession,
+        { sessionId: session.sessionId },
+        { context },
+      ),
+    ).rejects.toThrow("database unavailable");
+    expect(startCodex).not.toHaveBeenCalled();
   });
 });

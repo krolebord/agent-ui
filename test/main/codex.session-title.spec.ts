@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createInMemorySessionBufferStore } from "../../src/main/database/session-buffer-store";
 import {
   type CodexLocalTerminalSessionData,
   CodexSessionsManager,
@@ -27,12 +28,14 @@ function createManager() {
     forget: vi.fn(),
   };
 
+  const sessionBuffers = createInMemorySessionBufferStore();
   const manager = new CodexSessionsManager({
+    sessionBuffers,
     state: sessionsState,
     titleGeneration: titleGeneration as unknown as TitleGenerationService,
   });
 
-  return { manager, sessionsState, titleGeneration };
+  return { manager, sessionsState, titleGeneration, sessionBuffers };
 }
 
 function mockTitleGeneration(
@@ -50,14 +53,15 @@ function mockTitleGeneration(
   });
 }
 
-describe("CodexSessionsManager title generation", () => {
-  it("triggers title generation for unnamed sessions with initial prompt", () => {
-    const { manager, sessionsState, titleGeneration } = createManager();
+describe("CodexSessionsManager title generation", async () => {
+  it("triggers title generation for unnamed sessions with initial prompt", async () => {
+    const { manager, sessionsState, titleGeneration, sessionBuffers } =
+      createManager();
     mockTitleGeneration(titleGeneration, {
       generatedTitle: "Generated title",
     });
 
-    const sessionId = manager.createSession({
+    const sessionId = await manager.createSession({
       cwd: "/tmp",
       sessionName: undefined,
       permissionMode: "default",
@@ -78,15 +82,19 @@ describe("CodexSessionsManager title generation", () => {
     const created = sessionsState.state[sessionId];
     expect(created?.title).toBe("Generated title");
     if (created?.type === "codex-local-terminal") {
-      expect(created.startupConfig.initialPrompt).toBe("write release notes");
+      expect(created.hasInitialPrompt).toBe(true);
+      expect(created.startupConfig).not.toHaveProperty("initialPrompt");
+      await expect(sessionBuffers.getInitialPrompt(sessionId)).resolves.toBe(
+        "write release notes",
+      );
     }
   });
 
-  it("sets a provisional title from the initial prompt immediately", () => {
+  it("sets a provisional title from the initial prompt immediately", async () => {
     const { manager, sessionsState, titleGeneration } = createManager();
     mockTitleGeneration(titleGeneration);
 
-    const sessionId = manager.createSession({
+    const sessionId = await manager.createSession({
       cwd: "/tmp",
       sessionName: undefined,
       permissionMode: "default",
@@ -98,10 +106,10 @@ describe("CodexSessionsManager title generation", () => {
     expect(sessionsState.state[sessionId]?.title).toBe("write release notes");
   });
 
-  it("does not trigger title generation for named sessions", () => {
+  it("does not trigger title generation for named sessions", async () => {
     const { manager, titleGeneration } = createManager();
 
-    manager.createSession({
+    await manager.createSession({
       cwd: "/tmp",
       sessionName: "Custom Session",
       permissionMode: "default",
@@ -113,10 +121,10 @@ describe("CodexSessionsManager title generation", () => {
     expect(titleGeneration.requestFromPrompt).not.toHaveBeenCalled();
   });
 
-  it("strips /plan prefix before title generation", () => {
+  it("strips /plan prefix before title generation", async () => {
     const { manager, titleGeneration } = createManager();
 
-    const sessionId = manager.createSession({
+    const sessionId = await manager.createSession({
       cwd: "/tmp",
       sessionName: undefined,
       permissionMode: "default",
@@ -133,10 +141,10 @@ describe("CodexSessionsManager title generation", () => {
     );
   });
 
-  it("skips title generation when /plan has no body", () => {
+  it("skips title generation when /plan has no body", async () => {
     const { manager, titleGeneration } = createManager();
 
-    manager.createSession({
+    await manager.createSession({
       cwd: "/tmp",
       sessionName: undefined,
       permissionMode: "default",
@@ -151,7 +159,7 @@ describe("CodexSessionsManager title generation", () => {
   it("forgets title trigger state when deleting session", async () => {
     const { manager, titleGeneration } = createManager();
 
-    const sessionId = manager.createSession({
+    const sessionId = await manager.createSession({
       cwd: "/tmp",
       sessionName: undefined,
       permissionMode: "default",
@@ -165,7 +173,7 @@ describe("CodexSessionsManager title generation", () => {
     expect(titleGeneration.forget).toHaveBeenCalledWith(sessionId);
   });
 
-  it("does not overwrite a manually renamed session when title generation resolves", () => {
+  it("does not overwrite a manually renamed session when title generation resolves", async () => {
     const { manager, sessionsState, titleGeneration } = createManager();
     let applyGeneratedTitle: (() => void) | undefined;
 
@@ -189,7 +197,7 @@ describe("CodexSessionsManager title generation", () => {
       },
     );
 
-    const sessionId = manager.createSession({
+    const sessionId = await manager.createSession({
       cwd: "/tmp",
       sessionName: undefined,
       permissionMode: "default",

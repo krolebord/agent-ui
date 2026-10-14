@@ -39,7 +39,6 @@ export const scheduledPromptInputSchema = z.object({
   prompt: z
     .string()
     .trim()
-    .min(1)
     .max(100_000)
     .refine(
       (value) =>

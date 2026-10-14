@@ -70,6 +70,7 @@ export type CodexSubagentSessionData = z.infer<
 
 export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
   type: z.literal("codex-local-terminal"),
+  hasInitialPrompt: z.boolean().optional(),
   codexSessionId: z.string().optional(),
   subagentsByThreadId: z
     .record(z.string(), codexSubagentSessionSchema)
@@ -82,7 +83,6 @@ export const codexLocalTerminalSessionSchema = commonSessionSchema.extend({
     modelReasoningEffort: codexModelReasoningEffortSchema.default("high"),
     fastMode: codexFastModeSchema.optional(),
     permissionMode: z.enum(["default", "full-auto", "yolo"]).default("default"),
-    initialPrompt: z.string().optional(),
     configOverrides: z.string().optional(),
     mcpEnabled: z.boolean().optional().catch(undefined),
     mcpCanScheduleSessions: z.boolean().optional().catch(undefined),
@@ -130,7 +130,7 @@ export const codexSessionsRouter = {
   startSession: procedure
     .input(startCodexSessionSchema)
     .handler(async ({ input, context }) => {
-      const sessionId = context.sessions.codex.createSession(input);
+      const sessionId = await context.sessions.codex.createSession(input);
 
       await call(
         codexSessionsRouter.resumeSession,
@@ -170,7 +170,7 @@ export const codexSessionsRouter = {
           .permissionMode as CodexPermissionMode,
         initialPrompt: session.codexSessionId
           ? undefined
-          : session.startupConfig.initialPrompt,
+          : await context.sessionBuffers.getInitialPrompt(sessionId),
         configOverrides: session.startupConfig.configOverrides,
         mcpEnabled: session.startupConfig.mcpEnabled,
         mcpCanScheduleSessions: session.startupConfig.mcpCanScheduleSessions,
@@ -491,10 +491,16 @@ export class CodexSessionsManager {
     }
   }
 
-  createSession(input: z.infer<typeof startCodexSessionSchema>): string {
+  async createSession(
+    input: z.infer<typeof startCodexSessionSchema>,
+  ): Promise<string> {
     const sessionId = generateUniqueSessionId();
     const sessionName = input.sessionName?.trim() || undefined;
     const initialPrompt = input.initialPrompt?.trim() || undefined;
+
+    if (initialPrompt) {
+      await this.sessionBuffers.setInitialPrompt(sessionId, initialPrompt);
+    }
 
     const newSession: CodexLocalTerminalSessionData = {
       sessionId,
@@ -503,6 +509,7 @@ export class CodexSessionsManager {
       lastActivityAt: Date.now(),
       status: "stopped",
       title: sessionName ?? DEFAULT_CODEX_SESSION_TITLE,
+      hasInitialPrompt: !!initialPrompt,
       codexSessionId: undefined,
       startupConfig: {
         cwd: input.cwd,
@@ -510,7 +517,6 @@ export class CodexSessionsManager {
         modelReasoningEffort: input.modelReasoningEffort,
         fastMode: input.fastMode,
         permissionMode: input.permissionMode,
-        initialPrompt,
         configOverrides: input.configOverrides,
         mcpEnabled: input.mcpEnabled,
         mcpCanScheduleSessions: input.mcpCanScheduleSessions,
@@ -1062,6 +1068,12 @@ export class CodexSessionsManager {
     }
 
     const sessionId = generateUniqueSessionId();
+    const initialPrompt = await this.sessionBuffers.getInitialPrompt(
+      input.sessionId,
+    );
+    if (initialPrompt) {
+      await this.sessionBuffers.setInitialPrompt(sessionId, initialPrompt);
+    }
     const forkedSession: CodexLocalTerminalSessionData = {
       sessionId,
       type: "codex-local-terminal",
@@ -1069,6 +1081,7 @@ export class CodexSessionsManager {
       lastActivityAt: Date.now(),
       status: "stopped",
       title: `${sourceSession.title} (fork)`,
+      hasInitialPrompt: !!initialPrompt,
       codexSessionId: undefined,
       startupConfig: {
         cwd: sourceSession.startupConfig.cwd,
@@ -1076,7 +1089,6 @@ export class CodexSessionsManager {
         modelReasoningEffort: sourceSession.startupConfig.modelReasoningEffort,
         fastMode: sourceSession.startupConfig.fastMode,
         permissionMode: sourceSession.startupConfig.permissionMode,
-        initialPrompt: sourceSession.startupConfig.initialPrompt,
         configOverrides: sourceSession.startupConfig.configOverrides,
         mcpEnabled: sourceSession.startupConfig.mcpEnabled,
         mcpCanScheduleSessions:

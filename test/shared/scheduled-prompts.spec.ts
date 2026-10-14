@@ -105,7 +105,6 @@ describe("running prompt source choices", () => {
         cwd: "/var/tmp/project",
         model: "opus",
         permissionMode: "default",
-        initialPrompt: undefined,
       },
     };
   }

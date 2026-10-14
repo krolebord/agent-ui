@@ -194,7 +194,6 @@ function createManager(opts?: {
     modelReasoningEffort: "high",
     fastMode: "off",
     permissionMode: "default",
-    initialPrompt: opts?.initialPrompt ?? "/plan summarize recent commits",
     model: undefined,
     configOverrides: undefined,
     accountId: opts?.accountId,
@@ -689,7 +688,6 @@ describe("CodexSessionsManager", () => {
       fastMode: "off",
       permissionMode: "default",
       model: undefined,
-      initialPrompt: undefined,
       configOverrides: undefined,
     };
 
@@ -780,7 +778,12 @@ describe("CodexSessionsManager", () => {
 
   it("creates and starts a forked session under a new local session ID", async () => {
     const { state, sessionsState } = createSessionsState();
-    const manager = new CodexSessionsManager(sessionsState);
+    const sessionBuffers = createInMemorySessionBufferStore();
+    await sessionBuffers.setInitialPrompt("source-session", "summarize status");
+    const manager = new CodexSessionsManager({
+      state: sessionsState,
+      sessionBuffers,
+    });
 
     state["source-session"] = {
       sessionId: "source-session",
@@ -789,6 +792,7 @@ describe("CodexSessionsManager", () => {
       lastActivityAt: Date.now(),
       status: "stopped",
       title: "Source Session",
+      hasInitialPrompt: true,
       codexSessionId: "codex-session-1",
       startupConfig: {
         cwd: "/tmp/project",
@@ -796,7 +800,6 @@ describe("CodexSessionsManager", () => {
         modelReasoningEffort: "minimal",
         fastMode: "fast",
         permissionMode: "yolo",
-        initialPrompt: "summarize status",
         configOverrides: 'model_provider = "openai"',
       },
     };
@@ -812,6 +815,7 @@ describe("CodexSessionsManager", () => {
       sessionId: result.sessionId,
       type: "codex-local-terminal",
       title: "Source Session (fork)",
+      hasInitialPrompt: true,
       codexSessionId: undefined,
       startupConfig: {
         cwd: "/tmp/project",
@@ -819,10 +823,16 @@ describe("CodexSessionsManager", () => {
         modelReasoningEffort: "minimal",
         fastMode: "fast",
         permissionMode: "yolo",
-        initialPrompt: "summarize status",
         configOverrides: 'model_provider = "openai"',
       },
     });
+
+    expect(state[result.sessionId]?.startupConfig).not.toHaveProperty(
+      "initialPrompt",
+    );
+    await expect(
+      sessionBuffers.getInitialPrompt(result.sessionId),
+    ).resolves.toBe("summarize status");
 
     const startCall = terminalSessionSpies.start.mock.calls.at(-1)?.[0] as
       | { args?: string[]; cols?: number; rows?: number; cwd?: string }
@@ -882,7 +892,6 @@ describe("CodexSessionsManager", () => {
         modelReasoningEffort: "high",
         fastMode: "default",
         permissionMode: "default",
-        initialPrompt: undefined,
         configOverrides: undefined,
       },
     };

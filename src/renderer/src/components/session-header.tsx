@@ -1,6 +1,5 @@
 import type { Session } from "@main/sessions/state";
 import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
-import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import { useTerminalAttachFiles } from "@renderer/hooks/use-terminal-attach-files";
 import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
@@ -18,7 +17,6 @@ import {
   FolderOpen,
   GitFork,
   History,
-  PackageOpen,
   Paperclip,
   TerminalSquare,
 } from "lucide-react";
@@ -40,7 +38,10 @@ import {
   useProjectBottomPaneView,
 } from "./diff-review-pane";
 import { MobileSidebarTrigger } from "./mobile-sidebar-trigger";
-import { SchedulePromptButton } from "./schedule-prompt-dialog";
+import {
+  SchedulePromptButton,
+  SessionSidePaneToggle,
+} from "./session-side-pane";
 import {
   ClaudeCodeIcon,
   CodexIcon,
@@ -138,31 +139,6 @@ function AttachFileButton({ terminalId }: { terminalId: string }) {
       </Button>
       {fileInput}
     </>
-  );
-}
-
-function ArtifactsButton({ sessionId }: { sessionId: string }) {
-  const count = useAppState(
-    (state) =>
-      Object.values(state.artifacts).filter(
-        (artifact) => artifact.sessionId === sessionId,
-      ).length,
-  );
-  const showArtifacts = useMainViewStore((state) => state.showArtifacts);
-  if (count === 0) return null;
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="h-7 shrink-0 gap-1 px-1.5"
-      aria-label={`Session artifacts, ${count}`}
-      title={`Session artifacts (${count})`}
-      onClick={() => showArtifacts(sessionId)}
-    >
-      <PackageOpen className="size-3.5 text-muted-foreground" />
-      <span className="font-mono text-[11px]">{count}</span>
-    </Button>
   );
 }
 
@@ -380,12 +356,7 @@ export function SessionHeader({ session }: { session: Session }) {
       {session.type !== "worktree-setup" ? (
         <AttachFileButton terminalId={session.sessionId} />
       ) : null}
-      <ArtifactsButton sessionId={session.sessionId} />
-      <SchedulePromptButton
-        key={session.sessionId}
-        session={session}
-        disabled={projectLocked}
-      />
+      <SchedulePromptButton session={session} disabled={projectLocked} />
       <div className="flex max-md:hidden shrink-0 items-center">
         {bottomPaneViewItems.map(({ view, icon: ViewIcon, label }, index) => (
           <Button
@@ -465,6 +436,9 @@ export function SessionHeader({ session }: { session: Session }) {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+      ) : null}
+      {session.type !== "worktree-setup" ? (
+        <SessionSidePaneToggle session={session} />
       ) : null}
     </header>
   );

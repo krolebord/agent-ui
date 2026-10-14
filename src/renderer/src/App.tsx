@@ -1,6 +1,7 @@
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { AddProjectDialog } from "@renderer/components/add-project-dialog";
 import { ArtifactToastListener } from "@renderer/components/artifact-toast-listener";
+import { ArtifactPreviewDialog } from "@renderer/components/artifacts-page";
 import { ConfirmDialog } from "@renderer/components/confirm-dialog";
 import { ConnectionStatusIndicator } from "@renderer/components/connection-status-indicator";
 import { DiffReviewCommitDialog } from "@renderer/components/diff-review-commit-dialog";
@@ -134,6 +135,7 @@ function App() {
       <WorktreeManagerDialog />
       <ProjectDeletionToastListener />
       <ArtifactToastListener />
+      <ArtifactPreviewDialog />
       <SettingsDialog />
       <DiffReviewCommitDialog />
       <Toaster

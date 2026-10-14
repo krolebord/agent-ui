@@ -52,7 +52,6 @@ describe("SessionsServiceNew.renameSession", () => {
         cwd: "/tmp",
         permissionMode: "default",
         model: "opus",
-        initialPrompt: undefined,
       },
     };
 

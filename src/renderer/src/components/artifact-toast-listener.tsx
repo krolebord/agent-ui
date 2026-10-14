@@ -1,3 +1,4 @@
+import { useArtifactPreviewDialogStore } from "@renderer/components/artifacts-page";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
@@ -30,10 +31,11 @@ export function ArtifactToastListener() {
       toast.success(getNewArtifactToastTitle(artifact), {
         action: {
           label: isVisual ? "View" : "View artifacts",
-          onClick: () =>
-            useMainViewStore
-              .getState()
-              .showArtifacts(artifact.sessionId, isVisual ? artifact.id : null),
+          onClick: () => {
+            if (isVisual)
+              useArtifactPreviewDialogStore.getState().open(artifact.id);
+            else useMainViewStore.getState().showArtifacts(artifact.sessionId);
+          },
         },
       });
     }

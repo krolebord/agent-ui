@@ -30,6 +30,10 @@ export function createPromptDelivery(deps: Dependencies) {
         "Project is busy. Try sending this prompt after the project operation finishes.",
       );
     if (session.status === "stopped") {
+      if (!prompt)
+        throw new Error(
+          "Session is stopped, so there is no composer text to submit. Resume the session or add a prompt.",
+        );
       await deps.skills.ensureFreshForPath(session.startupConfig.cwd);
       if (deps.sessions.state[session.sessionId]?.status !== "stopped")
         throw new Error(
@@ -89,23 +93,25 @@ export function createPromptDelivery(deps: Dependencies) {
       throw new Error(
         "Session terminal is unavailable. Resume the session and try again.",
       );
-    deps.terminalManager.writeToTerminal(
-      session.sessionId,
-      `\x1b[200~${prompt.replace(/\r\n?/g, "\n")}\x1b[201~`,
-    );
-    await delay(100);
-    if (deps.terminalManager.getRuntime(session.sessionId) !== runtime)
-      throw new Error(
-        "Session stopped while sending. Check the conversation before sending again.",
+    if (prompt) {
+      deps.terminalManager.writeToTerminal(
+        session.sessionId,
+        `\x1b[200~${prompt.replace(/\r\n?/g, "\n")}\x1b[201~`,
       );
-    const current = deps.sessions.state[session.sessionId];
-    if (
-      current?.status !== "idle" &&
-      current?.status !== "awaiting_user_response"
-    )
-      throw new Error(
-        "Session became busy while sending. Check the prompt input before sending again.",
-      );
+      await delay(100);
+      if (deps.terminalManager.getRuntime(session.sessionId) !== runtime)
+        throw new Error(
+          "Session stopped while sending. Check the conversation before sending again.",
+        );
+      const current = deps.sessions.state[session.sessionId];
+      if (
+        current?.status !== "idle" &&
+        current?.status !== "awaiting_user_response"
+      )
+        throw new Error(
+          "Session became busy while sending. Check the prompt input before sending again.",
+        );
+    }
     deps.terminalManager.writeToTerminal(
       session.sessionId,
       session.type === "codex-local-terminal" ? "\x1b[13u" : "\r",

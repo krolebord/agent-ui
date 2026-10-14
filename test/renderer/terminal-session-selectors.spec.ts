@@ -3,6 +3,7 @@ import {
   buildProjectSessionGroups,
   buildProjectTree,
   buildWorktreeManagerRows,
+  formatRelativeTime,
   getProjectDisplayName,
   groupHasAwaitingUserInput,
   isAwaitingUserInputStatus,
@@ -145,6 +146,24 @@ describe("buildProjectSessionGroups", () => {
     expect(groups[0]?.sessions.map((session) => session.sessionId)).toEqual([
       "active",
     ]);
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const now = Date.parse("2026-10-14T12:00:00Z");
+
+  it("uses compact units that grow with age", () => {
+    expect(formatRelativeTime(now - 2_000, now)).toBe("now");
+    expect(formatRelativeTime(now - 34_000, now)).toBe("30s");
+    expect(formatRelativeTime(now - 5 * 60_000, now)).toBe("5m");
+    expect(formatRelativeTime(now - 3 * 3_600_000, now)).toBe("3h");
+    expect(formatRelativeTime(now - 2 * 86_400_000, now)).toBe("2d");
+    expect(formatRelativeTime(now - 14 * 86_400_000, now)).toBe("2w");
+  });
+
+  it("returns nothing for unset timestamps and clamps future ones", () => {
+    expect(formatRelativeTime(0, now)).toBe("");
+    expect(formatRelativeTime(now + 60_000, now)).toBe("now");
   });
 });
 

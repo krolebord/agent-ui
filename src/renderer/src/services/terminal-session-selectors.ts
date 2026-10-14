@@ -48,7 +48,13 @@ export function getSessionLastActivityLabel(
   session: Session,
   now = Date.now(),
 ): string {
-  const timestamp = session.lastActivityAt;
+  return formatRelativeTime(session.lastActivityAt, now);
+}
+
+export function formatRelativeTime(
+  timestamp: number,
+  now = Date.now(),
+): string {
   if (timestamp <= 0) {
     return "";
   }

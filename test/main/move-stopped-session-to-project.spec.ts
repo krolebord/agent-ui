@@ -47,7 +47,6 @@ function baseSession(
       cwd: "/proj/a",
       permissionMode: "default",
       model: "opus",
-      initialPrompt: undefined,
     },
     ...overrides,
   };

@@ -36,15 +36,12 @@ const cursorAgentPermissionModeSchema = z
 
 export const cursorAgentSessionSchema = commonSessionSchema.extend({
   type: z.literal("cursor-agent"),
+  hasInitialPrompt: z.boolean().optional(),
   startupConfig: z.object({
     cwd: z.string(),
     model: z.string().optional(),
     mode: cursorAgentModeSchema,
     permissionMode: cursorAgentPermissionModeSchema,
-    initialPrompt: z
-      .string()
-      .optional()
-      .transform((v) => v?.trim()),
   }),
   cursorChatId: z.string().optional().catch(undefined),
   initialPromptSent: z.boolean().optional().catch(false),
@@ -108,7 +105,7 @@ export const cursorAgentSessionsRouter = {
 
       const pendingPrompt = session.initialPromptSent
         ? undefined
-        : session.startupConfig.initialPrompt;
+        : await context.sessionBuffers.getInitialPrompt(sessionId);
 
       let plan = false;
       let initialPrompt = pendingPrompt;
@@ -289,6 +286,10 @@ export class CursorAgentSessionsManager {
     const sessionName = input.sessionName?.trim() || undefined;
     const initialPrompt = input.initialPrompt?.trim() || undefined;
 
+    if (initialPrompt) {
+      await this.sessionBuffers.setInitialPrompt(sessionId, initialPrompt);
+    }
+
     const newSession: CursorAgentSessionData = {
       sessionId,
       type: "cursor-agent",
@@ -296,13 +297,13 @@ export class CursorAgentSessionsManager {
       lastActivityAt: Date.now(),
       status: "stopped",
       title: sessionName ?? DEFAULT_CURSOR_AGENT_SESSION_TITLE,
+      hasInitialPrompt: !!initialPrompt,
       warningMessage: this.buildSessionWarning(),
       startupConfig: {
         cwd: input.cwd,
         model: input.model,
         mode: input.mode,
         permissionMode: input.permissionMode,
-        initialPrompt,
       },
       cursorChatId: undefined,
     };

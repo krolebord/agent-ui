@@ -213,14 +213,6 @@ function useMoveSessionToProjectActions(session: Session): SessionMenuAction[] {
   ];
 }
 
-function getSessionInitialPrompt(session: Session): string | undefined {
-  if (!("initialPrompt" in session.startupConfig)) {
-    return undefined;
-  }
-  const prompt = session.startupConfig.initialPrompt?.trim();
-  return prompt || undefined;
-}
-
 interface SwitchableAccount {
   id: string;
   label: string;
@@ -472,7 +464,8 @@ export function useCommonSessionMenuActions(
   const openRename = useRenameSessionDialogStore((x) => x.open);
   const openRawState = useRawSessionStateDialogStore((x) => x.open);
   const moveSessionToProjectActions = useMoveSessionToProjectActions(session);
-  const initialPrompt = getSessionInitialPrompt(session);
+  const hasInitialPrompt =
+    "hasInitialPrompt" in session && session.hasInitialPrompt;
 
   return [
     ...moveSessionToProjectActions,
@@ -530,16 +523,41 @@ export function useCommonSessionMenuActions(
         toast.success("Working directory copied");
       },
     },
-    ...(initialPrompt
+    ...(hasInitialPrompt
       ? ([
           {
             type: "item",
             key: "copy-initial-prompt",
             label: "Copy initial prompt",
             icon: Copy,
-            onSelect: () => {
-              void navigator.clipboard.writeText(initialPrompt);
-              toast.success("Initial prompt copied");
+            onSelect: async () => {
+              try {
+                const prompt = orpc.sessions.getInitialPrompt
+                  .call({ sessionId: session.sessionId })
+                  .then((text) => {
+                    if (text === undefined) {
+                      throw new Error("Initial prompt is no longer available");
+                    }
+                    return text;
+                  });
+                if (
+                  typeof ClipboardItem !== "undefined" &&
+                  typeof navigator.clipboard.write === "function"
+                ) {
+                  await navigator.clipboard.write([
+                    new ClipboardItem({
+                      "text/plain": prompt.then(
+                        (text) => new Blob([text], { type: "text/plain" }),
+                      ),
+                    }),
+                  ]);
+                } else {
+                  await navigator.clipboard.writeText(await prompt);
+                }
+                toast.success("Initial prompt copied");
+              } catch {
+                toast.error("Failed to copy initial prompt");
+              }
             },
           },
         ] satisfies SessionMenuAction[])

@@ -57,6 +57,7 @@ interface SessionServiceOptions {
 
 export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
   type: z.literal("claude-local-terminal"),
+  hasInitialPrompt: z.boolean().optional(),
   startupConfig: z.object({
     permissionMode: claudePermissionModeSchema,
     model: claudeModelSchema,
@@ -68,10 +69,6 @@ export const claudeLocalTerminalSessionSchema = commonSessionSchema.extend({
     mcpEnabled: z.boolean().optional().catch(undefined),
     mcpCanScheduleSessions: z.boolean().optional().catch(undefined),
     accountId: z.string().optional().catch(undefined),
-    initialPrompt: z
-      .string()
-      .optional()
-      .transform((value) => value?.trim()),
     cwd: z.string(),
   }),
 });
@@ -310,12 +307,14 @@ export class SessionsServiceNew {
   private createSessionSnapshot(input: {
     sessionId: string;
     title: string;
+    hasInitialPrompt: boolean;
     startupConfig: ClaudeLocalTerminalSessionData["startupConfig"];
   }): ClaudeLocalTerminalSessionData {
     return {
       sessionId: input.sessionId,
       type: "claude-local-terminal",
       title: input.title,
+      hasInitialPrompt: input.hasInitialPrompt,
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
       status: "stopped",
@@ -328,6 +327,13 @@ export class SessionsServiceNew {
     const state = this.sessionsState;
     const sessionId = generateUniqueSessionId();
     const sessionName = sessionInput.sessionName?.trim();
+
+    if (sessionInput.initialPrompt?.trim()) {
+      await this.sessionBuffers.setInitialPrompt(
+        sessionId,
+        sessionInput.initialPrompt.trim(),
+      );
+    }
 
     const startupOptions: ClaudeStartupOptions = {
       cwd: sessionInput.cwd,
@@ -352,8 +358,8 @@ export class SessionsServiceNew {
     const newSession = this.createSessionSnapshot({
       sessionId,
       title: sessionName || getDefaultSessionTitle(sessionId),
+      hasInitialPrompt: !!sessionInput.initialPrompt?.trim(),
       startupConfig: {
-        initialPrompt: startupOptions.initialPrompt,
         model: startupOptions.model,
         effort: startupOptions.effort,
         haikuModelOverride: startupOptions.haikuModelOverride,
@@ -410,6 +416,7 @@ export class SessionsServiceNew {
 
   private async discardUnstartedSession(sessionId: string) {
     await this.terminalManager.unregisterTerminal(sessionId);
+    await this.sessionBuffers.delete(sessionId);
     this.sessionsState.updateState((state) => {
       delete state[sessionId];
     });
@@ -480,11 +487,17 @@ export class SessionsServiceNew {
     const session = this.getSessionState(input.sessionId);
 
     const sessionId = generateUniqueSessionId();
+    const initialPrompt = await this.sessionBuffers.getInitialPrompt(
+      input.sessionId,
+    );
+    if (initialPrompt) {
+      await this.sessionBuffers.setInitialPrompt(sessionId, initialPrompt);
+    }
     const forkedSession = this.createSessionSnapshot({
       sessionId,
       title: `${session.title} (fork)`,
+      hasInitialPrompt: !!initialPrompt,
       startupConfig: {
-        initialPrompt: session.startupConfig.initialPrompt,
         model: session.startupConfig.model,
         effort: session.startupConfig.effort,
         haikuModelOverride: session.startupConfig.haikuModelOverride,

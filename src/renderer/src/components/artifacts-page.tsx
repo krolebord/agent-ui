@@ -41,8 +41,10 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { create } from "zustand";
+import { combine } from "zustand/middleware";
 
-function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = bytes / 1024;
@@ -61,23 +63,29 @@ function formatCreatedAt(createdAt: number): string {
   }).format(createdAt);
 }
 
-function ArtifactIcon({ artifact }: { artifact: Artifact }) {
+export function ArtifactIcon({
+  artifact,
+  className = "size-4",
+}: {
+  artifact: Artifact;
+  className?: string;
+}) {
   if (artifact.kind === "visual") {
-    return <LayoutDashboard className="size-4" />;
+    return <LayoutDashboard className={className} />;
   }
   if (artifact.mimeType?.startsWith("image/")) {
-    return <FileImage className="size-4" />;
+    return <FileImage className={className} />;
   }
   if (
     artifact.mimeType?.startsWith("text/") ||
     artifact.mimeType === "application/json"
   ) {
-    return <FileText className="size-4" />;
+    return <FileText className={className} />;
   }
   if (artifact.mimeType === "application/zip") {
-    return <Archive className="size-4" />;
+    return <Archive className={className} />;
   }
-  return <File className="size-4" />;
+  return <File className={className} />;
 }
 
 export function ArtifactsPage() {
@@ -215,22 +223,27 @@ function resolveArtifactHref(destination: { path: string; url: string }) {
     : destination.path;
 }
 
+export async function downloadArtifact(artifact: Artifact) {
+  try {
+    const destination = await orpc.artifacts.getDownloadUrl.call({
+      id: artifact.id,
+    });
+    const anchor = document.createElement("a");
+    anchor.href = resolveArtifactHref(destination);
+    anchor.download = artifact.name;
+    if (navigator.userAgent.includes("Electron")) anchor.target = "_blank";
+    anchor.click();
+  } catch (error) {
+    toast.error(
+      error instanceof Error ? error.message : "Failed to download artifact",
+    );
+  }
+}
+
 function ArtifactRow({ artifact }: { artifact: Artifact }) {
   const [downloading, setDownloading] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const previewKind = getArtifactPreviewKind(artifact.mimeType);
-  const isFocused = useMainViewStore(
-    (state) => state.focusedArtifactId === artifact.id,
-  );
-  const clearFocusedArtifact = useMainViewStore(
-    (state) => state.clearFocusedArtifact,
-  );
-
-  useEffect(() => {
-    if (!isFocused) return;
-    if (previewKind && artifact.available) setPreviewOpen(true);
-    clearFocusedArtifact();
-  }, [isFocused, previewKind, artifact.available, clearFocusedArtifact]);
+  const openPreview = useArtifactPreviewDialogStore((state) => state.open);
   const removeArtifact = useMutation(
     orpc.artifacts.remove.mutationOptions({
       onSuccess: () => toast.success("Artifact removed"),
@@ -240,18 +253,7 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
   const download = async () => {
     setDownloading(true);
     try {
-      const destination = await orpc.artifacts.getDownloadUrl.call({
-        id: artifact.id,
-      });
-      const anchor = document.createElement("a");
-      anchor.href = resolveArtifactHref(destination);
-      anchor.download = artifact.name;
-      if (navigator.userAgent.includes("Electron")) anchor.target = "_blank";
-      anchor.click();
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to download artifact",
-      );
+      await downloadArtifact(artifact);
     } finally {
       setDownloading(false);
     }
@@ -311,7 +313,7 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
             size="sm"
             className="h-8 gap-1.5"
             disabled={!artifact.available}
-            onClick={() => setPreviewOpen(true)}
+            onClick={() => openPreview(artifact.id)}
           >
             <Eye className="size-3.5" />
             <span className="max-sm:hidden">Preview</span>
@@ -353,37 +355,81 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
           <Trash2 className="size-3.5" />
         </Button>
       </div>
-      {previewKind ? (
-        <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-          <DialogContent className="flex flex-col sm:max-w-4xl">
-            <DialogHeader className="min-w-0 pr-6">
-              <DialogTitle className="truncate" title={artifact.name}>
-                {artifact.name}
-              </DialogTitle>
-              <DialogDescription>
-                {formatBytes(artifact.size)}
-                {artifact.mimeType ? ` · ${artifact.mimeType}` : null}
-              </DialogDescription>
-            </DialogHeader>
-            {previewOpen ? (
-              <ArtifactPreview artifact={artifact} kind={previewKind} />
-            ) : null}
-            <DialogFooter>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5"
-                disabled={!artifact.available || downloading}
-                onClick={() => void download()}
-              >
-                <Download className="size-3.5" />
-                Download
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      ) : null}
     </li>
+  );
+}
+
+export const useArtifactPreviewDialogStore = create(
+  combine(
+    {
+      isOpen: false,
+      artifactId: null as string | null,
+    },
+    (set) => ({
+      open: (artifactId: string) => {
+        set({ isOpen: true, artifactId });
+      },
+      close: () => {
+        set({ isOpen: false });
+      },
+    }),
+  ),
+);
+
+export function canPreviewArtifact(artifact: Artifact): boolean {
+  return (
+    artifact.available && getArtifactPreviewKind(artifact.mimeType) !== null
+  );
+}
+
+export function ArtifactPreviewDialog() {
+  const isOpen = useArtifactPreviewDialogStore((state) => state.isOpen);
+  const artifactId = useArtifactPreviewDialogStore((state) => state.artifactId);
+  const close = useArtifactPreviewDialogStore((state) => state.close);
+  const artifact = useAppState((state) =>
+    artifactId ? (state.artifacts[artifactId] ?? null) : null,
+  );
+  const kind = artifact ? getArtifactPreviewKind(artifact.mimeType) : null;
+  const [downloading, setDownloading] = useState(false);
+
+  return (
+    <Dialog
+      open={isOpen && artifact !== null && kind !== null}
+      onOpenChange={(open) => {
+        if (!open) close();
+      }}
+    >
+      {artifact && kind ? (
+        <DialogContent className="flex flex-col sm:max-w-4xl">
+          <DialogHeader className="min-w-0 pr-6">
+            <DialogTitle className="truncate" title={artifact.name}>
+              {artifact.name}
+            </DialogTitle>
+            <DialogDescription>
+              {formatBytes(artifact.size)}
+              {artifact.mimeType ? ` · ${artifact.mimeType}` : null}
+            </DialogDescription>
+          </DialogHeader>
+          <ArtifactPreview key={artifact.id} artifact={artifact} kind={kind} />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5"
+              disabled={!artifact.available || downloading}
+              onClick={async () => {
+                setDownloading(true);
+                await downloadArtifact(artifact);
+                setDownloading(false);
+              }}
+            >
+              <Download className="size-3.5" />
+              Download
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      ) : null}
+    </Dialog>
   );
 }
 

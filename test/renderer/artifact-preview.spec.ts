@@ -54,22 +54,10 @@ describe("getHtmlPreviewSandbox", () => {
 });
 
 describe("new artifact toasts", () => {
-  it("skips file artifacts from the session in view", () => {
-    expect(
-      shouldToastNewArtifact({ kind: "file", sessionId: "s1" }, "s1"),
-    ).toBe(false);
-    expect(
-      shouldToastNewArtifact({ kind: "file", sessionId: "s1" }, "s2"),
-    ).toBe(true);
-    expect(
-      shouldToastNewArtifact({ kind: "file", sessionId: "s1" }, null),
-    ).toBe(true);
-  });
-
-  it("always announces visuals", () => {
-    expect(
-      shouldToastNewArtifact({ kind: "visual", sessionId: "s1" }, "s1"),
-    ).toBe(true);
+  it("skips artifacts and visuals from the session in view", () => {
+    expect(shouldToastNewArtifact({ sessionId: "s1" }, "s1")).toBe(false);
+    expect(shouldToastNewArtifact({ sessionId: "s1" }, "s2")).toBe(true);
+    expect(shouldToastNewArtifact({ sessionId: "s1" }, null)).toBe(true);
   });
 
   it("titles visuals and files differently", () => {

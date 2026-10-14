@@ -1,4 +1,5 @@
 import type { Session } from "@main/sessions/state";
+import { cn } from "@renderer/lib/utils";
 import { getProjectDisplayName } from "@renderer/services/terminal-session-selectors";
 import type { PromptSchedule } from "@shared/scheduled-prompts";
 import { Check, ChevronsUpDown } from "lucide-react";
@@ -25,11 +26,13 @@ export function RunningSessionPicker({
   value,
   onChange,
   disabled,
+  className,
 }: {
   sessions: Session[];
   value: PromptSourceSelection | null;
   onChange: (source: PromptSourceSelection) => void;
   disabled: boolean;
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const projects = useAppState((state) => state.projects);
@@ -43,7 +46,7 @@ export function RunningSessionPicker({
           role="combobox"
           aria-expanded={open}
           disabled={disabled}
-          className="w-full justify-between font-normal"
+          className={cn("w-full justify-between font-normal", className)}
         >
           <span className="min-w-0 truncate">
             {value?.title ?? "Choose a running session"}

@@ -141,7 +141,7 @@ describe("scheduled prompts", () => {
     expect(deliver).toHaveBeenCalledOnce();
     expect(state.state[entry.id].status).toBe("sending");
     setStatus("running");
-    expect(state.state[entry.id].status).toBe("sent");
+    expect(state.state[entry.id]).toBeUndefined();
     setStatus("idle");
     await vi.advanceTimersByTimeAsync(120_000);
     expect(deliver).toHaveBeenCalledOnce();
@@ -360,6 +360,39 @@ describe("scheduled prompts", () => {
     persistence.dispose();
   });
 
+  it("drops prompts saved as sent by earlier versions and keeps the rest", () => {
+    const pending = {
+      sessionId: "session",
+      prompt: "Continue working",
+      schedule: { kind: "after-turn" },
+      id: "pending",
+      createdAt: NOW,
+      status: "pending",
+    };
+    const saved = new Map<string, unknown>([
+      [
+        "scheduledPrompts",
+        {
+          pending,
+          delivered: {
+            ...pending,
+            id: "delivered",
+            status: "sent",
+            sentAt: NOW,
+          },
+        },
+      ],
+    ]);
+    const persistence = new PersistenceOrchestrator({
+      schemaVersion: 1,
+      store: { get: (key) => saved.get(key), set: () => {} },
+    });
+    const { state } = setup("idle");
+    persistence.registerAndHydrate(defineScheduledPromptsPersistence(state));
+    expect(Object.keys(state.state)).toEqual(["pending"]);
+    persistence.dispose();
+  });
+
   it("does not retry uncertain deliveries on restart", async () => {
     const { service, create, state, deliver } = setup("idle");
     const entry = create();
@@ -427,7 +460,7 @@ describe("scheduled prompts", () => {
     });
     expect(state.state[entry.id].prompt).toBe("New task");
     expect(() => create({ kind: "at", at: NOW })).toThrow("future");
-    expect(() => create(undefined, " \n ")).toThrow();
+    expect(create(undefined, " \n ").prompt).toBe("");
     expect(() => create(undefined, "text\x1b[201~")).toThrow(
       "control characters",
     );

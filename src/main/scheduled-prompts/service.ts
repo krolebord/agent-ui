@@ -77,12 +77,8 @@ export class ScheduledPromptsService {
         ) {
           active.observedWork = true;
           this.options.state.updateState((entries) => {
-            const entry = entries[active.id];
-            if (entry?.status === "sending") {
-              entry.status = "sent";
-              entry.sentAt = this.now();
-              delete entry.message;
-            }
+            if (entries[active.id]?.status === "sending")
+              delete entries[active.id];
           });
         } else if (
           active.observedWork &&
@@ -199,11 +195,7 @@ export class ScheduledPromptsService {
 
   update(input: ScheduledPromptInput & { id: string }): void {
     const existing = this.options.state.state[input.id];
-    if (
-      !existing ||
-      existing.status === "sending" ||
-      existing.status === "sent"
-    )
+    if (!existing || existing.status === "sending")
       throw new Error("This prompt can no longer be edited.");
     if (existing.sessionId !== input.sessionId)
       throw new Error("A scheduled prompt cannot move to another session.");
@@ -238,7 +230,7 @@ export class ScheduledPromptsService {
 
   sendNow(id: string): void {
     const entry = this.options.state.state[id];
-    if (!entry || entry.status === "sending" || entry.status === "sent")
+    if (!entry || entry.status === "sending")
       throw new Error("This prompt cannot be sent again.");
     if (this.active.get(entry.sessionId)?.id === id)
       this.active.delete(entry.sessionId);

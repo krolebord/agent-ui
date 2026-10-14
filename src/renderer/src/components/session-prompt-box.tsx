@@ -1,5 +1,6 @@
 import { Textarea } from "@renderer/components/ui/textarea";
 import { isCoarsePointer } from "@renderer/lib/pointer";
+import { cn } from "@renderer/lib/utils";
 import type { ReactNode } from "react";
 
 interface SessionPromptBoxProps {
@@ -7,6 +8,7 @@ interface SessionPromptBoxProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  onCancel?: () => void;
   placeholder: string;
   autoFocus?: boolean;
   handoffControl?: ReactNode;
@@ -18,6 +20,7 @@ export function SessionPromptBox({
   value,
   onChange,
   onSubmit,
+  onCancel,
   placeholder,
   autoFocus,
   handoffControl,
@@ -37,17 +40,25 @@ export function SessionPromptBox({
           if (event.key === "Enter" && !event.shiftKey && !isCoarsePointer()) {
             event.preventDefault();
             onSubmit();
+          } else if (event.key === "Escape" && onCancel) {
+            event.preventDefault();
+            onCancel();
           }
         }}
         aria-label={placeholder}
-        className="min-h-22 md:min-h-19 rounded-b-none border-0 shadow-none focus-visible:border-0 focus-visible:ring-0"
+        className={cn(
+          "min-h-22 md:min-h-19 border-0 shadow-none focus-visible:border-0 focus-visible:ring-0",
+          (handoffControl || modeControl) && "rounded-b-none",
+        )}
       />
-      <div className="border-input bg-secondary/40 flex items-center gap-1.5 rounded-b-md border-t px-1.5 py-1">
-        {handoffControl}
-        {modeControl ? (
-          <div className="ml-auto min-w-0">{modeControl}</div>
-        ) : null}
-      </div>
+      {handoffControl || modeControl ? (
+        <div className="border-input bg-secondary/40 flex items-center gap-1.5 rounded-b-md border-t px-1.5 py-1">
+          {handoffControl}
+          {modeControl ? (
+            <div className="ml-auto min-w-0">{modeControl}</div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

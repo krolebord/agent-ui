@@ -35,10 +35,10 @@ export function getVisualFrameHeight(
 }
 
 export function shouldToastNewArtifact(
-  artifact: Pick<Artifact, "kind" | "sessionId">,
+  artifact: Pick<Artifact, "sessionId">,
   sessionInView: string | null,
 ): boolean {
-  return artifact.kind === "visual" || artifact.sessionId !== sessionInView;
+  return artifact.sessionId !== sessionInView;
 }
 
 export function getNewArtifactToastTitle(

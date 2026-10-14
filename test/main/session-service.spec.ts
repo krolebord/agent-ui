@@ -155,6 +155,41 @@ describe("SessionsServiceNew", () => {
   });
 
   describe("startNewSession", () => {
+    it("saves initial prompts outside state before launching", async () => {
+      const { service, state, sessionBuffers } = createService();
+      const write = vi.spyOn(sessionBuffers, "setInitialPrompt");
+      const sessionId = await service.startNewSession(
+        makeStartInput({ initialPrompt: "  saved prompt  " }),
+      );
+      expect(state[sessionId]?.hasInitialPrompt).toBe(true);
+      expect(state[sessionId]?.startupConfig).not.toHaveProperty(
+        "initialPrompt",
+      );
+      await expect(sessionBuffers.getInitialPrompt(sessionId)).resolves.toBe(
+        "saved prompt",
+      );
+      expect(write.mock.invocationCallOrder[0]).toBeLessThan(
+        terminalSessionSpies.start.mock.invocationCallOrder[0] ?? 0,
+      );
+      await service.deleteSession(sessionId);
+      await expect(
+        sessionBuffers.getInitialPrompt(sessionId),
+      ).resolves.toBeUndefined();
+    });
+
+    it("does not publish or launch a session when its prompt cannot be saved", async () => {
+      const { service, state, sessionBuffers } = createService();
+      vi.spyOn(sessionBuffers, "setInitialPrompt").mockRejectedValueOnce(
+        new Error("disk full"),
+      );
+      await expect(
+        service.startNewSession(
+          makeStartInput({ initialPrompt: "saved prompt" }),
+        ),
+      ).rejects.toThrow("disk full");
+      expect(Object.keys(state)).toHaveLength(0);
+      expect(terminalSessionSpies.start).not.toHaveBeenCalled();
+    });
     it("uses sessionName as title when provided", async () => {
       const { service, state, stateFileManager } = createService();
 
@@ -592,11 +627,13 @@ describe("SessionsServiceNew", () => {
 
   describe("forkSession", () => {
     it("creates and starts a forked session under the new session ID", async () => {
-      const { service, state, stateFileManager } = createService();
+      const { service, state, stateFileManager, sessionBuffers } =
+        createService();
 
       const sourceSessionId = await service.startNewSession(
         makeStartInput({
           sessionName: "Source Session",
+          initialPrompt: "source prompt",
         }),
       );
 
@@ -610,7 +647,14 @@ describe("SessionsServiceNew", () => {
       expect(state[forkedSessionId]).toMatchObject({
         sessionId: forkedSessionId,
         title: "Source Session (fork)",
+        hasInitialPrompt: true,
       });
+      expect(state[forkedSessionId]?.startupConfig).not.toHaveProperty(
+        "initialPrompt",
+      );
+      await expect(
+        sessionBuffers.getInitialPrompt(forkedSessionId),
+      ).resolves.toBe("source prompt");
 
       expect(service.getLiveSession(sourceSessionId)).not.toBeNull();
       expect(service.getLiveSession(forkedSessionId)).not.toBeNull();

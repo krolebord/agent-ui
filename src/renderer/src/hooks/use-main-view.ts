@@ -9,7 +9,6 @@ export const useMainViewStore = create(
     {
       view: "sessions" as MainView,
       artifactsSessionId: null as string | null,
-      focusedArtifactId: null as string | null,
     },
     (set) => ({
       showSessions: () => {
@@ -27,18 +26,8 @@ export const useMainViewStore = create(
       showAccounts: () => {
         set({ view: "accounts" });
       },
-      showArtifacts: (
-        sessionId: string | null = null,
-        focusedArtifactId: string | null = null,
-      ) => {
-        set({
-          view: "artifacts",
-          artifactsSessionId: sessionId,
-          focusedArtifactId,
-        });
-      },
-      clearFocusedArtifact: () => {
-        set({ focusedArtifactId: null });
+      showArtifacts: (sessionId: string | null = null) => {
+        set({ view: "artifacts", artifactsSessionId: sessionId });
       },
       clearArtifactsSessionFilter: () => {
         set({ artifactsSessionId: null });
@@ -53,7 +42,6 @@ export const useMainViewStore = create(
         set((state) => ({
           view: state.view === view ? "sessions" : view,
           artifactsSessionId: null,
-          focusedArtifactId: null,
         }));
       },
     }),
