@@ -40,6 +40,9 @@ export function createElectronHost(
           throw new Error(`Failed to open path: ${errorMessage}`);
         }
       },
+      async trashItem(targetPath) {
+        await shell.trashItem(targetPath);
+      },
       async openFolderInApp(targetPath, targetApp) {
         if (targetApp === "finder") {
           const errorMessage = await shell.openPath(targetPath);

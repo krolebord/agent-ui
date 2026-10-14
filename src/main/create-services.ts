@@ -302,8 +302,13 @@ export async function createServices(options: CreateServicesOptions) {
   persistenceService.registerAndHydrate(
     defineArtifactsPersistence(artifactsState),
   );
+  const visualPreviewsDir = path.join(userDataPath, "visual-previews");
+  const desktop = host.desktop;
   const artifactsService = new ArtifactsService(artifactsState, {
     visualsDir: path.join(userDataPath, "visuals"),
+    screenshotDir: visualPreviewsDir,
+    getProjectPaths: () => projectsState.state.map((project) => project.path),
+    trashFile: desktop ? (filePath) => desktop.trashItem(filePath) : undefined,
   });
 
   const agentBrowserState = defineAgentBrowserState();
@@ -313,7 +318,7 @@ export async function createServices(options: CreateServicesOptions) {
   void agentBrowserService.refresh();
   const htmlPreviewer = createHtmlPreviewer({
     runner: createAgentBrowserCli({ cwd: userDataPath }),
-    screenshotDir: path.join(userDataPath, "visual-previews"),
+    screenshotDir: visualPreviewsDir,
   });
 
   const projectTerminalsState = defineProjectTerminalsState();

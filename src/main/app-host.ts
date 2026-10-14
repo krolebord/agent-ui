@@ -13,6 +13,7 @@ export interface DesktopHost {
     targetApp: OpenInAppTarget,
   ): Promise<void>;
   selectDirectory(options: SelectDirectoryOptions): Promise<string | null>;
+  trashItem(targetPath: string): Promise<void>;
   openDevTools(): void;
 }
 

@@ -1,8 +1,9 @@
-import type { Artifact } from "@main/artifacts-service";
+import type { Artifact, ArtifactLocation } from "@main/artifacts-service";
 import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigger";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
+import { Checkbox } from "@renderer/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +15,11 @@ import {
 import { Input } from "@renderer/components/ui/input";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import {
+  canDeleteArtifactFile,
+  describeCleanupResult,
+  describeDeleteResult,
+} from "@renderer/lib/artifact-cleanup";
+import {
   formatTextPreview,
   getArtifactPreviewKind,
   getHtmlPreviewSandbox,
@@ -21,19 +27,26 @@ import {
   MAX_TEXT_PREVIEW_BYTES,
   readTextPreview,
 } from "@renderer/lib/artifact-preview";
+import { hasNativeDesktopShell } from "@renderer/lib/native-shell";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
+import {
+  getProjectDisplayName,
+  getProjectNameFromPath,
+} from "@renderer/services/terminal-session-selectors";
 import { readVisualContentHeight } from "@shared/visuals";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Archive,
   Copy,
   Download,
+  Eraser,
   Eye,
   File,
   FileImage,
   FileText,
   LayoutDashboard,
+  LoaderCircle,
   PackageOpen,
   Search,
   Trash2,
@@ -43,6 +56,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
+import { useConfirmDialogStore } from "./confirm-dialog";
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -98,11 +112,20 @@ export function ArtifactsPage() {
     sessionId ? (state.sessions[sessionId]?.title ?? null) : null,
   );
   const [query, setQuery] = useState("");
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const refreshAvailability = useMutation(
     orpc.artifacts.refreshAvailability.mutationOptions(),
   );
   const { mutate: refresh } = refreshAvailability;
   const refreshedIds = useRef<Set<string>>(new Set());
+  const allIds = useMemo(
+    () => Object.keys(artifactsById).sort(),
+    [artifactsById],
+  );
+  const locations = useQuery(
+    orpc.artifacts.inspect.queryOptions({ input: { ids: allIds } }),
+  ).data;
 
   useEffect(() => {
     const ids = Object.keys(artifactsById);
@@ -110,6 +133,16 @@ export function ArtifactsPage() {
     refreshedIds.current = new Set(ids);
     if (hasNewArtifact) refresh(undefined);
   }, [artifactsById, refresh]);
+
+  const cleanup = useMutation({
+    mutationFn: () => orpc.artifacts.cleanup.call(),
+    onSuccess: (result) => {
+      toast.success(describeCleanupResult(result));
+      setSelectedIds(new Set());
+      setBulkMode(true);
+    },
+    onError: (error) => toast.error(error.message),
+  });
 
   const artifacts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -121,8 +154,19 @@ export function ArtifactsPage() {
           (value) => value?.toLowerCase().includes(normalizedQuery),
         );
       })
-      .sort((left, right) => right.createdAt - left.createdAt);
-  }, [artifactsById, query, sessionId]);
+      .sort((left, right) =>
+        bulkMode ? right.size - left.size : right.createdAt - left.createdAt,
+      );
+  }, [artifactsById, query, sessionId, bulkMode]);
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -137,6 +181,39 @@ export function ArtifactsPage() {
               ).length
             : Object.keys(artifactsById).length}
         </Badge>
+        <div className="ml-auto">
+          {bulkMode ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7"
+              onClick={() => {
+                setBulkMode(false);
+                setSelectedIds(new Set());
+              }}
+            >
+              Done
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5"
+              disabled={cleanup.isPending || allIds.length === 0}
+              title="Remove artifacts whose files are gone and old preview screenshots, then pick what else to delete"
+              onClick={() => cleanup.mutate()}
+            >
+              {cleanup.isPending ? (
+                <LoaderCircle className="size-3.5 animate-spin" />
+              ) : (
+                <Eraser className="size-3.5" />
+              )}
+              Clean up
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -144,11 +221,14 @@ export function ArtifactsPage() {
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <h1 className="text-lg font-semibold tracking-tight">
-                Files published by your agents
+                {bulkMode
+                  ? "Clean up artifacts"
+                  : "Files published by your agents"}
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Artifacts stay listed across sessions. Downloads use the file
-                currently at the published path.
+                {bulkMode
+                  ? "Largest first. Remove artifacts from the list, or delete their files too. Files tracked by git are never deleted."
+                  : "Artifacts stay listed across sessions. Downloads use the file currently at the published path."}
               </p>
             </div>
             <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
@@ -203,17 +283,270 @@ export function ArtifactsPage() {
                       : "When an agent publishes a file, it will appear here and you’ll get a notification."}
                 </p>
               </div>
+            ) : bulkMode ? (
+              <ul className="divide-y divide-border/40">
+                {artifacts.map((artifact) => (
+                  <BulkArtifactRow
+                    key={artifact.id}
+                    artifact={artifact}
+                    location={locations?.[artifact.id]}
+                    selected={selectedIds.has(artifact.id)}
+                    onToggle={() => toggleSelected(artifact.id)}
+                  />
+                ))}
+              </ul>
             ) : (
               <ul className="divide-y divide-border/40">
                 {artifacts.map((artifact) => (
-                  <ArtifactRow key={artifact.id} artifact={artifact} />
+                  <ArtifactRow
+                    key={artifact.id}
+                    artifact={artifact}
+                    location={locations?.[artifact.id]}
+                  />
                 ))}
               </ul>
             )}
           </div>
         </div>
       </div>
+      {bulkMode ? (
+        <CleanupBar
+          artifacts={artifacts}
+          locations={locations}
+          selectedIds={selectedIds}
+          onSelect={setSelectedIds}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function CleanupBar({
+  artifacts,
+  locations,
+  selectedIds,
+  onSelect,
+}: {
+  artifacts: Artifact[];
+  locations: Record<string, ArtifactLocation> | undefined;
+  selectedIds: Set<string>;
+  onSelect: (ids: Set<string>) => void;
+}) {
+  const confirm = useConfirmDialogStore((state) => state.confirm);
+  const selected = artifacts.filter((artifact) => selectedIds.has(artifact.id));
+  const deletable = selected.filter((artifact) =>
+    canDeleteArtifactFile(locations?.[artifact.id]),
+  );
+  const selectedBytes = selected.reduce((sum, a) => sum + a.size, 0);
+  const deletableBytes = deletable.reduce((sum, a) => sum + a.size, 0);
+  const outsideProjects = artifacts.filter(
+    (artifact) => locations?.[artifact.id]?.kind !== "project",
+  );
+  const allSelected =
+    artifacts.length > 0 && selected.length === artifacts.length;
+  const dropFromSelection = (ids: string[]) => {
+    const next = new Set(selectedIds);
+    for (const id of ids) next.delete(id);
+    onSelect(next);
+  };
+  const removeMany = useMutation({
+    mutationFn: (ids: string[]) => orpc.artifacts.removeMany.call({ ids }),
+    onSuccess: (_data, ids) => {
+      dropFromSelection(ids);
+      toast.success(
+        `Removed ${ids.length} artifact${ids.length === 1 ? "" : "s"}`,
+      );
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const deleteFiles = useMutation({
+    mutationFn: (ids: string[]) => orpc.artifacts.deleteFiles.call({ ids }),
+    onSuccess: (result, ids) => {
+      dropFromSelection(ids);
+      toast.success(describeDeleteResult(result));
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const busy = removeMany.isPending || deleteFiles.isPending;
+  const skippedCount = selected.length - deletable.length;
+
+  return (
+    <div className="shrink-0 border-t border-border/70 bg-background/95 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {selected.length} selected · {formatBytes(selectedBytes)}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={() =>
+            onSelect(
+              allSelected ? new Set() : new Set(artifacts.map((a) => a.id)),
+            )
+          }
+        >
+          {allSelected ? "Clear selection" : "Select all"}
+        </Button>
+        {outsideProjects.length ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => onSelect(new Set(outsideProjects.map((a) => a.id)))}
+          >
+            Select outside projects
+          </Button>
+        ) : null}
+        <div className="ml-auto flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7"
+            disabled={busy || selected.length === 0}
+            title="Remove from the list and keep files on disk. Visuals live in app storage, so their files go too."
+            onClick={() => removeMany.mutate(selected.map((a) => a.id))}
+          >
+            Remove from list
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            className="h-7"
+            disabled={busy || deletable.length === 0}
+            onClick={() =>
+              confirm({
+                title: `Delete ${deletable.length} file${deletable.length === 1 ? "" : "s"}?`,
+                description: [
+                  `${formatBytes(deletableBytes)} will be ${hasNativeDesktopShell ? "moved to the Trash" : "permanently deleted"}, and the artifacts removed from the list.`,
+                  skippedCount
+                    ? `${skippedCount} selected file${skippedCount === 1 ? " is" : "s are"} tracked by git and will be kept.`
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" "),
+                confirmLabel: "Delete files",
+                onConfirm: async () => {
+                  await deleteFiles.mutateAsync(deletable.map((a) => a.id));
+                },
+              })
+            }
+          >
+            Delete files{deletable.length ? ` (${deletable.length})` : ""}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LocationBadges({
+  location,
+}: {
+  location: ArtifactLocation | undefined;
+}) {
+  const projectName = useAppState((state) => {
+    if (location?.kind !== "project") return null;
+    const project = state.projects.find(
+      (candidate) => candidate.path === location.projectPath,
+    );
+    return project
+      ? getProjectDisplayName(project)
+      : getProjectNameFromPath(location.projectPath);
+  });
+  if (!location || location.kind === "app") return null;
+  return (
+    <>
+      <Badge
+        variant="outline"
+        className="max-w-40 shrink-0 font-normal text-muted-foreground"
+        title={
+          location.kind === "project"
+            ? location.projectPath
+            : "Not inside any project"
+        }
+      >
+        <span className="truncate">
+          {location.kind === "project" ? projectName : "Outside projects"}
+        </span>
+      </Badge>
+      {location.kind === "project" && location.tracked ? (
+        <Badge
+          variant="outline"
+          className="shrink-0 font-normal text-muted-foreground"
+          title="Tracked by git, so its file can't be deleted from here"
+        >
+          Tracked
+        </Badge>
+      ) : null}
+    </>
+  );
+}
+
+function BulkArtifactRow({
+  artifact,
+  location,
+  selected,
+  onToggle,
+}: {
+  artifact: Artifact;
+  location: ArtifactLocation | undefined;
+  selected: boolean;
+  onToggle: () => void;
+}) {
+  const checkboxId = `artifact-select-${artifact.id}`;
+  return (
+    <li
+      className={cn(
+        "flex items-center gap-3 px-3 py-2 transition-colors hover:bg-white/[0.025] md:px-4",
+        selected && "bg-primary/5",
+      )}
+    >
+      <Checkbox id={checkboxId} checked={selected} onCheckedChange={onToggle} />
+      <label
+        htmlFor={checkboxId}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+      >
+        <ArtifactIcon
+          artifact={artifact}
+          className="size-4 shrink-0 text-muted-foreground"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span
+              className="truncate text-sm font-medium"
+              title={artifact.name}
+            >
+              {artifact.name}
+            </span>
+            {artifact.kind === "visual" ? (
+              <Badge variant="secondary" className="shrink-0">
+                Visual
+              </Badge>
+            ) : null}
+            {!artifact.available ? (
+              <Badge variant="destructive" className="shrink-0">
+                Missing
+              </Badge>
+            ) : null}
+            <LocationBadges location={location} />
+          </span>
+          <span
+            className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground/80"
+            title={artifact.path}
+          >
+            {artifact.path}
+          </span>
+        </span>
+        <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+          {formatBytes(artifact.size)}
+        </span>
+      </label>
+    </li>
   );
 }
 
@@ -240,7 +573,13 @@ export async function downloadArtifact(artifact: Artifact) {
   }
 }
 
-function ArtifactRow({ artifact }: { artifact: Artifact }) {
+function ArtifactRow({
+  artifact,
+  location,
+}: {
+  artifact: Artifact;
+  location: ArtifactLocation | undefined;
+}) {
   const [downloading, setDownloading] = useState(false);
   const previewKind = getArtifactPreviewKind(artifact.mimeType);
   const openPreview = useArtifactPreviewDialogStore((state) => state.open);
@@ -283,6 +622,7 @@ function ArtifactRow({ artifact }: { artifact: Artifact }) {
                 Missing
               </Badge>
             ) : null}
+            <LocationBadges location={location} />
           </div>
           {artifact.description ? (
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">

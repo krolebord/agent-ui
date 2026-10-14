@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { defineServiceState } from "@shared/service-state";
 import { HTML_RENDER_MAX_TITLE_LENGTH } from "@shared/visuals";
+import simpleGit from "simple-git";
 import { z } from "zod";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
@@ -56,12 +57,51 @@ function inferMimeType(filePath: string): string | undefined {
   return mimeTypesByExtension[path.extname(filePath).toLowerCase()];
 }
 
+export type ArtifactLocation =
+  | { kind: "app" }
+  | { kind: "project"; projectPath: string; tracked: boolean }
+  | { kind: "elsewhere" };
+
+interface ArtifactsServiceOptions {
+  visualsDir: string;
+  screenshotDir: string;
+  getProjectPaths?: () => string[];
+  listTrackedFiles?: (
+    projectPath: string,
+    relativePaths: string[],
+  ) => Promise<Set<string>>;
+  trashFile?: (filePath: string) => Promise<void>;
+  now?: () => number;
+}
+
+const SCREENSHOT_MAX_AGE_MS = 60 * 60_000;
+
+function isInside(dir: string, filePath: string): boolean {
+  const relative = path.relative(dir, path.resolve(filePath));
+  return (
+    relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
+  );
+}
+
+async function listTrackedFilesWithGit(
+  projectPath: string,
+  relativePaths: string[],
+): Promise<Set<string>> {
+  const output = await simpleGit(projectPath).raw([
+    "ls-files",
+    "-z",
+    "--",
+    ...relativePaths,
+  ]);
+  return new Set(output.split("\0").filter(Boolean));
+}
+
 export class ArtifactsService {
   private readonly visualsDir: string;
 
   constructor(
     readonly state: ArtifactsState,
-    options: { visualsDir: string },
+    private readonly options: ArtifactsServiceOptions,
   ) {
     this.visualsDir = path.resolve(options.visualsDir);
   }
@@ -138,18 +178,133 @@ export class ArtifactsService {
     this.state.updateState((artifacts) => {
       delete artifacts[id];
     });
-    if (artifact?.kind === "visual" && this.isInVisualsDir(artifact.path)) {
+    if (
+      artifact?.kind === "visual" &&
+      isInside(this.visualsDir, artifact.path)
+    ) {
       await rm(artifact.path, { force: true }).catch(() => {});
     }
   }
 
-  private isInVisualsDir(filePath: string): boolean {
-    const relative = path.relative(this.visualsDir, path.resolve(filePath));
-    return (
-      relative !== "" &&
-      !relative.startsWith("..") &&
-      !path.isAbsolute(relative)
+  async removeMany(ids: string[]): Promise<void> {
+    for (const id of ids) await this.remove(id);
+  }
+
+  async inspect(ids: string[]): Promise<Record<string, ArtifactLocation>> {
+    const projectPaths = (this.options.getProjectPaths?.() ?? [])
+      .map((projectPath) => path.resolve(projectPath))
+      .sort((a, b) => b.length - a.length);
+    const listTrackedFiles =
+      this.options.listTrackedFiles ?? listTrackedFilesWithGit;
+    const locations: Record<string, ArtifactLocation> = {};
+    const filesByProject = new Map<string, Map<string, string>>();
+
+    for (const id of ids) {
+      const artifact = this.state.state[id];
+      if (!artifact) continue;
+      if (
+        artifact.kind === "visual" &&
+        isInside(this.visualsDir, artifact.path)
+      ) {
+        locations[id] = { kind: "app" };
+        continue;
+      }
+      const projectPath = projectPaths.find((candidate) =>
+        isInside(candidate, artifact.path),
+      );
+      if (!projectPath) {
+        locations[id] = { kind: "elsewhere" };
+        continue;
+      }
+      locations[id] = { kind: "project", projectPath, tracked: false };
+      const files = filesByProject.get(projectPath) ?? new Map();
+      files.set(id, path.relative(projectPath, path.resolve(artifact.path)));
+      filesByProject.set(projectPath, files);
+    }
+
+    await Promise.all(
+      [...filesByProject].map(async ([projectPath, files]) => {
+        const tracked = await listTrackedFiles(projectPath, [
+          ...new Set(files.values()),
+        ]).catch(() => new Set<string>());
+        for (const [id, relativePath] of files) {
+          const location = locations[id];
+          if (location?.kind === "project")
+            location.tracked = tracked.has(relativePath);
+        }
+      }),
     );
+    return locations;
+  }
+
+  async cleanup(): Promise<{
+    removedArtifacts: number;
+    removedScreenshots: number;
+  }> {
+    await this.refreshAvailability();
+    const missing = Object.values(this.state.state)
+      .filter((artifact) => !artifact.available)
+      .map((artifact) => artifact.id);
+    await this.removeMany(missing);
+    return {
+      removedArtifacts: missing.length,
+      removedScreenshots: await this.pruneScreenshots(),
+    };
+  }
+
+  async deleteFiles(
+    ids: string[],
+  ): Promise<{ deleted: number; skipped: number }> {
+    const locations = await this.inspect(ids);
+    let deleted = 0;
+    let skipped = 0;
+    for (const id of ids) {
+      const artifact = this.state.state[id];
+      const location = locations[id];
+      if (!artifact || !location) continue;
+      if (location.kind === "app") {
+        await this.remove(id);
+        deleted += 1;
+        continue;
+      }
+      if (location.kind === "project" && location.tracked) {
+        skipped += 1;
+        continue;
+      }
+      const stats = await lstat(artifact.path).catch(() => null);
+      if (stats && !stats.isFile()) {
+        skipped += 1;
+        continue;
+      }
+      if (stats) {
+        await (this.options.trashFile ?? ((filePath) => rm(filePath)))(
+          artifact.path,
+        );
+      }
+      this.state.updateState((artifacts) => {
+        delete artifacts[id];
+        for (const other of Object.values(artifacts)) {
+          if (other.path === artifact.path) other.available = false;
+        }
+      });
+      deleted += 1;
+    }
+    return { deleted, skipped };
+  }
+
+  private async pruneScreenshots(): Promise<number> {
+    const dir = this.options.screenshotDir;
+    const cutoff = (this.options.now ?? Date.now)() - SCREENSHOT_MAX_AGE_MS;
+    const names = await readdir(dir).catch(() => []);
+    let removed = 0;
+    for (const name of names) {
+      const filePath = path.join(dir, name);
+      const stats = await lstat(filePath).catch(() => null);
+      if (!stats?.isFile() || stats.mtimeMs > cutoff) continue;
+      await rm(filePath, { force: true });
+      removed += 1;
+    }
+    return removed;
   }
 
   async refreshAvailability(): Promise<void> {
@@ -183,6 +338,24 @@ export const artifactsRouter = {
     .handler(async ({ input, context }) => {
       await context.artifactsService.remove(input.id);
     }),
+  removeMany: procedure
+    .input(z.object({ ids: z.array(z.string()) }))
+    .handler(async ({ input, context }) => {
+      await context.artifactsService.removeMany(input.ids);
+    }),
+  inspect: procedure
+    .input(z.object({ ids: z.array(z.string()) }))
+    .handler(({ input, context }) =>
+      context.artifactsService.inspect(input.ids),
+    ),
+  cleanup: procedure.handler(({ context }) =>
+    context.artifactsService.cleanup(),
+  ),
+  deleteFiles: procedure
+    .input(z.object({ ids: z.array(z.string()) }))
+    .handler(({ input, context }) =>
+      context.artifactsService.deleteFiles(input.ids),
+    ),
   getDownloadUrl: procedure
     .input(z.object({ id: z.string() }))
     .handler(({ input, context }) => {
