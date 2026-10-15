@@ -3,7 +3,6 @@ import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigge
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
-import { Checkbox } from "@renderer/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -15,9 +14,12 @@ import {
 import { Input } from "@renderer/components/ui/input";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import {
+  type CleanupMark,
   canDeleteArtifactFile,
+  describeApplyResult,
+  describeCleanupAction,
   describeCleanupResult,
-  describeDeleteResult,
+  nextCleanupMark,
 } from "@renderer/lib/artifact-cleanup";
 import {
   formatTextPreview,
@@ -47,16 +49,25 @@ import {
   FileText,
   LayoutDashboard,
   LoaderCircle,
+  Minus,
   PackageOpen,
   Search,
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import { useConfirmDialogStore } from "./confirm-dialog";
+import { ProjectFavicon } from "./project-favicon";
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -113,7 +124,7 @@ export function ArtifactsPage() {
   );
   const [query, setQuery] = useState("");
   const [bulkMode, setBulkMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [marks, setMarks] = useState<Map<string, CleanupMark>>(new Map());
   const refreshAvailability = useMutation(
     orpc.artifacts.refreshAvailability.mutationOptions(),
   );
@@ -137,8 +148,9 @@ export function ArtifactsPage() {
   const cleanup = useMutation({
     mutationFn: () => orpc.artifacts.cleanup.call(),
     onSuccess: (result) => {
-      toast.success(describeCleanupResult(result));
-      setSelectedIds(new Set());
+      const message = describeCleanupResult(result);
+      if (message) toast.success(message);
+      setMarks(new Map());
       setBulkMode(true);
     },
     onError: (error) => toast.error(error.message),
@@ -159,11 +171,13 @@ export function ArtifactsPage() {
       );
   }, [artifactsById, query, sessionId, bulkMode]);
 
-  const toggleSelected = (id: string) => {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+  const cycleMark = (id: string, keepMarked: boolean) => {
+    setMarks((current) => {
+      const mark = nextCleanupMark(current.get(id), locations?.[id]);
+      if (!mark && keepMarked) return current;
+      const next = new Map(current);
+      if (mark) next.set(id, mark);
+      else next.delete(id);
       return next;
     });
   };
@@ -190,7 +204,7 @@ export function ArtifactsPage() {
               className="h-7"
               onClick={() => {
                 setBulkMode(false);
-                setSelectedIds(new Set());
+                setMarks(new Map());
               }}
             >
               Done
@@ -227,7 +241,7 @@ export function ArtifactsPage() {
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
                 {bulkMode
-                  ? "Largest first. Remove artifacts from the list, or delete their files too. Files tracked by git are never deleted."
+                  ? "Largest first. Click a row once to remove it from the list, again to delete its file too. Files tracked by git are never deleted."
                   : "Artifacts stay listed across sessions. Downloads use the file currently at the published path."}
               </p>
             </div>
@@ -290,8 +304,8 @@ export function ArtifactsPage() {
                     key={artifact.id}
                     artifact={artifact}
                     location={locations?.[artifact.id]}
-                    selected={selectedIds.has(artifact.id)}
-                    onToggle={() => toggleSelected(artifact.id)}
+                    mark={marks.get(artifact.id)}
+                    onCycle={(keepMarked) => cycleMark(artifact.id, keepMarked)}
                   />
                 ))}
               </ul>
@@ -313,8 +327,8 @@ export function ArtifactsPage() {
         <CleanupBar
           artifacts={artifacts}
           locations={locations}
-          selectedIds={selectedIds}
-          onSelect={setSelectedIds}
+          marks={marks}
+          onMark={setMarks}
         />
       ) : null}
     </div>
@@ -324,57 +338,58 @@ export function ArtifactsPage() {
 function CleanupBar({
   artifacts,
   locations,
-  selectedIds,
-  onSelect,
+  marks,
+  onMark,
 }: {
   artifacts: Artifact[];
   locations: Record<string, ArtifactLocation> | undefined;
-  selectedIds: Set<string>;
-  onSelect: (ids: Set<string>) => void;
+  marks: Map<string, CleanupMark>;
+  onMark: Dispatch<SetStateAction<Map<string, CleanupMark>>>;
 }) {
   const confirm = useConfirmDialogStore((state) => state.confirm);
-  const selected = artifacts.filter((artifact) => selectedIds.has(artifact.id));
-  const deletable = selected.filter((artifact) =>
-    canDeleteArtifactFile(locations?.[artifact.id]),
+  const marked = artifacts.filter((artifact) => marks.has(artifact.id));
+  const toDelete = marked.filter(
+    (artifact) =>
+      marks.get(artifact.id) === "delete" &&
+      canDeleteArtifactFile(locations?.[artifact.id]),
   );
-  const selectedBytes = selected.reduce((sum, a) => sum + a.size, 0);
-  const deletableBytes = deletable.reduce((sum, a) => sum + a.size, 0);
+  const toRemove = marked.filter((artifact) => !toDelete.includes(artifact));
+  const deleteBytes = toDelete.reduce((sum, a) => sum + a.size, 0);
   const outsideProjects = artifacts.filter(
-    (artifact) => locations?.[artifact.id]?.kind !== "project",
+    (artifact) => locations?.[artifact.id]?.kind === "elsewhere",
   );
-  const allSelected =
-    artifacts.length > 0 && selected.length === artifacts.length;
-  const dropFromSelection = (ids: string[]) => {
-    const next = new Set(selectedIds);
-    for (const id of ids) next.delete(id);
-    onSelect(next);
-  };
-  const removeMany = useMutation({
-    mutationFn: (ids: string[]) => orpc.artifacts.removeMany.call({ ids }),
-    onSuccess: (_data, ids) => {
-      dropFromSelection(ids);
-      toast.success(
-        `Removed ${ids.length} artifact${ids.length === 1 ? "" : "s"}`,
-      );
+  const allMarked = artifacts.length > 0 && marked.length === artifacts.length;
+  const apply = useMutation({
+    mutationFn: async (ids: { remove: string[]; delete: string[] }) => {
+      if (ids.remove.length) {
+        await orpc.artifacts.removeMany.call({ ids: ids.remove });
+      }
+      const result = ids.delete.length
+        ? await orpc.artifacts.deleteFiles.call({ ids: ids.delete })
+        : { deleted: 0, skipped: 0 };
+      return { removed: ids.remove.length, ...result };
     },
-    onError: (error) => toast.error(error.message),
-  });
-  const deleteFiles = useMutation({
-    mutationFn: (ids: string[]) => orpc.artifacts.deleteFiles.call({ ids }),
     onSuccess: (result, ids) => {
-      dropFromSelection(ids);
-      toast.success(describeDeleteResult(result));
+      onMark((current) => {
+        const next = new Map(current);
+        for (const id of [...ids.remove, ...ids.delete]) next.delete(id);
+        return next;
+      });
+      toast.success(describeApplyResult(result));
     },
     onError: (error) => toast.error(error.message),
   });
-  const busy = removeMany.isPending || deleteFiles.isPending;
-  const skippedCount = selected.length - deletable.length;
+  const ids = {
+    remove: toRemove.map((a) => a.id),
+    delete: toDelete.map((a) => a.id),
+  };
 
   return (
     <div className="shrink-0 border-t border-border/70 bg-background/95 px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
       <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-2">
         <span className="text-xs text-muted-foreground tabular-nums">
-          {selected.length} selected · {formatBytes(selectedBytes)}
+          {marked.length} marked
+          {toDelete.length ? ` · ${formatBytes(deleteBytes)} to delete` : ""}
         </span>
         <Button
           type="button"
@@ -382,12 +397,21 @@ function CleanupBar({
           size="sm"
           className="h-7 text-xs"
           onClick={() =>
-            onSelect(
-              allSelected ? new Set() : new Set(artifacts.map((a) => a.id)),
+            onMark((current) =>
+              allMarked
+                ? new Map()
+                : new Map(
+                    artifacts.flatMap((a) => {
+                      const mark =
+                        current.get(a.id) ??
+                        nextCleanupMark(undefined, locations?.[a.id]);
+                      return mark ? [[a.id, mark] as const] : [];
+                    }),
+                  ),
             )
           }
         >
-          {allSelected ? "Clear selection" : "Select all"}
+          {allMarked ? "Clear selection" : "Select all"}
         </Button>
         {outsideProjects.length ? (
           <Button
@@ -395,50 +419,58 @@ function CleanupBar({
             variant="ghost"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => onSelect(new Set(outsideProjects.map((a) => a.id)))}
+            title="Mark files outside any project for deletion"
+            onClick={() =>
+              onMark((current) => {
+                const next = new Map(current);
+                for (const a of outsideProjects) next.set(a.id, "delete");
+                return next;
+              })
+            }
           >
             Select outside projects
           </Button>
         ) : null}
-        <div className="ml-auto flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7"
-            disabled={busy || selected.length === 0}
-            title="Remove from the list and keep files on disk. Visuals live in app storage, so their files go too."
-            onClick={() => removeMany.mutate(selected.map((a) => a.id))}
-          >
-            Remove from list
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            className="h-7"
-            disabled={busy || deletable.length === 0}
-            onClick={() =>
-              confirm({
-                title: `Delete ${deletable.length} file${deletable.length === 1 ? "" : "s"}?`,
-                description: [
-                  `${formatBytes(deletableBytes)} will be ${hasNativeDesktopShell ? "moved to the Trash" : "permanently deleted"}, and the artifacts removed from the list.`,
-                  skippedCount
-                    ? `${skippedCount} selected file${skippedCount === 1 ? " is" : "s are"} tracked by git and will be kept.`
-                    : "",
-                ]
-                  .filter(Boolean)
-                  .join(" "),
-                confirmLabel: "Delete files",
-                onConfirm: async () => {
-                  await deleteFiles.mutateAsync(deletable.map((a) => a.id));
-                },
-              })
+        <Button
+          type="button"
+          variant={toDelete.length ? "destructive" : "outline"}
+          size="sm"
+          className="ml-auto h-7"
+          disabled={apply.isPending || marked.length === 0}
+          onClick={() => {
+            if (!toDelete.length) {
+              apply.mutate(ids);
+              return;
             }
-          >
-            Delete files{deletable.length ? ` (${deletable.length})` : ""}
-          </Button>
-        </div>
+            confirm({
+              title: `Delete ${toDelete.length} file${toDelete.length === 1 ? "" : "s"}?`,
+              description: [
+                `${formatBytes(deleteBytes)} will be ${hasNativeDesktopShell ? "moved to the Trash" : "permanently deleted"}, and the artifacts removed from the list.`,
+                hasNativeDesktopShell &&
+                toDelete.some((artifact) => artifact.kind === "visual")
+                  ? "Visuals are deleted permanently."
+                  : "",
+                toRemove.length
+                  ? `${toRemove.length} other artifact${toRemove.length === 1 ? "" : "s"} will only be removed from the list.`
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" "),
+              confirmLabel: "Delete files",
+              onConfirm: async () => {
+                await apply.mutateAsync(ids);
+              },
+            });
+          }}
+        >
+          {apply.isPending ? (
+            <LoaderCircle className="size-3.5 animate-spin" />
+          ) : null}
+          {describeCleanupAction({
+            remove: toRemove.length,
+            delete: toDelete.length,
+          })}
+        </Button>
       </div>
     </div>
   );
@@ -461,19 +493,27 @@ function LocationBadges({
   if (!location || location.kind === "app") return null;
   return (
     <>
-      <Badge
-        variant="outline"
-        className="max-w-40 shrink-0 font-normal text-muted-foreground"
-        title={
-          location.kind === "project"
-            ? location.projectPath
-            : "Not inside any project"
-        }
-      >
-        <span className="truncate">
-          {location.kind === "project" ? projectName : "Outside projects"}
-        </span>
-      </Badge>
+      {location.kind === "project" ? (
+        <Badge
+          variant="outline"
+          className="max-w-40 shrink-0 gap-1 border-sky-400/30 bg-sky-400/10 pl-1.5 font-normal text-sky-200"
+          title={location.projectPath}
+        >
+          <ProjectFavicon
+            projectPath={location.projectPath}
+            className="size-3"
+          />
+          <span className="truncate">{projectName}</span>
+        </Badge>
+      ) : (
+        <Badge
+          variant="outline"
+          className="shrink-0 border-amber-400/30 bg-amber-400/10 font-normal text-amber-200"
+          title="Not inside any project"
+        >
+          Outside projects
+        </Badge>
+      )}
       {location.kind === "project" && location.tracked ? (
         <Badge
           variant="outline"
@@ -490,27 +530,46 @@ function LocationBadges({
 function BulkArtifactRow({
   artifact,
   location,
-  selected,
-  onToggle,
+  mark,
+  onCycle,
 }: {
   artifact: Artifact;
   location: ArtifactLocation | undefined;
-  selected: boolean;
-  onToggle: () => void;
+  mark: CleanupMark | undefined;
+  onCycle: (keepMarked: boolean) => void;
 }) {
-  const checkboxId = `artifact-select-${artifact.id}`;
+  const next = nextCleanupMark(mark, location);
   return (
-    <li
-      className={cn(
-        "flex items-center gap-3 px-3 py-2 transition-colors hover:bg-white/[0.025] md:px-4",
-        selected && "bg-primary/5",
-      )}
-    >
-      <Checkbox id={checkboxId} checked={selected} onCheckedChange={onToggle} />
-      <label
-        htmlFor={checkboxId}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+    <li>
+      <button
+        type="button"
+        className={cn(
+          "flex w-full items-center gap-3 px-3 py-2 text-left transition-colors md:px-4",
+          !mark && "hover:bg-white/[0.025]",
+          mark === "remove" && "bg-destructive/[0.07] hover:bg-destructive/10",
+          mark === "delete" && "bg-destructive/20 hover:bg-destructive/25",
+        )}
+        title={
+          next === "remove"
+            ? "Click to remove from the list and keep the file"
+            : next === "delete"
+              ? "Click to delete the file"
+              : "Click to unmark"
+        }
+        onClick={(event) => onCycle(event.detail > 1)}
       >
+        <span
+          className={cn(
+            "flex size-4 shrink-0 items-center justify-center rounded-sm border",
+            !mark && "border-input",
+            mark === "remove" && "border-destructive/70 text-destructive",
+            mark === "delete" &&
+              "border-destructive bg-destructive text-destructive-foreground",
+          )}
+        >
+          {mark === "remove" ? <Minus className="size-3" /> : null}
+          {mark === "delete" ? <Trash2 className="size-2.5" /> : null}
+        </span>
         <ArtifactIcon
           artifact={artifact}
           className="size-4 shrink-0 text-muted-foreground"
@@ -542,10 +601,20 @@ function BulkArtifactRow({
             {artifact.path}
           </span>
         </span>
+        {mark ? (
+          <span
+            className={cn(
+              "shrink-0 text-xs font-medium",
+              mark === "delete" ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            {mark === "delete" ? "Delete file" : "Remove"}
+          </span>
+        ) : null}
         <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
           {formatBytes(artifact.size)}
         </span>
-      </label>
+      </button>
     </li>
   );
 }
