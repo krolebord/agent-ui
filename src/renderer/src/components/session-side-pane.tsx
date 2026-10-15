@@ -49,7 +49,7 @@ export const useSessionSidePaneStore = create(
     combine(
       {
         open: true,
-        size: "22" as number | string,
+        size: "20" as number | string,
       },
       (set) => ({
         toggle: () => {
