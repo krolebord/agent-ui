@@ -7,7 +7,6 @@ import { ProjectTerminalPane } from "@renderer/components/project-terminal-pane"
 import { useScheduledPromptComposerStore } from "@renderer/components/scheduled-prompt-composer";
 import { SessionHeader } from "@renderer/components/session-header";
 import {
-  SESSION_SIDE_PANE_ID,
   SessionSidePane,
   useSessionSidePaneStore,
 } from "@renderer/components/session-side-pane";
@@ -25,6 +24,10 @@ import {
 import { useActiveSessionId } from "@renderer/hooks/use-active-session-id";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
+import {
+  savePanelLayout,
+  usePanelSize,
+} from "@renderer/hooks/use-panel-layout";
 import { cn } from "@renderer/lib/utils";
 import {
   AlertCircle,
@@ -232,8 +235,7 @@ function TerminalPage({
 }) {
   const isMobile = useIsMobile();
   const sidePaneOpen = useSessionSidePaneStore((state) => state.open);
-  const sidePaneSize = useSessionSidePaneStore((state) => state.size);
-  const setSidePaneSize = useSessionSidePaneStore((state) => state.setSize);
+  const sidePaneSize = usePanelSize("sessionSidePane");
   const errorMessage = session.errorMessage || session.warningMessage || "";
   const terminalAttachmentState =
     session.status === "stopped" || session.status === "error"
@@ -259,13 +261,9 @@ function TerminalPage({
             <ResizablePanelGroup
               orientation="horizontal"
               className="h-full min-h-0"
-              onLayoutChanged={(layout) => {
-                if (SESSION_SIDE_PANE_ID in layout) {
-                  setSidePaneSize(`${layout[SESSION_SIDE_PANE_ID]}`);
-                }
-              }}
+              onLayoutChanged={savePanelLayout}
             >
-              <ResizablePanel minSize="40">
+              <ResizablePanel minSize="40%">
                 <LiveTerminalSurface
                   terminalId={session.sessionId}
                   readOnly={readOnly}
@@ -276,10 +274,10 @@ function TerminalPage({
                 <>
                   <ResizableHandle />
                   <ResizablePanel
-                    id={SESSION_SIDE_PANE_ID}
+                    id="sessionSidePane"
                     defaultSize={sidePaneSize}
-                    minSize={200}
-                    maxSize="45"
+                    minSize="15%"
+                    maxSize="45%"
                   >
                     <SessionSidePane session={session} />
                   </ResizablePanel>
@@ -309,6 +307,7 @@ function SessionPageLayout({
   cwd: string | null;
 }) {
   const isMobile = useIsMobile();
+  const bottomPaneSize = usePanelSize("projectBottomPane");
   const [activeTab, setActiveTab] = useState<MobileTab>("session");
   const hasSidePane = sidePane !== undefined;
   const composerNonce = useScheduledPromptComposerStore(
@@ -382,12 +381,18 @@ function SessionPageLayout({
   }
 
   return (
-    <ResizablePanelGroup orientation="vertical" className="min-h-0 flex-1">
-      <ResizablePanel defaultSize={70} minSize={35}>
-        {topPane}
-      </ResizablePanel>
+    <ResizablePanelGroup
+      orientation="vertical"
+      className="min-h-0 flex-1"
+      onLayoutChanged={savePanelLayout}
+    >
+      <ResizablePanel minSize="35%">{topPane}</ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel defaultSize={30} minSize={15}>
+      <ResizablePanel
+        id="projectBottomPane"
+        defaultSize={bottomPaneSize}
+        minSize="15%"
+      >
         <ProjectBottomPane cwd={cwd} />
       </ResizablePanel>
     </ResizablePanelGroup>

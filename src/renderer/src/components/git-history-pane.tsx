@@ -15,6 +15,10 @@ import {
 import { useCopyToClipboard } from "@renderer/hooks/use-copy-to-clipboard";
 import { useGitPush } from "@renderer/hooks/use-git-push";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
+import {
+  savePanelLayout,
+  usePanelSize,
+} from "@renderer/hooks/use-panel-layout";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import type { GitHistoryCommit } from "@shared/claude-types";
@@ -129,8 +133,6 @@ function createGitHistoryStore(projectPath: string) {
         projectPath,
         selectedCommitHash: null as string | null,
         selectedFilePath: null as string | null,
-        commitsSize: 260 as number | string,
-        filesSize: 220 as number | string,
       },
       (set) => ({
         selectCommit: (hash: string) => {
@@ -138,12 +140,6 @@ function createGitHistoryStore(projectPath: string) {
         },
         selectFile: (filePath: string) => {
           set({ selectedFilePath: filePath });
-        },
-        setCommitsSize: (size: number | string) => {
-          set({ commitsSize: size });
-        },
-        setFilesSize: (size: number | string) => {
-          set({ filesSize: size });
         },
       }),
     ),
@@ -537,10 +533,8 @@ function ProjectGitHistoryPaneContent() {
     (state) => state.selectedFilePath,
   );
   const selectFile = useGitHistoryStore((state) => state.selectFile);
-  const commitsSize = useGitHistoryStore((state) => state.commitsSize);
-  const filesSize = useGitHistoryStore((state) => state.filesSize);
-  const setCommitsSize = useGitHistoryStore((state) => state.setCommitsSize);
-  const setFilesSize = useGitHistoryStore((state) => state.setFilesSize);
+  const commitsSize = usePanelSize("historyCommits");
+  const filesSize = usePanelSize("projectPaneSidebar");
 
   const queryClient = useQueryClient();
   const historyQuery = useInfiniteQuery(
@@ -1079,24 +1073,22 @@ function ProjectGitHistoryPaneContent() {
 
   return (
     <ResizablePanelGroup
-      onLayoutChanged={(e) => {
-        if ("history-commits" in e) {
-          setCommitsSize(`${e["history-commits"]}`);
-        }
-        if ("history-files" in e) {
-          setFilesSize(`${e["history-files"]}`);
-        }
-      }}
+      onLayoutChanged={savePanelLayout}
       orientation="horizontal"
       className="h-full min-h-0"
     >
-      <ResizablePanel id="history-commits" defaultSize={commitsSize}>
+      <ResizablePanel
+        id="historyCommits"
+        defaultSize={commitsSize}
+        minSize="12%"
+        maxSize="40%"
+      >
         {commitsListPanel()}
       </ResizablePanel>
 
       <ResizableHandle />
 
-      <ResizablePanel>
+      <ResizablePanel minSize="30%">
         <main className="flex h-full min-w-0 flex-col bg-black/10">
           {commitDiffViewer(true)}
         </main>
@@ -1104,7 +1096,12 @@ function ProjectGitHistoryPaneContent() {
 
       <ResizableHandle />
 
-      <ResizablePanel id="history-files" defaultSize={filesSize}>
+      <ResizablePanel
+        id="projectPaneSidebar"
+        defaultSize={filesSize}
+        minSize="12%"
+        maxSize="40%"
+      >
         {changedFilesList()}
       </ResizablePanel>
     </ResizablePanelGroup>

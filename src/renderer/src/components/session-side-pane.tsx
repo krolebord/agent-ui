@@ -42,14 +42,11 @@ import { SidebarIconButton } from "./session-sidebar-item";
 import { useAppState } from "./sync-state-provider";
 import { Button } from "./ui/button";
 
-export const SESSION_SIDE_PANE_ID = "session-side-pane";
-
 export const useSessionSidePaneStore = create(
   persist(
     combine(
       {
         open: true,
-        size: "20" as number | string,
       },
       (set) => ({
         toggle: () => {
@@ -57,9 +54,6 @@ export const useSessionSidePaneStore = create(
         },
         show: () => {
           set({ open: true });
-        },
-        setSize: (size: number | string) => {
-          set({ size });
         },
       }),
     ),

@@ -37,6 +37,10 @@ import {
 } from "@renderer/components/ui/dropdown-menu";
 import { useGitPush } from "@renderer/hooks/use-git-push";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
+import {
+  savePanelLayout,
+  usePanelSize,
+} from "@renderer/hooks/use-panel-layout";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
 import { useHotkey } from "@tanstack/react-hotkeys";
@@ -188,7 +192,6 @@ function createProjectDiffStore(projectPath: string) {
         projectPath,
         selectedFilePath: null as string | null,
         confirmedFiles: [] as string[],
-        sidebarSize: 220 as number | string,
         editableDrafts: {} as Record<string, EditableDiffDraft>,
         editorFocusedFilePath: null as string | null,
         largeFileEditPaths: [] as string[],
@@ -225,9 +228,6 @@ function createProjectDiffStore(projectPath: string) {
         },
         clearConfirmations: () => {
           set({ confirmedFiles: [] });
-        },
-        setSidebarSize: (size: number | string) => {
-          set({ sidebarSize: size });
         },
         initializeEditableDraft: (
           filePath: string,
@@ -1554,8 +1554,7 @@ function ProjectDiffPaneContent() {
       someFilesConfirmed: included.length > 0 && included.length < files.length,
     };
   }, [files, confirmedFiles]);
-  const sidebarSize = useProjectDiffStore((state) => state.sidebarSize);
-  const setSidebarSize = useProjectDiffStore((state) => state.setSidebarSize);
+  const sidebarSize = usePanelSize("projectPaneSidebar");
 
   const pathsToCommit = useMemo(
     () => (files ? gitPathsForConfirmedFiles(files, confirmedFiles) : []),
@@ -2051,21 +2050,22 @@ function ProjectDiffPaneContent() {
 
   return (
     <ResizablePanelGroup
-      onLayoutChanged={(e) => {
-        if ("files-sidebar" in e) {
-          setSidebarSize(`${e["files-sidebar"]}`);
-        }
-      }}
+      onLayoutChanged={savePanelLayout}
       orientation="horizontal"
       className="h-full min-h-0"
     >
-      <ResizablePanel>
+      <ResizablePanel minSize="40%">
         <DiffViewerPanel {...diffViewerProps} />
       </ResizablePanel>
 
       <ResizableHandle />
 
-      <ResizablePanel id="files-sidebar" defaultSize={sidebarSize}>
+      <ResizablePanel
+        id="projectPaneSidebar"
+        defaultSize={sidebarSize}
+        minSize="12%"
+        maxSize="40%"
+      >
         <aside className="flex h-full flex-col border-l border-border/70 bg-black/15">
           <DiffFilesSidebar
             {...sidebarProps}

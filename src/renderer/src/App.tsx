@@ -33,6 +33,10 @@ import { useAppShortcuts } from "@renderer/hooks/use-app-shortcuts";
 import { useAttentionFavicon } from "@renderer/hooks/use-attention-favicon";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import { useMobileNavStore } from "@renderer/hooks/use-mobile-nav";
+import {
+  savePanelLayout,
+  usePanelSize,
+} from "@renderer/hooks/use-panel-layout";
 import { useEffect } from "react";
 import { useAppState } from "./components/sync-state-provider";
 import { diffsWorkerFactory } from "./diff-worker";
@@ -59,9 +63,19 @@ function SessionListSidebar() {
 }
 
 function DesktopAppShell() {
+  const sidebarSize = usePanelSize("sessionsSidebar");
+
   return (
-    <ResizablePanelGroup orientation="horizontal">
-      <ResizablePanel defaultSize="18" minSize="12" maxSize="35">
+    <ResizablePanelGroup
+      orientation="horizontal"
+      onLayoutChanged={savePanelLayout}
+    >
+      <ResizablePanel
+        id="sessionsSidebar"
+        defaultSize={sidebarSize}
+        minSize="12%"
+        maxSize="35%"
+      >
         <SessionListSidebar />
       </ResizablePanel>
       <ResizableHandle />

@@ -15,6 +15,10 @@ import {
   ResizablePanelGroup,
 } from "@renderer/components/ui/resizable";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
+import {
+  savePanelLayout,
+  usePanelSize,
+} from "@renderer/hooks/use-panel-layout";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { cn } from "@renderer/lib/utils";
 import { orpc } from "@renderer/orpc-client";
@@ -274,6 +278,7 @@ function ProjectTerminalStack({
 
 export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
   const isMobile = useIsMobile();
+  const sidebarSize = usePanelSize("projectPaneSidebar");
   const hasCwd = Boolean(cwd);
   const projectLocked = useAppState((state) =>
     cwd
@@ -558,12 +563,19 @@ export function ProjectTerminalPane({ cwd }: { cwd: string | null }) {
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
-      <ResizablePanel defaultSize="80" minSize="40">
-        {renderTerminalStack()}
-      </ResizablePanel>
+    <ResizablePanelGroup
+      orientation="horizontal"
+      className="h-full min-h-0"
+      onLayoutChanged={savePanelLayout}
+    >
+      <ResizablePanel minSize="40%">{renderTerminalStack()}</ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel defaultSize="20" minSize="12" maxSize="40">
+      <ResizablePanel
+        id="projectPaneSidebar"
+        defaultSize={sidebarSize}
+        minSize="12%"
+        maxSize="40%"
+      >
         <aside className="flex h-full flex-col border-l border-border/70 bg-black/15">
           <div className="flex h-7 border-b border-border/70">
             <div className="flex flex-1 items-center gap-1.5 px-2">
