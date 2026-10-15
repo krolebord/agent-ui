@@ -260,6 +260,209 @@ describe("CodexAppServerTracker mappings", () => {
   });
 });
 
+describe("CodexAppServerTracker async questions", () => {
+  function createQuestionTracker() {
+    const callbacks = createTracker({ initialThreadId: "root-thread" });
+    const socket = attachFakeSocket(callbacks.tracker);
+    const ask = (threadId = "root-thread") =>
+      socket.receive({
+        method: "item/completed",
+        params: {
+          threadId,
+          turnId: "turn-1",
+          item: {
+            id: "question-1",
+            type: "agentMessage",
+            delivery: "async",
+            phase: "final_answer",
+            text: "Which approach should I use?",
+            questions: [{ title: "Which approach should I use?" }],
+          },
+        },
+      });
+    const reply = (threadId = "root-thread") =>
+      socket.receive({
+        method: "item/completed",
+        params: {
+          threadId,
+          item: { id: "reply-1", type: "userMessage", content: [] },
+        },
+      });
+    const status = (type: "active" | "idle", activeFlags: string[] = []) =>
+      socket.receive({
+        method: "thread/status/changed",
+        params: { threadId: "root-thread", status: { type, activeFlags } },
+      });
+
+    return { ...callbacks, ...socket, ask, reply, status };
+  }
+
+  it("keeps an async question visible while the agent continues working", () => {
+    const { ask, receive, status, reply, sent, onStatusChange } =
+      createQuestionTracker();
+    status("active");
+    ask();
+    status("active");
+    receive({ method: "turn/started", params: { threadId: "root-thread" } });
+    receive({
+      method: "item/completed",
+      params: {
+        threadId: "root-thread",
+        item: { type: "agentMessage", text: "Still working", questions: null },
+      },
+    });
+
+    expect(onStatusChange.mock.calls).toEqual([
+      ["running"],
+      ["awaiting_approval"],
+    ]);
+    expect(sent()).toEqual([]);
+
+    reply();
+    expect(onStatusChange).toHaveBeenLastCalledWith("running");
+  });
+
+  it("keeps an unanswered question visible after the turn completes", () => {
+    const { ask, receive, status, reply, onStatusChange, onTurnCompleted } =
+      createQuestionTracker();
+    ask();
+    receive({
+      method: "turn/completed",
+      params: { threadId: "root-thread", turn: { status: "completed" } },
+    });
+    status("idle");
+
+    expect(onTurnCompleted).toHaveBeenCalledWith("root-thread", "completed");
+    expect(onStatusChange.mock.calls).toEqual([["awaiting_approval"]]);
+
+    reply();
+    expect(onStatusChange).toHaveBeenLastCalledWith("awaiting_user_response");
+  });
+
+  it("preserves a blocking approval when an async question is answered", () => {
+    const { ask, status, reply, onStatusChange } = createQuestionTracker();
+    ask();
+    status("active", ["waitingOnApproval"]);
+    reply();
+    expect(onStatusChange.mock.calls).toEqual([["awaiting_approval"]]);
+
+    status("active");
+    expect(onStatusChange).toHaveBeenLastCalledWith("running");
+  });
+
+  it.each([
+    {
+      method: "turn/completed",
+      params: { turn: { status: "interrupted" } },
+      expectedStatus: "awaiting_user_response",
+    },
+    {
+      method: "turn/completed",
+      params: { turn: { status: "failed" } },
+      expectedStatus: "error",
+    },
+    {
+      method: "thread/closed",
+      params: {},
+      expectedStatus: "awaiting_user_response",
+    },
+    {
+      method: "error",
+      params: { error: "Something failed" },
+      expectedStatus: "error",
+    },
+  ])("clears pending questions on $method ($expectedStatus)", (event) => {
+    const { ask, receive, status, onStatusChange } = createQuestionTracker();
+    ask();
+    receive({
+      method: event.method,
+      params: { threadId: "root-thread", ...event.params },
+    });
+    expect(onStatusChange).toHaveBeenLastCalledWith(event.expectedStatus);
+
+    status("active");
+    expect(onStatusChange).toHaveBeenLastCalledWith("running");
+  });
+
+  it("scopes async questions and replies to their thread", () => {
+    const { ask, status, reply, onStatusChange, onSubagentUpdate } =
+      createQuestionTracker();
+    status("active");
+    ask("child-thread");
+    expect(onStatusChange.mock.calls).toEqual([["running"]]);
+    expect(onSubagentUpdate).toHaveBeenLastCalledWith({
+      threadId: "child-thread",
+      status: "awaiting_approval",
+    });
+
+    reply();
+    expect(onSubagentUpdate).toHaveBeenCalledTimes(1);
+    reply("child-thread");
+    expect(onSubagentUpdate).toHaveBeenLastCalledWith({
+      threadId: "child-thread",
+      status: "running",
+    });
+  });
+
+  it("preserves a subagent question through thread hydration and collab updates", () => {
+    const { ask, receive, reply, onSubagentUpdate } = createQuestionTracker();
+    ask("child-thread");
+    onSubagentUpdate.mockClear();
+
+    receive({
+      method: "thread/started",
+      params: {
+        thread: {
+          id: "child-thread",
+          parentThreadId: "root-thread",
+          status: { type: "active", activeFlags: [] },
+        },
+      },
+    });
+    receive({
+      method: "item/completed",
+      params: {
+        item: {
+          type: "collabAgentToolCall",
+          tool: "wait",
+          senderThreadId: "root-thread",
+          receiverThreadIds: ["child-thread"],
+          agentsStates: { "child-thread": { status: "completed" } },
+        },
+      },
+    });
+
+    expect(onSubagentUpdate).toHaveBeenNthCalledWith(
+      1,
+      expect.not.objectContaining({ status: expect.anything() }),
+    );
+    expect(onSubagentUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "awaiting_approval" }),
+    );
+
+    reply("child-thread");
+    expect(onSubagentUpdate).toHaveBeenLastCalledWith({
+      threadId: "child-thread",
+      status: "awaiting_user_response",
+    });
+  });
+
+  it.each([
+    { type: "agentMessage", delivery: "async", questions: [] },
+    { type: "agentMessage", delivery: "async", questions: null },
+    { type: "agentMessage", delivery: "async", questions: [{}] },
+    { type: "agentMessage", questions: [{ title: "Regular message" }] },
+    { type: "commandExecution", status: "completed" },
+  ])("ignores items that are not async questions: %j", (item) => {
+    const { receive, onStatusChange } = createQuestionTracker();
+    receive({
+      method: "item/completed",
+      params: { threadId: "root-thread", item },
+    });
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+});
+
 describe("CodexAppServerTracker external auth", () => {
   it("answers a token refresh request without consuming our own pending call", async () => {
     const onChatgptAuthTokensRefresh = vi.fn().mockResolvedValue({
