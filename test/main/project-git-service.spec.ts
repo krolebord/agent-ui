@@ -507,6 +507,40 @@ describe("ProjectGitService", () => {
     );
   });
 
+  it("breaks down diff stats by file kind from the last refresh", async () => {
+    const projectsState = defineProjectState();
+    projectsState.updateState((projects) => {
+      projects.push({ path: "/repo-one", collapsed: false });
+    });
+
+    checkIsRepoMock.mockResolvedValue(true);
+    branchLocalMock.mockResolvedValue({ current: "main" });
+    rawMock.mockImplementation(async (_projectPath: string, args: string[]) => {
+      if (args[0] === "rev-parse" && args[1] === "--git-path") {
+        return ".git/index\n";
+      }
+      if (args[0] === "diff" && args[2] === "--numstat") {
+        return "4\t1\tsrc/app.ts\n6\t0\tsrc/app.test.ts\n-\t-\tdocs/logo.png\n2\t2\tREADME.md\n";
+      }
+      return "";
+    });
+
+    const service = new ProjectGitService(projectsState);
+    expect(service.getDiffBreakdown("/repo-one")).toBeNull();
+
+    await service.refreshProject("/repo-one");
+
+    expect(projectsState.state[0]?.gitDiffStats).toEqual({
+      addedLines: 12,
+      deletedLines: 3,
+    });
+    expect(service.getDiffBreakdown("/repo-one")).toMatchObject({
+      code: { addedLines: 4, deletedLines: 1 },
+      tests: { addedLines: 6, deletedLines: 0 },
+      docs: { addedLines: 2, deletedLines: 2 },
+    });
+  });
+
   it("runs git commands in the C locale over the ambient environment", async () => {
     checkIsRepoMock.mockResolvedValue(true);
     branchLocalMock.mockResolvedValue({ current: "main" });

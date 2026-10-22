@@ -77,6 +77,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAddProjectDialogStore } from "./add-project-dialog";
+import { GitDiffBreakdownHoverCard } from "./git-diff-breakdown-hover-card";
 import { useNewSessionDialogStore } from "./new-session-dialog";
 import { ProjectFavicon } from "./project-favicon";
 import { useProjectWorktreeDialogStore } from "./project-worktree-dialog";
@@ -163,26 +164,27 @@ function InboxRowGitLine({
         {project.gitBranch}
       </span>
       {addedLines || deletedLines ? (
-        <span
-          className="ml-auto shrink-0 font-mono"
-          title={`${addedLines ?? 0} added, ${deletedLines ?? 0} deleted (uncommitted)`}
-        >
-          {addedLines ? (
-            <span className={dimmed ? "text-emerald-700" : "text-emerald-500"}>
-              +{addedLines}
-            </span>
-          ) : null}
-          {deletedLines ? (
-            <span
-              className={cn(
-                addedLines && "ml-1",
-                dimmed ? "text-rose-800" : "text-rose-500",
-              )}
-            >
-              -{deletedLines}
-            </span>
-          ) : null}
-        </span>
+        <GitDiffBreakdownHoverCard projectPath={project.path}>
+          <span className="ml-auto shrink-0 font-mono">
+            {addedLines ? (
+              <span
+                className={dimmed ? "text-emerald-700" : "text-emerald-500"}
+              >
+                +{addedLines}
+              </span>
+            ) : null}
+            {deletedLines ? (
+              <span
+                className={cn(
+                  addedLines && "ml-1",
+                  dimmed ? "text-rose-800" : "text-rose-500",
+                )}
+              >
+                -{deletedLines}
+              </span>
+            ) : null}
+          </span>
+        </GitDiffBreakdownHoverCard>
       ) : null}
     </span>
   );

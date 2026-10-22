@@ -37,6 +37,7 @@ import {
   useDiffReviewStore,
   useProjectBottomPaneView,
 } from "./diff-review-pane";
+import { GitDiffBreakdownHoverCard } from "./git-diff-breakdown-hover-card";
 import { MobileSidebarTrigger } from "./mobile-sidebar-trigger";
 import {
   SchedulePromptButton,
@@ -327,15 +328,23 @@ export function SessionHeader({ session }: { session: Session }) {
       </div>
       {addedLines || deletedLines || aheadCommits || behindCommits ? (
         <div className="shrink-0 font-mono text-xs text-muted-foreground">
-          {addedLines ? (
-            <span className="text-emerald-400">+{addedLines}</span>
-          ) : null}
-          {deletedLines ? (
-            <span
-              className={addedLines ? "ml-2 text-rose-400" : "text-rose-400"}
-            >
-              -{deletedLines}
-            </span>
+          {activeProject && (addedLines || deletedLines) ? (
+            <GitDiffBreakdownHoverCard projectPath={activeProject.path}>
+              <span>
+                {addedLines ? (
+                  <span className="text-emerald-400">+{addedLines}</span>
+                ) : null}
+                {deletedLines ? (
+                  <span
+                    className={
+                      addedLines ? "ml-2 text-rose-400" : "text-rose-400"
+                    }
+                  >
+                    -{deletedLines}
+                  </span>
+                ) : null}
+              </span>
+            </GitDiffBreakdownHoverCard>
           ) : null}
           {aheadCommits ? (
             <span className={addedLines || deletedLines ? "ml-2" : undefined}>

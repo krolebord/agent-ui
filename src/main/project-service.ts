@@ -688,6 +688,13 @@ export const projectsRouter = {
       assertProjectPathInteractionAllowed(input.path, context);
       return refreshTrackedProject(input.path, context);
     }),
+  getDiffBreakdown: procedure
+    .input(z.object({ path: projectPathSchema }))
+    .handler(({ input, context }) =>
+      context.projectGitService.getDiffBreakdown(
+        normalizeProjectPath(input.path),
+      ),
+    ),
   getFavicon: procedure
     .input(z.object({ path: projectPathSchema }))
     .handler(async ({ input }) => ({
