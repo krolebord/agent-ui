@@ -1,4 +1,22 @@
+import { z } from "zod";
 import log from "./logger";
+
+const asyncQuestionItemSchema = z.object({
+  threadId: z.string(),
+  item: z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("agentMessage"),
+      delivery: z.literal("async"),
+      questions: z.array(
+        z.object({
+          title: z.string(),
+          options: z.array(z.string()).nullable().optional(),
+        }),
+      ),
+    }),
+    z.object({ type: z.literal("userMessage") }),
+  ]),
+});
 
 export type CodexAppServerSessionState =
   | "running"
@@ -246,6 +264,11 @@ export class CodexAppServerTracker {
     string,
     CodexAppServerSessionState
   >();
+  private readonly emittedThreadStatuses = new Map<
+    string,
+    CodexAppServerSessionState
+  >();
+  private readonly threadsWithAsyncQuestions = new Set<string>();
   private readonly hydratedSubagentThreads = new Set<string>();
 
   constructor(options: CodexAppServerTrackerOptions) {
@@ -557,6 +580,9 @@ export class CodexAppServerTracker {
         if (turn.status === "completed" || turn.status === "interrupted")
           this.onTurnCompleted?.(threadId, turn.status);
 
+        if (turn.status === "interrupted") {
+          this.threadsWithAsyncQuestions.delete(threadId);
+        }
         this.emitThreadStatus(threadId, "awaiting_user_response");
         return;
       }
@@ -574,12 +600,14 @@ export class CodexAppServerTracker {
           this.setThreadId(threadId);
         }
 
+        this.threadsWithAsyncQuestions.delete(threadId);
         const nextStatus = "awaiting_user_response";
         this.emitThreadStatus(threadId, nextStatus);
         return;
       }
 
       case "item/completed": {
+        this.handleAsyncQuestionItem(message.params);
         this.handleCompletedItem(message.params);
         return;
       }
@@ -603,6 +631,32 @@ export class CodexAppServerTracker {
       default:
         return;
     }
+  }
+
+  private handleAsyncQuestionItem(params: unknown) {
+    const result = asyncQuestionItemSchema.safeParse(params);
+    if (!result.success) {
+      return;
+    }
+
+    const { threadId, item } = result.data;
+    if (item.type === "userMessage") {
+      if (!this.threadsWithAsyncQuestions.delete(threadId)) {
+        return;
+      }
+    } else if (item.questions.length > 0) {
+      this.threadsWithAsyncQuestions.add(threadId);
+    } else {
+      return;
+    }
+
+    if (!this.threadId) {
+      this.setThreadId(threadId);
+    }
+    this.emitThreadStatus(
+      threadId,
+      this.threadStatuses.get(threadId) ?? "running",
+    );
   }
 
   private handleThread(thread: object) {
@@ -647,7 +701,6 @@ export class CodexAppServerTracker {
           typeof threadRecord.preview === "string"
             ? threadRecord.preview
             : undefined,
-        status: status ?? undefined,
         createdAt:
           typeof threadRecord.createdAt === "number"
             ? threadRecord.createdAt
@@ -711,7 +764,14 @@ export class CodexAppServerTracker {
         const state = agentState as { status?: unknown; message?: unknown };
         if (isCollabAgentStatus(state.status)) {
           update.collabStatus = state.status;
-          update.status = mapCollabAgentStatus(state.status);
+          const status = mapCollabAgentStatus(state.status);
+          if (status === "starting" || status === "stopped") {
+            this.threadsWithAsyncQuestions.delete(receiverThreadId);
+            update.status = status;
+          } else if (status) {
+            this.emitThreadStatus(receiverThreadId, status);
+            update.status = this.emittedThreadStatuses.get(receiverThreadId);
+          }
         }
         if (typeof state.message === "string") {
           update.message = state.message;
@@ -754,11 +814,18 @@ export class CodexAppServerTracker {
     threadId: string,
     nextStatus: CodexAppServerSessionState,
   ) {
-    if (this.threadStatuses.get(threadId) === nextStatus) {
+    this.threadStatuses.set(threadId, nextStatus);
+    if (nextStatus === "error") {
+      this.threadsWithAsyncQuestions.delete(threadId);
+    } else if (this.threadsWithAsyncQuestions.has(threadId)) {
+      nextStatus = "awaiting_approval";
+    }
+
+    if (this.emittedThreadStatuses.get(threadId) === nextStatus) {
       return;
     }
 
-    this.threadStatuses.set(threadId, nextStatus);
+    this.emittedThreadStatuses.set(threadId, nextStatus);
     this.onThreadStatusChange?.(threadId, nextStatus);
     if (this.threadId === threadId) {
       this.onStatusChange?.(nextStatus);

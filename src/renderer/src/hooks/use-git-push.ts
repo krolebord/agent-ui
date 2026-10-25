@@ -1,6 +1,7 @@
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { orpc } from "@renderer/orpc-client";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useEffectEvent } from "react";
 import { toast } from "sonner";
 
 export function useGitPush(projectPath: string) {
@@ -12,6 +13,36 @@ export function useGitPush(projectPath: string) {
   const hasUpstream = Boolean(upstreamStats);
   const aheadCommits = upstreamStats?.aheadCommits ?? 0;
   const projectLocked = activeProject?.interactionDisabled === true;
+  const refreshMutation = useMutation(
+    orpc.projects.refreshProject.mutationOptions(),
+  );
+  const refreshUpstreamStats = useEffectEvent(() => {
+    if (!projectPath || projectLocked) return;
+    refreshMutation.mutate({ path: projectPath });
+  });
+
+  useEffect(() => {
+    projectPath;
+    refreshUpstreamStats();
+
+    let wasUnfocused = false;
+    const handleBlur = () => {
+      wasUnfocused = true;
+    };
+    const handleFocus = () => {
+      if (!wasUnfocused) return;
+      wasUnfocused = false;
+      refreshUpstreamStats();
+    };
+
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [projectPath]);
+
   const mutation = useMutation(
     orpc.projects.pushToRemote.mutationOptions({
       onSuccess: () => {

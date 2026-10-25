@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { copyFile, cp, lstat, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  type GitDiffBreakdown,
+  type GitDiffFileStat,
+  summarizeDiffByKind,
+} from "@shared/changed-file-kind";
 import type {
   ClaudeProject,
   GitDiffStats,
@@ -287,9 +292,14 @@ type ProjectGitMetadata = Pick<
   "gitBranch" | "gitDiffStats" | "gitUpstreamDiffStats"
 >;
 
+type ResolvedProjectGitMetadata = ProjectGitMetadata & {
+  diffFiles: GitDiffFileStat[];
+};
+
 interface ProjectGitData {
   currentBranch?: string;
   diffStats: GitDiffStats;
+  diffFiles: GitDiffFileStat[];
   upstreamDiffStats?: GitUpstreamDiffStats;
   isRepo: boolean;
   localBranches: string[];
@@ -494,9 +504,8 @@ async function copyProjectSettingsDirectory(
   }
 }
 
-function parseGitDiffStats(diffSummary: string): GitDiffStats {
-  let addedLines = 0;
-  let deletedLines = 0;
+function parseGitNumstat(diffSummary: string): GitDiffFileStat[] {
+  const files: GitDiffFileStat[] = [];
 
   for (const line of diffSummary.trim().split("\n")) {
     const trimmed = line.trim();
@@ -504,18 +513,27 @@ function parseGitDiffStats(diffSummary: string): GitDiffStats {
       continue;
     }
 
-    const [addedValue, deletedValue] = trimmed.split("\t");
+    const [addedValue, deletedValue, ...pathParts] = trimmed.split("\t");
     const added = Number.parseInt(addedValue ?? "", 10);
     const deleted = Number.parseInt(deletedValue ?? "", 10);
 
-    if (Number.isFinite(added)) {
-      addedLines += added;
-    }
-    if (Number.isFinite(deleted)) {
-      deletedLines += deleted;
-    }
+    files.push({
+      path: pathParts.join("\t"),
+      addedLines: Number.isFinite(added) ? added : 0,
+      deletedLines: Number.isFinite(deleted) ? deleted : 0,
+    });
   }
 
+  return files;
+}
+
+function sumGitDiffStats(files: readonly GitDiffFileStat[]): GitDiffStats {
+  let addedLines = 0;
+  let deletedLines = 0;
+  for (const file of files) {
+    addedLines += file.addedLines;
+    deletedLines += file.deletedLines;
+  }
   return { addedLines, deletedLines };
 }
 
@@ -779,6 +797,7 @@ async function readProjectGitData(
       git,
       isRepo: false,
       diffStats: { addedLines: 0, deletedLines: 0 },
+      diffFiles: [],
       localBranches: [],
     };
   }
@@ -805,13 +824,14 @@ async function readProjectGitData(
       ]);
     },
   );
-  const diffStats = parseGitDiffStats(diffSummary);
+  const diffFiles = parseGitNumstat(diffSummary);
 
   return {
     git,
     isRepo: true,
     currentBranch,
-    diffStats,
+    diffStats: sumGitDiffStats(diffFiles),
+    diffFiles,
     upstreamDiffStats: await resolveUpstreamDiffStats(git, currentBranch),
     localBranches: includeLocalBranches
       ? await getLocalBranchNames(git, summary)
@@ -838,7 +858,7 @@ function projectGitMetadataEquals(
 
 async function resolveProjectGitMetadata(
   projectPath: string,
-): Promise<ProjectGitMetadata> {
+): Promise<ResolvedProjectGitMetadata> {
   try {
     const projectGitData = await readProjectGitData(projectPath);
     if (!projectGitData.isRepo) {
@@ -846,6 +866,7 @@ async function resolveProjectGitMetadata(
         gitBranch: undefined,
         gitDiffStats: undefined,
         gitUpstreamDiffStats: undefined,
+        diffFiles: [],
       };
     }
 
@@ -853,6 +874,7 @@ async function resolveProjectGitMetadata(
       gitBranch: projectGitData.currentBranch,
       gitDiffStats: projectGitData.diffStats,
       gitUpstreamDiffStats: projectGitData.upstreamDiffStats,
+      diffFiles: projectGitData.diffFiles,
     };
   } catch (error) {
     const gitError = error as { message?: string };
@@ -867,6 +889,7 @@ async function resolveProjectGitMetadata(
       gitBranch: undefined,
       gitDiffStats: undefined,
       gitUpstreamDiffStats: undefined,
+      diffFiles: [],
     };
   }
 }
@@ -944,6 +967,8 @@ export class ProjectGitService {
     ReturnType<typeof withThrottledAsyncRunner>
   >();
 
+  private readonly diffFilesByProject = new Map<string, GitDiffFileStat[]>();
+
   private refreshInFlight: Promise<void> | null = null;
   private disposed = false;
   private started = false;
@@ -987,6 +1012,7 @@ export class ProjectGitService {
     if (this.disposed) {
       return;
     }
+    this.diffFilesByProject.set(projectPath, metadata.diffFiles);
 
     const project = this.projectsState.state.find(
       (item) => item.path === projectPath,
@@ -1004,6 +1030,11 @@ export class ProjectGitService {
       draft.gitDiffStats = metadata.gitDiffStats;
       draft.gitUpstreamDiffStats = metadata.gitUpstreamDiffStats;
     });
+  }
+
+  getDiffBreakdown(projectPath: string): GitDiffBreakdown | null {
+    const diffFiles = this.diffFilesByProject.get(projectPath);
+    return diffFiles ? summarizeDiffByKind(diffFiles) : null;
   }
 
   async getUncommittedDiff(projectPath: string): Promise<string | null> {
@@ -1999,6 +2030,11 @@ export class ProjectGitService {
         return;
       }
 
+      this.diffFilesByProject.clear();
+      for (const [projectPath, metadata] of metadataEntries) {
+        this.diffFilesByProject.set(projectPath, metadata.diffFiles);
+      }
+
       const metadataByPath = new Map(metadataEntries);
       const hasChanges = metadataEntries.some(
         ([projectPath, metadata]) =>
@@ -2058,5 +2094,6 @@ export class ProjectGitService {
       runner.dispose();
     }
     this.refreshRunners.clear();
+    this.diffFilesByProject.clear();
   }
 }
