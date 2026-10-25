@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@renderer/components/ui/dialog";
+import { Input } from "@renderer/components/ui/input";
 import { Kbd, KbdGroup } from "@renderer/components/ui/kbd";
 import { Label } from "@renderer/components/ui/label";
 import {
@@ -52,13 +53,17 @@ import {
   Activity,
   Bug,
   FolderOpen,
+  Globe,
   Keyboard,
   LoaderCircle,
   Settings,
   Sparkles,
   Users,
+  X,
 } from "lucide-react";
 import type * as React from "react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { create } from "zustand";
 import { combine } from "zustand/middleware";
 import { AccountsSettingsItem } from "./accounts-page";
@@ -117,6 +122,15 @@ export function SettingsDialog() {
             </SettingsSectionTrigger>
             <AccordionContent>
               <MachineStatsSettings />
+            </AccordionContent>
+          </AccordionItem>
+
+          <AccordionItem value="remote-access">
+            <SettingsSectionTrigger icon={Globe}>
+              Remote access
+            </SettingsSectionTrigger>
+            <AccordionContent>
+              <AllowedWebHostsSettings />
             </AccordionContent>
           </AccordionItem>
 
@@ -378,6 +392,86 @@ function DockBadgeForAttentionToggle() {
         checked={enabled}
         onCheckedChange={(checked) => mutate({ enabled: checked })}
       />
+    </div>
+  );
+}
+
+function AllowedWebHostsSettings() {
+  const hosts = useAppState((s) => s.appSettings.allowedWebHosts);
+  const [draft, setDraft] = useState("");
+  const { mutate, isPending } = useMutation(
+    orpc.appSettings.setAllowedWebHosts.mutationOptions({
+      onError: (error) => {
+        toast.error(error.message || "Failed to update allowed hosts");
+      },
+    }),
+  );
+
+  const addHost = () => {
+    const host = draft.trim();
+    if (!host) return;
+    mutate({ hosts: [...hosts, host] }, { onSuccess: () => setDraft("") });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-0.5">
+        <div className="text-sm font-medium">Allowed hostnames</div>
+        <div className="text-xs text-muted-foreground">
+          Hostnames that may open the web UI through a proxy such as Tailscale
+          Serve. Localhost is always allowed. Anyone who can reach these hosts
+          gets full control of your sessions and terminals.
+        </div>
+      </div>
+      {hosts.length > 0 ? (
+        <ul className="divide-y divide-border/40 rounded-md border">
+          {hosts.map((host) => (
+            <li
+              key={host}
+              className="flex items-center justify-between gap-2 py-1 pr-1 pl-3"
+            >
+              <span className="truncate font-mono text-xs">{host}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0"
+                aria-label={`Remove ${host}`}
+                disabled={isPending}
+                onClick={() =>
+                  mutate({ hosts: hosts.filter((entry) => entry !== host) })
+                }
+              >
+                <X className="size-3.5" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <form
+        className="flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          addHost();
+        }}
+      >
+        <Input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="my-mac.tailnet.ts.net"
+          className="font-mono text-xs"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+        />
+        <Button
+          type="submit"
+          variant="outline"
+          disabled={isPending || !draft.trim()}
+        >
+          Add
+        </Button>
+      </form>
     </div>
   );
 }

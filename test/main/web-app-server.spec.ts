@@ -522,4 +522,41 @@ describe("web app server", () => {
       }),
     ).toBe(403);
   });
+
+  it("reads additional allowed hosts on every request", async () => {
+    const reservation = await reservePort();
+    await new Promise<void>((resolve) =>
+      reservation.server.close(() => resolve()),
+    );
+    process.env.AGENT_UI_WEB_PORT = String(reservation.port);
+    let extraHosts: string[] = [];
+    const server = await startWebAppServer({
+      rendererDist,
+      getServices: () => ({}) as Services,
+      getAllowedHosts: () => extraHosts,
+    });
+    servers.push(server);
+    const tailnetRequest = {
+      headers: {
+        host: "my-mac.tailnet.ts.net",
+        origin: "https://my-mac.tailnet.ts.net",
+      },
+    };
+
+    expect(await statusOf(server.url, tailnetRequest)).toBe(403);
+    extraHosts = ["my-mac.tailnet.ts.net"];
+    expect(await statusOf(server.url, tailnetRequest)).toBe(200);
+    expect(
+      await statusOf(server.url, {
+        path: "/rpc",
+        headers: {
+          ...tailnetRequest.headers,
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-version": "13",
+          "sec-websocket-key": randomBytes(16).toString("base64"),
+        },
+      }),
+    ).toBe(101);
+  });
 });

@@ -24,6 +24,8 @@ interface WebAppServerOptions {
   rendererDist: string;
   viteDevServerUrl?: string;
   getServices: () => Services | null;
+  /** Hostnames allowed in addition to loopback and `AGENT_UI_ALLOWED_HOSTS`, read per request. */
+  getAllowedHosts?: () => readonly string[];
 }
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -330,9 +332,15 @@ export async function startWebAppServer(options: WebAppServerOptions) {
     },
   });
 
+  const getAllowedHosts = () => [
+    ...config.allowedHosts,
+    ...(options.getAllowedHosts?.() ?? []),
+  ];
+
   let boundPort = config.port;
   const server = createServer((req, res) => {
-    if (!isAllowedHost(req.headers.host, config.allowedHosts)) {
+    const allowedHosts = getAllowedHosts();
+    if (!isAllowedHost(req.headers.host, allowedHosts)) {
       sendText(res, 403, "Forbidden");
       return;
     }
@@ -343,7 +351,7 @@ export async function startWebAppServer(options: WebAppServerOptions) {
     }
 
     if (isMcpRequest(req)) {
-      if (!isAllowedOrigin(req.headers.origin, config.allowedHosts)) {
+      if (!isAllowedOrigin(req.headers.origin, allowedHosts)) {
         sendText(res, 403, "Forbidden");
         return;
       }
@@ -382,9 +390,10 @@ export async function startWebAppServer(options: WebAppServerOptions) {
   });
 
   server.on("upgrade", (req, socket, head) => {
+    const allowedHosts = getAllowedHosts();
     if (
-      !isAllowedHost(req.headers.host, config.allowedHosts) ||
-      !isAllowedOrigin(req.headers.origin, config.allowedHosts)
+      !isAllowedHost(req.headers.host, allowedHosts) ||
+      !isAllowedOrigin(req.headers.origin, allowedHosts)
     ) {
       socket.end(
         "HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",

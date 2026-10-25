@@ -80,6 +80,12 @@ Headless mode binds to `127.0.0.1` and prints the selected URL. It starts at
 port `3420` and automatically tries subsequent ports when that port is in use.
 Set `AGENT_UI_WEB_PORT` to request a different starting port.
 
+The server only accepts requests addressed to loopback. To reach it through a
+proxy such as `tailscale serve 3420`, add the proxied hostname under
+Settings → Remote access (takes effect immediately and persists), or list it in
+the comma-separated `AGENT_UI_ALLOWED_HOSTS` environment variable. The Electron
+app runs the same web server, so this works there too.
+
 On macOS, headless mode shares application state with the Electron app at
 `~/Library/Application Support/agent-ui/agent-ui.json`. On Linux, application
 state is stored under `$XDG_CONFIG_HOME/agent-ui` (defaulting to

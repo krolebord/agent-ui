@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isAllowedHost,
   isAllowedOrigin,
+  normalizeAllowedHosts,
   parseAllowedHosts,
 } from "../../src/main/web-access-policy";
 
@@ -34,5 +35,19 @@ describe("web access policy", () => {
     ["chrome-extension://localhost", false],
   ])("Origin %s → %s", (origin, allowed) => {
     expect(isAllowedOrigin(origin, allowedHosts)).toBe(allowed);
+  });
+
+  it("normalizes bare hosts and URLs, dropping invalid entries and duplicates", () => {
+    expect(
+      normalizeAllowedHosts([
+        " My-Mac.Tailnet.ts.net ",
+        "https://my-mac.tailnet.ts.net/some/path",
+        "my-mac.tailnet.ts.net:443",
+        "http://100.64.0.1:3420",
+        "bad/host",
+        "ftp://example.com",
+        "",
+      ]),
+    ).toEqual(["my-mac.tailnet.ts.net", "100.64.0.1"]);
   });
 });

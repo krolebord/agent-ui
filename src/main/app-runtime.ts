@@ -95,6 +95,8 @@ export async function startAppRuntime(
       rendererDist: options.rendererDist,
       viteDevServerUrl: options.viteDevServerUrl,
       getServices: () => services,
+      getAllowedHosts: () =>
+        services?.appSettingsState.state.allowedWebHosts ?? [],
     });
 
     return {

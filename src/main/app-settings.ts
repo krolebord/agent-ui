@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import z from "zod";
 import { lastSessionOptionsSchema } from "../shared/last-session-options";
 import { defineServiceState } from "../shared/service-state";
@@ -14,6 +15,10 @@ import {
 } from "../shared/title-generation";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
+import {
+  normalizeAllowedHost,
+  normalizeAllowedHosts,
+} from "./web-access-policy";
 
 export const sleepBlockModes = ["off", "working", "always"] as const;
 export type SleepBlockMode = (typeof sleepBlockModes)[number];
@@ -88,6 +93,7 @@ export interface AppSettings {
   lastSessionOptions: z.infer<typeof lastSessionOptionsSchema>;
   titleGeneration: TitleGenerationSettings;
   sessionMemory: SessionMemorySettings;
+  allowedWebHosts: string[];
 }
 
 const defaults: AppSettings = {
@@ -100,6 +106,7 @@ const defaults: AppSettings = {
   lastSessionOptions: {},
   titleGeneration: defaultTitleGenerationSettings,
   sessionMemory: defaultSessionMemorySettings,
+  allowedWebHosts: [],
 };
 
 export type AppSettingsState = ReturnType<typeof defineAppSettingsState>;
@@ -129,6 +136,10 @@ const appSettingsPersistenceSchema = z
       defaultTitleGenerationSettings,
     ),
     sessionMemory: sessionMemorySettingsSchema,
+    allowedWebHosts: z
+      .array(z.string())
+      .catch([])
+      .transform(normalizeAllowedHosts),
   })
   .transform(({ preventSleep, sleepBlockMode, ...settings }) => ({
     ...settings,
@@ -202,6 +213,21 @@ export const appSettingsRouter = {
     .handler(async ({ input, context }) => {
       context.appSettingsState.updateState((state) => {
         state.titleGeneration = input;
+      });
+    }),
+  setAllowedWebHosts: procedure
+    .input(z.object({ hosts: z.array(z.string()) }))
+    .handler(async ({ input, context }) => {
+      const invalid = input.hosts.filter(
+        (host) => normalizeAllowedHost(host) === null,
+      );
+      if (invalid.length > 0) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Not a valid hostname: ${invalid.join(", ")}`,
+        });
+      }
+      context.appSettingsState.updateState((state) => {
+        state.allowedWebHosts = normalizeAllowedHosts(input.hosts);
       });
     }),
 };

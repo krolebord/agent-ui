@@ -9,12 +9,28 @@ function hostnameOf(host: string): string | null {
   }
 }
 
-export function parseAllowedHosts(value: string | undefined): string[] {
-  const configured = (value ?? "")
-    .split(",")
-    .map((entry) => hostnameOf(entry.trim()))
+/** Accepts a bare host (`mac.tailnet.ts.net:443`) or a full URL and returns its hostname. */
+export function normalizeAllowedHost(entry: string): string | null {
+  const trimmed = entry.trim();
+  if (/^https?:\/\//iu.test(trimmed)) {
+    const url = URL.parse(trimmed);
+    return url ? hostnameOf(url.host) : null;
+  }
+  return hostnameOf(trimmed);
+}
+
+export function normalizeAllowedHosts(entries: readonly string[]): string[] {
+  const hostnames = entries
+    .map(normalizeAllowedHost)
     .filter((hostname) => hostname !== null);
-  return [...LOOPBACK_HOSTNAMES, ...configured];
+  return [...new Set(hostnames)];
+}
+
+export function parseAllowedHosts(value: string | undefined): string[] {
+  return [
+    ...LOOPBACK_HOSTNAMES,
+    ...normalizeAllowedHosts((value ?? "").split(",")),
+  ];
 }
 
 export function isAllowedHost(
