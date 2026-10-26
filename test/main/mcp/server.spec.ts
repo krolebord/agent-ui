@@ -185,7 +185,7 @@ describe("mcp server", () => {
     }
   });
 
-  it("translates an immediate schedule into a one-time run at now", async () => {
+  it("enables an immediate schedule as a one-time run at now", async () => {
     createScheduledSession.mockReturnValueOnce({ id: "sched-2" });
     const token = mcpSessionTokens.sign({
       cwd: "/home/user/project",
@@ -204,6 +204,43 @@ describe("mcp server", () => {
       const input = createScheduledSession.mock.calls[0][0];
       expect(input.schedule.kind).toBe("once");
       expect(input.schedule.at).toBeGreaterThanOrEqual(before);
+      expect(input).toMatchObject({ enabled: true, allowPastOnce: true });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("enables a one-time schedule without approval", async () => {
+    createScheduledSession.mockReturnValueOnce({
+      id: "sched-3",
+      nextRunAt: 4_102_444_800_000,
+    });
+    const token = mcpSessionTokens.sign({
+      cwd: "/home/user/project",
+      canScheduleSessions: true,
+    });
+    const client = await connectClient(token);
+    try {
+      const result = await client.callTool({
+        name: "create_scheduled_session",
+        arguments: {
+          schedule: { kind: "once", at: 4_102_444_800_000 },
+          config: { type: "claude", cwd: "/home/user/project" },
+        },
+      });
+      expect(createScheduledSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          schedule: { kind: "once", at: 4_102_444_800_000 },
+          enabled: true,
+          allowPastOnce: false,
+        }),
+      );
+      const [content] = result.content as [{ type: string; text: string }];
+      expect(JSON.parse(content.text)).toEqual({
+        id: "sched-3",
+        status: "scheduled",
+        nextRunAt: 4_102_444_800_000,
+      });
     } finally {
       await client.close();
     }
@@ -252,6 +289,11 @@ describe("mcp server", () => {
       id: "sched-1",
       createdBy: "agent",
       enabled: true,
+    });
+    updateScheduledSession.mockReturnValueOnce({
+      id: "sched-1",
+      enabled: false,
+      needsApproval: true,
     });
     const token = mcpSessionTokens.sign({
       cwd: "/home/user/project",

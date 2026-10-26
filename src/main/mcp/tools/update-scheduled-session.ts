@@ -10,7 +10,8 @@ export const updateScheduledSessionTool = defineMcpTool({
   name: "update_scheduled_session",
   description:
     "Replaces the name, schedule, and config of a scheduled session that " +
-    "was previously created by an agent (see list_scheduled_sessions). The " +
+    "was previously created by an agent (see list_scheduled_sessions). An " +
+    "'immediate' or 'once' schedule takes effect right away. A 'recurring' " +
     "edit is a proposal: the entry is disabled again and runs only after " +
     "the user re-approves it in the Scheduled Sessions page. User-created " +
     "schedules cannot be edited; ask the user to change those instead.",
@@ -53,23 +54,30 @@ export const updateScheduledSessionTool = defineMcpTool({
       };
     }
 
-    services.scheduledSessionsService.update({
+    const updated = services.scheduledSessionsService.update({
       id: input.id,
       name: input.name,
       schedule: resolveScheduleInput(input.schedule),
       config: input.config,
       editedBy: "agent",
+      allowPastOnce: input.schedule.kind === "immediate",
     });
 
     return textResult(
       JSON.stringify(
-        {
-          id: input.id,
-          status: "pending-approval",
-          note:
-            "Updated and disabled. It will not run until the user re-enables " +
-            "it in the Scheduled Sessions page.",
-        },
+        updated.needsApproval
+          ? {
+              id: input.id,
+              status: "pending-approval",
+              note:
+                "Updated and disabled. It will not run until the user " +
+                "re-enables it in the Scheduled Sessions page.",
+            }
+          : {
+              id: input.id,
+              status: "scheduled",
+              nextRunAt: updated.nextRunAt,
+            },
         null,
         2,
       ),

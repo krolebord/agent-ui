@@ -4,9 +4,7 @@ import { scheduledSessionConfigSchema } from "../../scheduled-sessions/state";
 import { defineMcpTool, textResult } from "../define-tool";
 
 export const scheduleInputSchema = z.discriminatedUnion("kind", [
-  z
-    .object({ kind: z.literal("immediate") })
-    .describe("Run as soon as the user approves the session."),
+  z.object({ kind: z.literal("immediate") }).describe("Run right away."),
   z.object({
     kind: z.literal("once"),
     at: z.number().describe("Unix epoch milliseconds."),
@@ -28,14 +26,14 @@ export function resolveScheduleInput(
 export const createScheduledSessionTool = defineMcpTool({
   name: "create_scheduled_session",
   description:
-    "Creates a scheduled agent session in Agent UI. The session is created " +
-    "DISABLED and runs only after the user reviews and approves it in the " +
-    "Scheduled Sessions page — tell the user to approve it there. Use " +
-    "schedule kind 'immediate' to request a run right after approval, " +
-    "'once' for a single future run, or 'recurring' with a cron expression. " +
-    "config.cwd must be an absolute path to the project directory (usually " +
-    "your own working directory); config.initialPrompt is the task the " +
-    "scheduled agent should perform.",
+    "Creates a scheduled agent session in Agent UI. Schedule kind " +
+    "'immediate' starts the session right away and 'once' runs it a single " +
+    "time at a future moment; both take effect without user approval. " +
+    "'recurring' (cron expression) is created DISABLED and runs only after " +
+    "the user reviews and approves it in the Scheduled Sessions page — tell " +
+    "the user to approve it there. config.cwd must be an absolute path to " +
+    "the project directory (usually your own working directory); " +
+    "config.initialPrompt is the task the scheduled agent should perform.",
   inputSchema: {
     name: z
       .string()
@@ -56,23 +54,27 @@ export const createScheduledSessionTool = defineMcpTool({
       };
     }
 
+    const needsApproval = input.schedule.kind === "recurring";
     const entry = services.scheduledSessionsService.create({
       name: input.name,
       schedule: resolveScheduleInput(input.schedule),
       config: input.config,
       createdBy: "agent",
-      enabled: false,
+      enabled: !needsApproval,
+      allowPastOnce: input.schedule.kind === "immediate",
     });
 
     return textResult(
       JSON.stringify(
-        {
-          id: entry.id,
-          status: "pending-approval",
-          note:
-            "Created disabled. It will not run until the user enables it in " +
-            "the Scheduled Sessions page.",
-        },
+        needsApproval
+          ? {
+              id: entry.id,
+              status: "pending-approval",
+              note:
+                "Created disabled. It will not run until the user enables " +
+                "it in the Scheduled Sessions page.",
+            }
+          : { id: entry.id, status: "scheduled", nextRunAt: entry.nextRunAt },
         null,
         2,
       ),

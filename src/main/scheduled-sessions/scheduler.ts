@@ -34,6 +34,7 @@ export interface CreateScheduledSessionInput {
   config: ScheduledSessionConfig;
   createdBy?: "user" | "agent";
   enabled?: boolean;
+  allowPastOnce?: boolean;
 }
 
 export interface UpdateScheduledSessionInput {
@@ -42,6 +43,7 @@ export interface UpdateScheduledSessionInput {
   schedule: ScheduleSpec;
   config: ScheduledSessionConfig;
   editedBy?: "user" | "agent";
+  allowPastOnce?: boolean;
 }
 
 export function getNextCronRunAt(cron: string, fromMs: number): number | null {
@@ -128,7 +130,7 @@ export class ScheduledSessionsService {
     const now = this.now();
     const enabled = input.enabled ?? true;
     assertScheduleIsRunnable(input.schedule, now, {
-      allowPastOnce: !enabled,
+      allowPastOnce: input.allowPastOnce || !enabled,
     });
 
     const entry: ScheduledSession = {
@@ -157,9 +159,10 @@ export class ScheduledSessionsService {
     if (!existing) {
       throw new Error(`Scheduled session ${input.id} not found`);
     }
-    const enabled = input.editedBy !== "agent";
+    const enabled =
+      input.editedBy !== "agent" || input.schedule.kind === "once";
     assertScheduleIsRunnable(input.schedule, now, {
-      allowPastOnce: !enabled,
+      allowPastOnce: input.allowPastOnce || !enabled,
     });
 
     this.state.updateState((entries) => {

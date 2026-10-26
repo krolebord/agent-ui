@@ -411,6 +411,25 @@ describe("ScheduledSessionsService", () => {
       ).toThrow(/future/);
     });
 
+    it("runs an enabled immediate entry right away", async () => {
+      const { service, state, runSession } = createService();
+      const entry = service.create({
+        schedule: { kind: "once", at: BASE_TIME.getTime() - 1 },
+        config: claudeConfig,
+        createdBy: "agent",
+        allowPastOnce: true,
+      });
+
+      expect(state.state[entry.id]?.needsApproval).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(runSession).toHaveBeenCalledExactlyOnceWith(claudeConfig, {
+        createdBy: "agent",
+      });
+
+      service.dispose();
+    });
+
     it("runs a pending immediate entry once the user enables it", async () => {
       const { service, state, runSession } = createService();
       const entry = service.create({
@@ -461,24 +480,49 @@ describe("ScheduledSessionsService", () => {
       service.dispose();
     });
 
-    it("agent edits may carry a past one-time schedule", () => {
+    it("agent edits to a one-time schedule skip re-approval", () => {
       const { service, state } = createService();
       const entry = service.create({
-        schedule: { kind: "once", at: BASE_TIME.getTime() + 60_000 },
+        schedule: { kind: "recurring", cron: "0 3 * * *" },
         config: claudeConfig,
         createdBy: "agent",
         enabled: false,
       });
 
+      const at = BASE_TIME.getTime() + 60_000;
       service.update({
         id: entry.id,
-        schedule: { kind: "once", at: BASE_TIME.getTime() - 1 },
+        schedule: { kind: "once", at },
         config: claudeConfig,
         editedBy: "agent",
       });
 
-      expect(state.state[entry.id]?.enabled).toBe(false);
-      expect(state.state[entry.id]?.needsApproval).toBe(true);
+      const stored = state.state[entry.id];
+      expect(stored?.enabled).toBe(true);
+      expect(stored?.needsApproval).toBeUndefined();
+      expect(stored?.nextRunAt).toBe(at);
+
+      service.dispose();
+    });
+
+    it("agent edits reject past one-time schedules unless allowed", () => {
+      const { service } = createService();
+      const entry = service.create({
+        schedule: { kind: "once", at: BASE_TIME.getTime() + 60_000 },
+        config: claudeConfig,
+        createdBy: "agent",
+      });
+      const edit = {
+        id: entry.id,
+        schedule: { kind: "once" as const, at: BASE_TIME.getTime() - 1 },
+        config: claudeConfig,
+        editedBy: "agent" as const,
+      };
+
+      expect(() => service.update(edit)).toThrow(/future/);
+      expect(() =>
+        service.update({ ...edit, allowPastOnce: true }),
+      ).not.toThrow();
 
       service.dispose();
     });
