@@ -1,4 +1,5 @@
 import type { Artifact, ArtifactLocation } from "@main/artifacts-service";
+import { File as CodeFile, type FileOptions } from "@pierre/diffs/react";
 import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigger";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Badge } from "@renderer/components/ui/badge";
@@ -12,6 +13,10 @@ import {
   DialogTitle,
 } from "@renderer/components/ui/dialog";
 import { Input } from "@renderer/components/ui/input";
+import {
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@renderer/components/ui/toggle-group";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import {
   type CleanupMark,
@@ -22,10 +27,11 @@ import {
   nextCleanupMark,
 } from "@renderer/lib/artifact-cleanup";
 import {
-  formatTextPreview,
   getArtifactPreviewKind,
   getHtmlPreviewSandbox,
+  getTextPreviewFile,
   getVisualFrameHeight,
+  hasArtifactSourceView,
   MAX_TEXT_PREVIEW_BYTES,
   readTextPreview,
 } from "@renderer/lib/artifact-preview";
@@ -842,12 +848,63 @@ export function ArtifactPreviewDialog() {
   );
 }
 
+const TEXT_PREVIEW_OPTIONS = {
+  theme: "github-dark-default",
+  overflow: "wrap",
+  disableFileHeader: true,
+} as const satisfies FileOptions<undefined, undefined>;
+
+type ArtifactPreviewKind = NonNullable<
+  ReturnType<typeof getArtifactPreviewKind>
+>;
+
 function ArtifactPreview({
   artifact,
   kind,
 }: {
   artifact: Artifact;
-  kind: NonNullable<ReturnType<typeof getArtifactPreviewKind>>;
+  kind: ArtifactPreviewKind;
+}) {
+  const [view, setView] = useState<"preview" | "source">("preview");
+  if (!hasArtifactSourceView(artifact)) {
+    return (
+      <ArtifactPreviewBody artifact={artifact} kind={kind} showSource={false} />
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-col gap-2">
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        size="sm"
+        aria-label="Preview mode"
+        className="self-start"
+        value={view}
+        onValueChange={(value) => {
+          if (value === "preview" || value === "source") setView(value);
+        }}
+      >
+        <ToggleGroupItem value="preview">Preview</ToggleGroupItem>
+        <ToggleGroupItem value="source">Source</ToggleGroupItem>
+      </ToggleGroup>
+      <ArtifactPreviewBody
+        artifact={artifact}
+        kind={kind}
+        showSource={view === "source"}
+      />
+    </div>
+  );
+}
+
+function ArtifactPreviewBody({
+  artifact,
+  kind,
+  showSource,
+}: {
+  artifact: Artifact;
+  kind: ArtifactPreviewKind;
+  showSource: boolean;
 }) {
   const [mediaFailed, setMediaFailed] = useState(false);
   const destination = useQuery(
@@ -856,6 +913,7 @@ function ArtifactPreview({
   const previewHref = destination.data
     ? `${resolveArtifactHref(destination.data)}?preview=1`
     : null;
+  const isText = kind === "text" || showSource;
   const text = useQuery({
     queryKey: ["artifact-text-preview", previewHref],
     queryFn: async () => {
@@ -864,14 +922,14 @@ function ArtifactPreview({
       if (!response.ok) throw new Error(await response.text());
       return readTextPreview(response);
     },
-    enabled: kind === "text" && previewHref !== null,
+    enabled: isText && previewHref !== null,
     gcTime: 0,
   });
 
   const error =
     destination.error ??
-    text.error ??
-    (mediaFailed ? new Error("Failed to load artifact") : null);
+    (isText ? text.error : null) ??
+    (mediaFailed && !isText ? new Error("Failed to load artifact") : null);
   if (error) {
     return (
       <PreviewMessage>
@@ -880,6 +938,26 @@ function ArtifactPreview({
     );
   }
   if (!previewHref) return <PreviewMessage>Loading preview…</PreviewMessage>;
+
+  if (isText) {
+    if (!text.data) return <PreviewMessage>Loading preview…</PreviewMessage>;
+    return (
+      <div className="flex min-h-0 flex-col gap-2">
+        <div className="max-h-[65vh] overflow-auto rounded-md border border-border/60">
+          <CodeFile
+            file={getTextPreviewFile(artifact, text.data.text)}
+            options={TEXT_PREVIEW_OPTIONS}
+          />
+        </div>
+        {text.data.truncated ? (
+          <p className="text-xs text-muted-foreground">
+            Showing the first {formatBytes(MAX_TEXT_PREVIEW_BYTES)}. Download
+            the file to see the rest.
+          </p>
+        ) : null}
+      </div>
+    );
+  }
 
   if (kind === "image") {
     return (
@@ -904,32 +982,15 @@ function ArtifactPreview({
     );
   }
 
-  if (kind === "html") {
-    return artifact.kind === "visual" ? (
-      <VisualFrame src={previewHref} title={artifact.name} />
-    ) : (
-      <iframe
-        src={previewHref}
-        title={artifact.name}
-        sandbox={getHtmlPreviewSandbox(artifact.kind)}
-        className="h-[70vh] w-full rounded-md border border-border/60 bg-white"
-      />
-    );
-  }
-
-  if (!text.data) return <PreviewMessage>Loading preview…</PreviewMessage>;
-  return (
-    <div className="flex min-h-0 flex-col gap-2">
-      <pre className="max-h-[65vh] overflow-auto rounded-md border border-border/60 bg-black/35 p-3 font-mono text-xs leading-5 whitespace-pre-wrap break-words">
-        <code>{formatTextPreview(text.data.text, artifact.mimeType)}</code>
-      </pre>
-      {text.data.truncated ? (
-        <p className="text-xs text-muted-foreground">
-          Showing the first {formatBytes(MAX_TEXT_PREVIEW_BYTES)}. Download the
-          file to see the rest.
-        </p>
-      ) : null}
-    </div>
+  return artifact.kind === "visual" ? (
+    <VisualFrame src={previewHref} title={artifact.name} />
+  ) : (
+    <iframe
+      src={previewHref}
+      title={artifact.name}
+      sandbox={getHtmlPreviewSandbox(artifact.kind)}
+      className="h-[70vh] w-full rounded-md border border-border/60 bg-white"
+    />
   );
 }
 

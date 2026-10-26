@@ -1,6 +1,12 @@
 import { useArtifactPreviewDialogStore } from "@renderer/components/artifacts-page";
-import { useAppState } from "@renderer/components/sync-state-provider";
-import { useActiveSessionStore } from "@renderer/hooks/use-active-session-id";
+import {
+  useAppState,
+  useAppStateStore,
+} from "@renderer/components/sync-state-provider";
+import {
+  switchSession,
+  useActiveSessionStore,
+} from "@renderer/hooks/use-active-session-id";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import {
   getNewArtifactToastTitle,
@@ -10,6 +16,7 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 export function ArtifactToastListener() {
+  const store = useAppStateStore();
   const artifacts = useAppState((state) => state.artifacts);
   const knownIds = useRef<Set<string> | null>(null);
 
@@ -30,17 +37,21 @@ export function ArtifactToastListener() {
       const isVisual = artifact.kind === "visual";
       toast.success(getNewArtifactToastTitle(artifact), {
         action: {
-          label: isVisual ? "View" : "View artifacts",
+          label: isVisual ? "View" : "Open session",
           onClick: () => {
-            if (isVisual)
+            if (isVisual) {
               useArtifactPreviewDialogStore.getState().open(artifact.id);
-            else useMainViewStore.getState().showArtifacts(artifact.sessionId);
+            } else if (store.getState().sessions[artifact.sessionId]) {
+              switchSession(artifact.sessionId);
+            } else {
+              useMainViewStore.getState().showArtifacts(artifact.sessionId);
+            }
           },
         },
       });
     }
     knownIds.current = currentIds;
-  }, [artifacts]);
+  }, [artifacts, store]);
 
   return null;
 }

@@ -3,7 +3,9 @@ import {
   getArtifactPreviewKind,
   getHtmlPreviewSandbox,
   getNewArtifactToastTitle,
+  getTextPreviewFile,
   getVisualFrameHeight,
+  hasArtifactSourceView,
   readTextPreview,
   shouldToastNewArtifact,
 } from "@renderer/lib/artifact-preview";
@@ -34,6 +36,38 @@ describe("getArtifactPreviewKind", () => {
     [undefined, null],
   ] as const)("maps %s to %s", (mimeType, kind) => {
     expect(getArtifactPreviewKind(mimeType)).toBe(kind);
+  });
+});
+
+describe("hasArtifactSourceView", () => {
+  it.each([
+    ["file", "image/svg+xml", true],
+    ["file", "text/html", true],
+    ["visual", "text/html", false],
+    ["file", "image/png", false],
+    ["file", "text/plain", false],
+  ] as const)("%s %s -> %s", (kind, mimeType, expected) => {
+    expect(hasArtifactSourceView({ kind, mimeType })).toBe(expected);
+  });
+});
+
+describe("getTextPreviewFile", () => {
+  it("uses the file name on disk so a custom title keeps its language", () => {
+    expect(
+      getTextPreviewFile({ name: "Plan", path: "/repo/src/plan.ts" }, "x").name,
+    ).toBe("plan.ts");
+    expect(
+      getTextPreviewFile({ name: "Plan", path: "C:\\repo\\plan.py" }, "x").name,
+    ).toBe("plan.py");
+  });
+
+  it("highlights SVG source as XML", () => {
+    expect(
+      getTextPreviewFile(
+        { name: "logo", path: "/a/logo.svg", mimeType: "image/svg+xml" },
+        "<svg/>",
+      ).lang,
+    ).toBe("xml");
   });
 });
 

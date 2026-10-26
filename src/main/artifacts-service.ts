@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { defineServiceState } from "@shared/service-state";
 import { HTML_RENDER_MAX_TITLE_LENGTH } from "@shared/visuals";
@@ -38,23 +46,61 @@ export const defineArtifactsPersistence = (state: ArtifactsState) =>
   });
 
 const mimeTypesByExtension: Record<string, string> = {
+  ".avif": "image/avif",
+  ".bmp": "image/bmp",
+  ".cjs": "text/javascript",
+  ".css": "text/css",
   ".csv": "text/csv",
   ".gif": "image/gif",
+  ".htm": "text/html",
   ".html": "text/html",
+  ".ico": "image/x-icon",
   ".jpeg": "image/jpeg",
   ".jpg": "image/jpeg",
+  ".js": "text/javascript",
   ".json": "application/json",
+  ".jsonl": "text/plain",
+  ".log": "text/plain",
+  ".markdown": "text/markdown",
   ".md": "text/markdown",
+  ".mjs": "text/javascript",
   ".pdf": "application/pdf",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".tsv": "text/tab-separated-values",
   ".txt": "text/plain",
   ".webp": "image/webp",
+  ".xml": "text/xml",
+  ".yaml": "text/yaml",
+  ".yml": "text/yaml",
   ".zip": "application/zip",
 };
 
-function inferMimeType(filePath: string): string | undefined {
-  return mimeTypesByExtension[path.extname(filePath).toLowerCase()];
+const TEXT_SNIFF_BYTES = 8192;
+
+async function looksLikeText(filePath: string): Promise<boolean> {
+  const file = await open(filePath, "r").catch(() => null);
+  if (!file) return false;
+  try {
+    const buffer = Buffer.alloc(TEXT_SNIFF_BYTES);
+    const { bytesRead } = await file.read(buffer, 0, TEXT_SNIFF_BYTES, 0);
+    const sample = buffer.subarray(0, bytesRead);
+    if (sample.includes(0)) return false;
+    new TextDecoder("utf-8", { fatal: true }).decode(sample, {
+      stream: bytesRead === TEXT_SNIFF_BYTES,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    await file.close();
+  }
+}
+
+async function inferMimeType(filePath: string): Promise<string | undefined> {
+  const known = mimeTypesByExtension[path.extname(filePath).toLowerCase()];
+  if (known) return known;
+  return (await looksLikeText(filePath)) ? "text/plain" : undefined;
 }
 
 export type ArtifactLocation =
@@ -121,6 +167,7 @@ export class ArtifactsService {
     if (!stats.isFile()) {
       throw new Error("Only regular files can be published as artifacts");
     }
+    const mimeType = await inferMimeType(resolvedPath);
 
     const existing = Object.values(this.state.state).find(
       (artifact) =>
@@ -135,6 +182,7 @@ export class ArtifactsService {
         draft.name = input.name?.trim() || draft.name;
         draft.description = input.description?.trim() || draft.description;
         draft.size = stats.size;
+        draft.mimeType = mimeType;
         draft.available = true;
       });
       return this.state.state[existing.id] ?? existing;
@@ -148,7 +196,7 @@ export class ArtifactsService {
       name: input.name?.trim() || path.basename(resolvedPath),
       description: input.description?.trim() || undefined,
       size: stats.size,
-      mimeType: inferMimeType(resolvedPath),
+      mimeType,
       createdAt: Date.now(),
       available: true,
     };

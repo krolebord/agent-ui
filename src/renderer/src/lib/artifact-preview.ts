@@ -1,4 +1,5 @@
 import type { Artifact } from "@main/artifacts-service";
+import type { FileContents } from "@pierre/diffs";
 
 export type ArtifactPreviewKind = "image" | "pdf" | "html" | "text";
 
@@ -71,6 +72,26 @@ export async function readTextPreview(
     text += decoder.decode(value, { stream: true });
   }
   return { text: text + decoder.decode(), truncated: false };
+}
+
+export function hasArtifactSourceView(
+  artifact: Pick<Artifact, "kind" | "mimeType">,
+): boolean {
+  return (
+    artifact.kind === "file" &&
+    (artifact.mimeType === "image/svg+xml" || artifact.mimeType === "text/html")
+  );
+}
+
+export function getTextPreviewFile(
+  artifact: Pick<Artifact, "name" | "path" | "mimeType">,
+  text: string,
+): FileContents {
+  return {
+    name: artifact.path.split(/[\\/]/).pop() || artifact.name,
+    contents: formatTextPreview(text, artifact.mimeType),
+    lang: artifact.mimeType === "image/svg+xml" ? "xml" : undefined,
+  };
 }
 
 export function formatTextPreview(

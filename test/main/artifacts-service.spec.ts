@@ -106,6 +106,26 @@ describe("ArtifactsService", () => {
     expect(other.id).not.toBe(first.id);
   });
 
+  it.each([
+    ["config.yml", "a: 1", "text/yaml"],
+    ["index.ts", "export const a = 1;", "text/plain"],
+    ["Dockerfile", "FROM node:22", "text/plain"],
+    ["notes.unknown", "caf\u00e9", "text/plain"],
+    ["empty.unknown", "", "text/plain"],
+    ["blob.bin", Buffer.from([0x7f, 0x45, 0x00, 0x01]), undefined],
+    ["latin1.unknown", Buffer.from([0x63, 0x61, 0x66, 0xe9]), undefined],
+  ])("infers the MIME type of %s", async (name, contents, mimeType) => {
+    await writeFile(path.join(tempRoot, name), contents);
+
+    const artifact = await service.publish({
+      sessionId: "session-123",
+      cwd: tempRoot,
+      filePath: name,
+    });
+
+    expect(artifact.mimeType).toBe(mimeType);
+  });
+
   it("marks artifacts missing without removing their metadata", async () => {
     const filePath = path.join(tempRoot, "temporary.pdf");
     await writeFile(filePath, "pdf");
