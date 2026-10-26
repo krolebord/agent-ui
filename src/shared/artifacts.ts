@@ -1,0 +1,1 @@
+export const MAX_EDITABLE_ARTIFACT_BYTES = 1024 * 1024;

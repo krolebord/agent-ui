@@ -31,16 +31,14 @@ function hashContents(contents: Uint8Array): string {
 
 function decodeTextFile(contents: Uint8Array): string {
   if (contents.includes(0)) {
-    throw new UnsupportedEditableFileError(
-      "Binary files cannot be edited in the diff pane.",
-    );
+    throw new UnsupportedEditableFileError("Binary files cannot be edited.");
   }
 
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(contents);
   } catch {
     throw new UnsupportedEditableFileError(
-      "This file is not valid UTF-8 and cannot be edited in the diff pane.",
+      "This file is not valid UTF-8 and cannot be edited.",
     );
   }
 }
@@ -89,17 +87,22 @@ async function resolveEditableFilePath(
   return resolvedPath;
 }
 
-export async function readEditableFileSnapshot(
-  projectPath: string,
+export async function readEditableFile(
   filePath: string,
 ): Promise<EditableFileSnapshot> {
-  const resolvedPath = await resolveEditableFilePath(projectPath, filePath);
-  const bytes = await readFile(resolvedPath);
+  const bytes = await readFile(filePath);
   return {
     contents: decodeTextFile(bytes),
     revision: hashContents(bytes),
     size: bytes.byteLength,
   };
+}
+
+export async function readEditableFileSnapshot(
+  projectPath: string,
+  filePath: string,
+): Promise<EditableFileSnapshot> {
+  return readEditableFile(await resolveEditableFilePath(projectPath, filePath));
 }
 
 export async function readGitFileContents(
@@ -127,6 +130,28 @@ export async function readGitFileContents(
   return decodeTextFile(Buffer.from(contents));
 }
 
+export async function saveEditableFile(
+  filePath: string,
+  input: { contents: string; expectedRevision: string },
+): Promise<{ revision: string }> {
+  let currentBytes: Buffer;
+  try {
+    currentBytes = await readFile(filePath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+      throw new EditableFileConflictError();
+    }
+    throw error;
+  }
+  if (hashContents(currentBytes) !== input.expectedRevision) {
+    throw new EditableFileConflictError();
+  }
+
+  const nextBytes = Buffer.from(input.contents, "utf8");
+  await writeFile(filePath, nextBytes);
+  return { revision: hashContents(nextBytes) };
+}
+
 export async function saveEditableFileSnapshot(
   projectPath: string,
   input: { filePath: string; contents: string; expectedRevision: string },
@@ -143,12 +168,5 @@ export async function saveEditableFileSnapshot(
     }
     throw error;
   }
-  const currentBytes = await readFile(resolvedPath);
-  if (hashContents(currentBytes) !== input.expectedRevision) {
-    throw new EditableFileConflictError();
-  }
-
-  const nextBytes = Buffer.from(input.contents, "utf8");
-  await writeFile(resolvedPath, nextBytes);
-  return { revision: hashContents(nextBytes) };
+  return saveEditableFile(resolvedPath, input);
 }

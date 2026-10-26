@@ -1,4 +1,5 @@
 import {
+  canEditArtifact,
   formatTextPreview,
   getArtifactPreviewKind,
   getHtmlPreviewSandbox,
@@ -9,6 +10,7 @@ import {
   readTextPreview,
   shouldToastNewArtifact,
 } from "@renderer/lib/artifact-preview";
+import { MAX_EDITABLE_ARTIFACT_BYTES } from "@shared/artifacts";
 import { describe, expect, it } from "vitest";
 
 function streamResponse(chunks: string[]): Response {
@@ -48,6 +50,24 @@ describe("hasArtifactSourceView", () => {
     ["file", "text/plain", false],
   ] as const)("%s %s -> %s", (kind, mimeType, expected) => {
     expect(hasArtifactSourceView({ kind, mimeType })).toBe(expected);
+  });
+});
+
+describe("canEditArtifact", () => {
+  const file = { kind: "file", available: true, size: 10 } as const;
+
+  it("edits available text files within the size limit", () => {
+    expect(canEditArtifact(file, "text")).toBe(true);
+  });
+
+  it.each([
+    ["visuals", { ...file, kind: "visual" }, "text"],
+    ["missing files", { ...file, available: false }, "text"],
+    ["large files", { ...file, size: MAX_EDITABLE_ARTIFACT_BYTES + 1 }, "text"],
+    ["images", file, "image"],
+    ["HTML", file, "html"],
+  ] as const)("does not edit %s", (_label, artifact, kind) => {
+    expect(canEditArtifact(artifact, kind)).toBe(false);
   });
 });
 

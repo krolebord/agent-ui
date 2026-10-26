@@ -1,5 +1,6 @@
 import type { Artifact } from "@main/artifacts-service";
 import type { FileContents } from "@pierre/diffs";
+import { MAX_EDITABLE_ARTIFACT_BYTES } from "@shared/artifacts";
 
 export type ArtifactPreviewKind = "image" | "pdf" | "html" | "text";
 
@@ -83,13 +84,25 @@ export function hasArtifactSourceView(
   );
 }
 
+export function canEditArtifact(
+  artifact: Pick<Artifact, "kind" | "available" | "size">,
+  previewKind: ArtifactPreviewKind,
+): boolean {
+  return (
+    artifact.kind === "file" &&
+    artifact.available &&
+    previewKind === "text" &&
+    artifact.size <= MAX_EDITABLE_ARTIFACT_BYTES
+  );
+}
+
 export function getTextPreviewFile(
   artifact: Pick<Artifact, "name" | "path" | "mimeType">,
-  text: string,
+  contents: string,
 ): FileContents {
   return {
     name: artifact.path.split(/[\\/]/).pop() || artifact.name,
-    contents: formatTextPreview(text, artifact.mimeType),
+    contents,
     lang: artifact.mimeType === "image/svg+xml" ? "xml" : undefined,
   };
 }

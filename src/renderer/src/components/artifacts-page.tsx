@@ -1,5 +1,9 @@
 import type { Artifact, ArtifactLocation } from "@main/artifacts-service";
-import { File as CodeFile, type FileOptions } from "@pierre/diffs/react";
+import {
+  File as CodeFile,
+  EditProvider,
+  type FileOptions,
+} from "@pierre/diffs/react";
 import { MobileSidebarTrigger } from "@renderer/components/mobile-sidebar-trigger";
 import { useAppState } from "@renderer/components/sync-state-provider";
 import { Badge } from "@renderer/components/ui/badge";
@@ -17,6 +21,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@renderer/components/ui/toggle-group";
+import { useDiffsEditorFactory } from "@renderer/hooks/use-diffs-editor-factory";
 import { useMainViewStore } from "@renderer/hooks/use-main-view";
 import {
   type CleanupMark,
@@ -27,6 +32,9 @@ import {
   nextCleanupMark,
 } from "@renderer/lib/artifact-cleanup";
 import {
+  type ArtifactPreviewKind,
+  canEditArtifact,
+  formatTextPreview,
   getArtifactPreviewKind,
   getHtmlPreviewSandbox,
   getTextPreviewFile,
@@ -43,6 +51,7 @@ import {
   getProjectNameFromPath,
 } from "@renderer/services/terminal-session-selectors";
 import { readVisualContentHeight } from "@shared/visuals";
+import { useHotkey } from "@tanstack/react-hotkeys";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Archive,
@@ -57,6 +66,8 @@ import {
   LoaderCircle,
   Minus,
   PackageOpen,
+  Pencil,
+  Save,
   Search,
   Trash2,
   X,
@@ -774,20 +785,52 @@ function ArtifactRow({
   );
 }
 
+function confirmDiscardEdits(onConfirm: () => void) {
+  useConfirmDialogStore.getState().confirm({
+    title: "Discard unsaved edits?",
+    description: "Your changes to this artifact haven't been saved.",
+    confirmLabel: "Discard",
+    onConfirm,
+  });
+}
+
 export const useArtifactPreviewDialogStore = create(
   combine(
     {
       isOpen: false,
       artifactId: null as string | null,
+      editing: false,
+      editDirty: false,
     },
-    (set) => ({
-      open: (artifactId: string) => {
-        set({ isOpen: true, artifactId });
-      },
-      close: () => {
-        set({ isOpen: false });
-      },
-    }),
+    (set, get) => {
+      const leaveEditing = (then: () => void) => {
+        if (get().editDirty) confirmDiscardEdits(then);
+        else then();
+      };
+      return {
+        open: (artifactId: string) => {
+          const state = get();
+          if (state.isOpen && state.artifactId === artifactId) return;
+          leaveEditing(() =>
+            set({ isOpen: true, artifactId, editing: false, editDirty: false }),
+          );
+        },
+        close: () => {
+          leaveEditing(() =>
+            set({ isOpen: false, editing: false, editDirty: false }),
+          );
+        },
+        startEditing: () => {
+          set({ editing: true, editDirty: false });
+        },
+        stopEditing: () => {
+          leaveEditing(() => set({ editing: false, editDirty: false }));
+        },
+        setEditDirty: (editDirty: boolean) => {
+          set({ editDirty });
+        },
+      };
+    },
   ),
 );
 
@@ -801,6 +844,10 @@ export function ArtifactPreviewDialog() {
   const isOpen = useArtifactPreviewDialogStore((state) => state.isOpen);
   const artifactId = useArtifactPreviewDialogStore((state) => state.artifactId);
   const close = useArtifactPreviewDialogStore((state) => state.close);
+  const editing = useArtifactPreviewDialogStore((state) => state.editing);
+  const startEditing = useArtifactPreviewDialogStore(
+    (state) => state.startEditing,
+  );
   const artifact = useAppState((state) =>
     artifactId ? (state.artifacts[artifactId] ?? null) : null,
   );
@@ -825,23 +872,44 @@ export function ArtifactPreviewDialog() {
               {artifact.mimeType ? ` · ${artifact.mimeType}` : null}
             </DialogDescription>
           </DialogHeader>
-          <ArtifactPreview key={artifact.id} artifact={artifact} kind={kind} />
-          <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5"
-              disabled={!artifact.available || downloading}
-              onClick={async () => {
-                setDownloading(true);
-                await downloadArtifact(artifact);
-                setDownloading(false);
-              }}
-            >
-              <Download className="size-3.5" />
-              Download
-            </Button>
-          </DialogFooter>
+          {editing ? (
+            <ArtifactEditor key={artifact.id} artifact={artifact} />
+          ) : (
+            <>
+              <ArtifactPreview
+                key={artifact.id}
+                artifact={artifact}
+                kind={kind}
+              />
+              <DialogFooter>
+                {canEditArtifact(artifact, kind) ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={startEditing}
+                  >
+                    <Pencil className="size-3.5" />
+                    Edit
+                  </Button>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  disabled={!artifact.available || downloading}
+                  onClick={async () => {
+                    setDownloading(true);
+                    await downloadArtifact(artifact);
+                    setDownloading(false);
+                  }}
+                >
+                  <Download className="size-3.5" />
+                  Download
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       ) : null}
     </Dialog>
@@ -854,9 +922,236 @@ const TEXT_PREVIEW_OPTIONS = {
   disableFileHeader: true,
 } as const satisfies FileOptions<undefined, undefined>;
 
-type ArtifactPreviewKind = NonNullable<
-  ReturnType<typeof getArtifactPreviewKind>
->;
+const TEXT_EDIT_OPTIONS = {
+  ...TEXT_PREVIEW_OPTIONS,
+  overflow: "scroll",
+} as const satisfies FileOptions<undefined, undefined>;
+
+type ArtifactEditDraft = {
+  key: number;
+  revision: string;
+  loadedContents: string;
+  savedContents: string;
+  contents: string;
+  conflict: boolean;
+};
+
+let artifactEditSequence = 0;
+
+function createEditDraft(snapshot: {
+  contents: string;
+  revision: string;
+}): ArtifactEditDraft {
+  return {
+    key: ++artifactEditSequence,
+    revision: snapshot.revision,
+    loadedContents: snapshot.contents,
+    savedContents: snapshot.contents,
+    contents: snapshot.contents,
+    conflict: false,
+  };
+}
+
+function ArtifactEditor({ artifact }: { artifact: Artifact }) {
+  const stopEditing = useArtifactPreviewDialogStore(
+    (state) => state.stopEditing,
+  );
+  const setEditDirty = useArtifactPreviewDialogStore(
+    (state) => state.setEditDirty,
+  );
+  const confirm = useConfirmDialogStore((state) => state.confirm);
+  const { createEditor, loadError, retry } = useDiffsEditorFactory<undefined>();
+  const snapshot = useQuery({
+    ...orpc.artifacts.readForEdit.queryOptions({ input: { id: artifact.id } }),
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const [draft, setDraft] = useState<ArtifactEditDraft | null>(null);
+  const save = useMutation(orpc.artifacts.saveEdit.mutationOptions());
+
+  useEffect(() => {
+    if (snapshot.data && !draft) setDraft(createEditDraft(snapshot.data));
+  }, [snapshot.data, draft]);
+
+  const dirty = draft !== null && draft.contents !== draft.savedContents;
+  useEffect(() => {
+    setEditDirty(dirty);
+  }, [dirty, setEditDirty]);
+
+  const loadedContents = draft?.loadedContents;
+  const file = useMemo(
+    () =>
+      loadedContents === undefined
+        ? null
+        : getTextPreviewFile(
+            {
+              name: artifact.name,
+              path: artifact.path,
+              mimeType: artifact.mimeType,
+            },
+            loadedContents,
+          ),
+    [artifact.name, artifact.path, artifact.mimeType, loadedContents],
+  );
+
+  const saveDraft = () => {
+    if (!draft || !dirty || draft.conflict || save.isPending) return;
+    const contents = draft.contents;
+    save.mutate(
+      { id: artifact.id, contents, expectedRevision: draft.revision },
+      {
+        onSuccess: (result) => {
+          if (result.status === "conflict") {
+            setDraft((current) => current && { ...current, conflict: true });
+            return;
+          }
+          setDraft(
+            (current) =>
+              current && {
+                ...current,
+                revision: result.revision,
+                savedContents: contents,
+              },
+          );
+          toast.success("Changes saved");
+        },
+        onError: (error) => {
+          toast.error(error.message || "Failed to save changes");
+        },
+      },
+    );
+  };
+
+  const editorRef = useRef<HTMLDivElement>(null);
+  useHotkey("Mod+S", saveDraft, { target: editorRef, ignoreInputs: false });
+
+  const reload = () => {
+    const run = async () => {
+      const result = await snapshot.refetch();
+      if (result.isSuccess) {
+        setDraft(createEditDraft(result.data));
+      } else {
+        toast.error(result.error?.message || "Failed to reload the file");
+      }
+    };
+    if (!dirty) {
+      void run();
+      return;
+    }
+    confirm({
+      title: "Reload file from disk?",
+      description:
+        "Your unsaved edits will be discarded and replaced with the latest version on disk.",
+      confirmLabel: "Reload",
+      onConfirm: run,
+    });
+  };
+
+  const copyEdits = () => {
+    if (!draft) return;
+    void navigator.clipboard.writeText(draft.contents);
+    toast.success("Unsaved edits copied");
+  };
+
+  let body: React.ReactNode;
+  if (snapshot.error && !draft) {
+    body = (
+      <PreviewMessage>
+        {snapshot.error.message || "Failed to load the file"}
+      </PreviewMessage>
+    );
+  } else if (loadError) {
+    body = (
+      <PreviewMessage>
+        <span className="flex items-center gap-2">
+          Failed to load the editor.
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={retry}
+          >
+            Retry
+          </Button>
+        </span>
+      </PreviewMessage>
+    );
+  } else if (!createEditor || !draft || !file) {
+    body = <PreviewMessage>Loading editor…</PreviewMessage>;
+  } else {
+    body = (
+      <div className="max-h-[65vh] overflow-auto rounded-md border border-border/60">
+        <EditProvider createEditor={createEditor}>
+          <CodeFile
+            key={draft.key}
+            file={file}
+            options={TEXT_EDIT_OPTIONS}
+            edit
+            onEditChange={({ file: edited }) => {
+              setDraft(
+                (current) =>
+                  current && { ...current, contents: edited.contents },
+              );
+            }}
+          />
+        </EditProvider>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={editorRef} className="contents">
+      {draft?.conflict ? (
+        <div className="flex items-center gap-2 rounded-md border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-200">
+          <span className="flex-1">
+            This file changed on disk after you started editing.
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={copyEdits}
+          >
+            Copy edits
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-[11px]"
+            onClick={reload}
+          >
+            Reload
+          </Button>
+        </div>
+      ) : null}
+      {body}
+      <DialogFooter>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8"
+          onClick={stopEditing}
+        >
+          Done
+        </Button>
+        <Button
+          size="sm"
+          className="h-8 gap-1.5"
+          disabled={!dirty || draft?.conflict || save.isPending}
+          onClick={saveDraft}
+        >
+          {save.isPending ? (
+            <LoaderCircle className="size-3.5 animate-spin" />
+          ) : (
+            <Save className="size-3.5" />
+          )}
+          Save
+        </Button>
+      </DialogFooter>
+    </div>
+  );
+}
 
 function ArtifactPreview({
   artifact,
@@ -945,7 +1240,10 @@ function ArtifactPreviewBody({
       <div className="flex min-h-0 flex-col gap-2">
         <div className="max-h-[65vh] overflow-auto rounded-md border border-border/60">
           <CodeFile
-            file={getTextPreviewFile(artifact, text.data.text)}
+            file={getTextPreviewFile(
+              artifact,
+              formatTextPreview(text.data.text, artifact.mimeType),
+            )}
             options={TEXT_PREVIEW_OPTIONS}
           />
         </div>

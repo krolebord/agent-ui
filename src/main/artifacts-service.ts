@@ -9,12 +9,21 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { ORPCError } from "@orpc/server";
+import { MAX_EDITABLE_ARTIFACT_BYTES } from "@shared/artifacts";
 import { defineServiceState } from "@shared/service-state";
 import { HTML_RENDER_MAX_TITLE_LENGTH } from "@shared/visuals";
 import simpleGit from "simple-git";
 import { z } from "zod";
 import { procedure } from "./orpc";
 import { defineStatePersistence } from "./persistence-orchestrator";
+import {
+  EditableFileConflictError,
+  type EditableFileSnapshot,
+  readEditableFile,
+  saveEditableFile,
+  UnsupportedEditableFileError,
+} from "./project-file-edit";
 
 export const artifactSchema = z.object({
   id: z.string(),
@@ -388,11 +397,65 @@ export class ArtifactsService {
     });
   }
 
+  async readForEdit(id: string): Promise<EditableFileSnapshot> {
+    const artifact = this.getEditableArtifact(id);
+    const stats = await stat(artifact.path).catch(() => null);
+    if (!stats?.isFile()) {
+      this.markUnavailable(id);
+      throw new UnsupportedEditableFileError("The artifact file is missing.");
+    }
+    if (stats.size > MAX_EDITABLE_ARTIFACT_BYTES) {
+      throw new UnsupportedEditableFileError(
+        "Files larger than 1 MB can't be edited here.",
+      );
+    }
+    return readEditableFile(artifact.path);
+  }
+
+  async saveEdit(
+    id: string,
+    input: { contents: string; expectedRevision: string },
+  ): Promise<{ revision: string }> {
+    const artifact = this.getEditableArtifact(id);
+    const size = Buffer.byteLength(input.contents, "utf8");
+    if (size > MAX_EDITABLE_ARTIFACT_BYTES) {
+      throw new UnsupportedEditableFileError(
+        "Files larger than 1 MB can't be edited here.",
+      );
+    }
+    const result = await saveEditableFile(artifact.path, input);
+    this.state.updateState((artifacts) => {
+      const draft = artifacts[id];
+      if (!draft) return;
+      draft.size = size;
+      draft.available = true;
+    });
+    return result;
+  }
+
+  private getEditableArtifact(id: string): Artifact {
+    const artifact = this.state.state[id];
+    if (!artifact) {
+      throw new ORPCError("NOT_FOUND", { message: "Artifact not found" });
+    }
+    if (artifact.kind !== "file") {
+      throw new UnsupportedEditableFileError("Visuals can't be edited.");
+    }
+    return artifact;
+  }
+
   markUnavailable(id: string): void {
     this.state.updateState((artifacts) => {
       if (artifacts[id]) artifacts[id].available = false;
     });
   }
+}
+
+function toEditError(error: unknown): unknown {
+  if (error instanceof UnsupportedEditableFileError) {
+    return new ORPCError("BAD_REQUEST", { message: error.message });
+  }
+  return error;
 }
 
 export const artifactsRouter = {
@@ -422,6 +485,35 @@ export const artifactsRouter = {
     .handler(({ input, context }) =>
       context.artifactsService.deleteFiles(input.ids),
     ),
+  readForEdit: procedure
+    .input(z.object({ id: z.string() }))
+    .handler(async ({ input, context }) => {
+      try {
+        const snapshot = await context.artifactsService.readForEdit(input.id);
+        return { contents: snapshot.contents, revision: snapshot.revision };
+      } catch (error) {
+        throw toEditError(error);
+      }
+    }),
+  saveEdit: procedure
+    .input(
+      z.object({
+        id: z.string(),
+        contents: z.string(),
+        expectedRevision: z.string().regex(/^[0-9a-f]{64}$/i),
+      }),
+    )
+    .handler(async ({ input, context }) => {
+      try {
+        const result = await context.artifactsService.saveEdit(input.id, input);
+        return { status: "saved" as const, revision: result.revision };
+      } catch (error) {
+        if (error instanceof EditableFileConflictError) {
+          return { status: "conflict" as const };
+        }
+        throw toEditError(error);
+      }
+    }),
   getDownloadUrl: procedure
     .input(z.object({ id: z.string() }))
     .handler(({ input, context }) => {

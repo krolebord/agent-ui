@@ -17,6 +17,11 @@ import {
   artifactSchema,
   defineArtifactsState,
 } from "../../src/main/artifacts-service";
+import {
+  EditableFileConflictError,
+  UnsupportedEditableFileError,
+} from "../../src/main/project-file-edit";
+import { MAX_EDITABLE_ARTIFACT_BYTES } from "../../src/shared/artifacts";
 
 describe("ArtifactsService", () => {
   let tempRoot: string;
@@ -124,6 +129,82 @@ describe("ArtifactsService", () => {
     });
 
     expect(artifact.mimeType).toBe(mimeType);
+  });
+
+  it("saves edits when the file hasn't changed since it was read", async () => {
+    const filePath = path.join(tempRoot, "notes.md");
+    await writeFile(filePath, "draft");
+    const artifact = await service.publish({
+      sessionId: "session-123",
+      cwd: tempRoot,
+      filePath,
+    });
+
+    const snapshot = await service.readForEdit(artifact.id);
+    expect(snapshot.contents).toBe("draft");
+
+    const result = await service.saveEdit(artifact.id, {
+      contents: "final version",
+      expectedRevision: snapshot.revision,
+    });
+
+    expect(result.revision).not.toBe(snapshot.revision);
+    await expect(readFile(filePath, "utf8")).resolves.toBe("final version");
+    expect(service.state.state[artifact.id]?.size).toBe(13);
+  });
+
+  it("refuses to save over a file that changed after it was read", async () => {
+    const filePath = path.join(tempRoot, "notes.md");
+    await writeFile(filePath, "draft");
+    const artifact = await service.publish({
+      sessionId: "session-123",
+      cwd: tempRoot,
+      filePath,
+    });
+    const snapshot = await service.readForEdit(artifact.id);
+    await writeFile(filePath, "agent update");
+
+    await expect(
+      service.saveEdit(artifact.id, {
+        contents: "my edit",
+        expectedRevision: snapshot.revision,
+      }),
+    ).rejects.toBeInstanceOf(EditableFileConflictError);
+    await expect(readFile(filePath, "utf8")).resolves.toBe("agent update");
+  });
+
+  it("does not edit visuals, binary files, or files over the size limit", async () => {
+    const visual = await service.publishVisual({
+      sessionId: "session-123",
+      html: "<p>hi</p>",
+      title: "Visual",
+    });
+    await expect(service.readForEdit(visual.id)).rejects.toBeInstanceOf(
+      UnsupportedEditableFileError,
+    );
+
+    await writeFile(path.join(tempRoot, "blob.bin"), Buffer.from([1, 0, 2]));
+    const binary = await service.publish({
+      sessionId: "session-123",
+      cwd: tempRoot,
+      filePath: "blob.bin",
+    });
+    await expect(service.readForEdit(binary.id)).rejects.toBeInstanceOf(
+      UnsupportedEditableFileError,
+    );
+
+    await writeFile(
+      path.join(tempRoot, "large.txt"),
+      "a".repeat(MAX_EDITABLE_ARTIFACT_BYTES + 1),
+    );
+    const large = await service.publish({
+      sessionId: "session-123",
+      cwd: tempRoot,
+      filePath: "large.txt",
+    });
+    await expect(service.readForEdit(large.id)).rejects.toBeInstanceOf(
+      UnsupportedEditableFileError,
+    );
   });
 
   it("marks artifacts missing without removing their metadata", async () => {

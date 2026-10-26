@@ -1,4 +1,4 @@
-import type { EditorFactory, EditorOptions } from "@pierre/diffs/edit";
+import type { EditorOptions } from "@pierre/diffs/edit";
 import type {
   AnnotationSide,
   DiffLineAnnotation,
@@ -35,6 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@renderer/components/ui/dropdown-menu";
+import { useDiffsEditorFactory } from "@renderer/hooks/use-diffs-editor-factory";
 import { useGitPush } from "@renderer/hooks/use-git-push";
 import { useIsMobile } from "@renderer/hooks/use-is-mobile";
 import {
@@ -351,37 +352,11 @@ function getProjectDiffStore(cwd: string): ProjectDiffStore {
 
 export function ProjectDiffPane({ cwd }: { cwd: string }) {
   const store = getProjectDiffStore(cwd);
-  const [createEditor, setCreateEditor] = useState<EditorFactory<
-    DiffReviewAnnotationMetadata,
-    undefined
-  > | null>(null);
-  const [editorLoadError, setEditorLoadError] = useState(false);
-  const editorLoaderMounted = useRef(false);
-
-  const loadEditor = useCallback(() => {
-    setEditorLoadError(false);
-    void import("@pierre/diffs/edit")
-      .then(({ Editor: DiffsEditor }) => {
-        if (!editorLoaderMounted.current) return;
-        const factory: EditorFactory<
-          DiffReviewAnnotationMetadata,
-          undefined
-        > = (editorType, options, editStateKey) =>
-          new DiffsEditor(editorType, options, editStateKey);
-        setCreateEditor(() => factory);
-      })
-      .catch(() => {
-        if (editorLoaderMounted.current) setEditorLoadError(true);
-      });
-  }, []);
-
-  useEffect(() => {
-    editorLoaderMounted.current = true;
-    loadEditor();
-    return () => {
-      editorLoaderMounted.current = false;
-    };
-  }, [loadEditor]);
+  const {
+    createEditor,
+    loadError: editorLoadError,
+    retry: loadEditor,
+  } = useDiffsEditorFactory<DiffReviewAnnotationMetadata>();
 
   if (!createEditor) {
     return (
