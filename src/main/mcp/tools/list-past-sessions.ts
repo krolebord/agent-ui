@@ -1,11 +1,18 @@
+import type { ClaudeProject } from "@shared/claude-types";
+import { partitionInboxSessions } from "@shared/session-lifecycle";
 import {
+  type SessionMemoryAgent,
   type SessionMemoryRelation,
   sessionMemoryAgents,
   sessionMemoryRelations,
 } from "@shared/session-memory";
 import { z } from "zod";
-import { loadDisplayTitles } from "../../session-memory/display";
-import { listConversations } from "../../session-memory/store/queries";
+import { excerpt, loadDisplayTitles } from "../../session-memory/display";
+import {
+  findIndexedAgentUiSessionIds,
+  listConversations,
+} from "../../session-memory/store/queries";
+import type { Session } from "../../sessions/state";
 import { defineMcpTool } from "../define-tool";
 import type { McpRequestContext } from "../session-token";
 import {
@@ -19,15 +26,22 @@ import {
   formatRelation,
   isPastSessionsAvailable,
   type PastSessionsServices,
+  type ProjectFilter,
   plural,
   resolveActiveWindow,
   resolveOwnConversationIds,
   resolveProjectFilter,
   runPastSessionsTool,
+  sessionMatchesProjectFilter,
+  sessionMemoryAgentOf,
   timezoneLabel,
 } from "./past-sessions";
 
 const PAGE_SIZE = 20;
+const MAX_UNINDEXED_SESSIONS_SHOWN = 10;
+
+const inboxFilters = ["unsettled", "active", "snoozed", "settled"] as const;
+type InboxFilter = (typeof inboxFilters)[number];
 
 export const listPastSessionsInputSchema = {
   agent: z.enum(sessionMemoryAgents).optional(),
@@ -55,6 +69,12 @@ export const listPastSessionsInputSchema = {
     .describe(
       "Default: main and forked conversations; forks only hold their own turns, not the copied history.",
     ),
+  inbox: z
+    .enum(inboxFilters)
+    .optional()
+    .describe(
+      "Only Agent UI sessions in this inbox state; unsettled = active or snoozed.",
+    ),
   offset: z
     .number()
     .int()
@@ -63,6 +83,42 @@ export const listPastSessionsInputSchema = {
 };
 
 type ListInput = z.output<z.ZodObject<typeof listPastSessionsInputSchema>>;
+
+/** Same partition as the inbox sidebar, limited to sessions with agent transcripts. */
+function resolveInboxSessions(
+  inbox: InboxFilter,
+  filters: { agent?: SessionMemoryAgent; project?: ProjectFilter },
+  sessions: Readonly<Record<string, Session>>,
+  projects: readonly ClaudeProject[],
+  context: McpRequestContext,
+  now: number,
+): Session[] {
+  const candidates = Object.values(sessions).filter((session) => {
+    const agent = sessionMemoryAgentOf(session);
+    return (
+      agent !== null &&
+      session.sessionId !== context.sessionId &&
+      (filters.agent === undefined || agent === filters.agent) &&
+      (filters.project === undefined ||
+        sessionMatchesProjectFilter(session, filters.project, projects))
+    );
+  });
+  const { active, snoozed, settled } = partitionInboxSessions(candidates, now);
+  switch (inbox) {
+    case "unsettled":
+      return [...active, ...snoozed];
+    case "active":
+      return active;
+    case "snoozed":
+      return snoozed;
+    case "settled":
+      return settled;
+    default: {
+      const exhaustive: never = inbox;
+      return exhaustive;
+    }
+  }
+}
 
 export async function listPastSessions(
   input: ListInput,
@@ -88,9 +144,21 @@ export async function listPastSessions(
         ? [input.relation]
         : ["main", "fork"];
 
+  const inboxSessions = input.inbox
+    ? resolveInboxSessions(
+        input.inbox,
+        { agent: input.agent, project },
+        sessions,
+        services.projectsState.state,
+        context,
+        now,
+      )
+    : undefined;
+
   const db = await services.sessionMemory.getDatabase();
   const excluded = await resolveOwnConversationIds(db, sessions, context);
   const rows = await listConversations(db, {
+    agentUiSessionId: inboxSessions?.map((session) => session.sessionId),
     agent: input.agent,
     projectPath: project?.projectPath,
     cwdPrefix: project?.cwdPrefix,
@@ -113,6 +181,7 @@ export async function listPastSessions(
     project,
     ...window,
     relation: relations && `${relations.join(" and ")} conversations only`,
+    inbox: input.inbox && `${input.inbox} Agent UI sessions`,
   });
   if (filters) lines.push(filters);
   if (excluded.length > 0) {
@@ -120,6 +189,26 @@ export async function listPastSessions(
   }
   const coverage = coverageNote(services.sessionMemory.getState());
   if (coverage) lines.push(`Coverage: ${coverage}`);
+  if (inboxSessions && offset === 0) {
+    const indexed = await findIndexedAgentUiSessionIds(
+      db,
+      inboxSessions.map((session) => session.sessionId),
+    );
+    const unindexed = inboxSessions.filter(
+      (session) => !indexed.has(session.sessionId),
+    );
+    if (unindexed.length > 0) {
+      const shown = unindexed
+        .slice(0, MAX_UNINDEXED_SESSIONS_SHOWN)
+        .map(
+          (session) => `"${excerpt(session.title, 60)}" (${session.sessionId})`,
+        );
+      const more = unindexed.length - shown.length;
+      lines.push(
+        `Not indexed yet, so not listed: ${shown.join(", ")}${more > 0 ? ` (+${more} more)` : ""}.`,
+      );
+    }
+  }
 
   if (conversations.length === 0) {
     lines.push(
@@ -141,6 +230,7 @@ export async function listPastSessions(
     const agentUiSession = formatAgentUiSession(
       conversation.agentUiSessionId,
       sessions,
+      now,
     );
     if (agentUiSession) lines.push(`   ${agentUiSession}`);
   }
@@ -156,7 +246,7 @@ export async function listPastSessions(
 export const listPastSessionsTool = defineMcpTool({
   name: "list_past_sessions",
   description:
-    "Lists the user's past agent conversations by recency, without a query. Use it for time-based references where search_past_sessions is weak. Same policy as search_past_sessions: only when the user or orchestrator explicitly refers to past work.",
+    'Lists the user\'s agent conversations by recency, without a query. Use it for time-based references where search_past_sessions is weak, or with inbox for Agent UI inbox sessions ("my unsettled sessions"). Same policy as search_past_sessions: only when the user or orchestrator explicitly refers to other sessions or past work.',
   inputSchema: listPastSessionsInputSchema,
   annotations: { readOnlyHint: true, openWorldHint: false },
   isAvailable: isPastSessionsAvailable,

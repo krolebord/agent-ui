@@ -47,7 +47,7 @@ export interface TurnRecord {
 
 export interface ListConversationsFilter
   extends Omit<SessionMemorySearchFilters, "excludeConversationIds"> {
-  agentUiSessionId?: string;
+  agentUiSessionId?: string | string[];
   /** Case-insensitive (ASCII) substring of the title or the opening user message. */
   text?: string;
   ids?: number[];
@@ -143,7 +143,11 @@ export async function listConversations(
     query = query.where("project_path", "=", filter.projectPath);
   }
   if (filter.agentUiSessionId !== undefined) {
-    query = query.where("agent_ui_session_id", "=", filter.agentUiSessionId);
+    const sessionIds = asArray(filter.agentUiSessionId);
+    if (sessionIds.length === 0) {
+      return [];
+    }
+    query = query.where("agent_ui_session_id", "in", sessionIds);
   }
   if (filter.ids !== undefined) {
     if (filter.ids.length === 0) {
@@ -268,6 +272,26 @@ export async function findConversationIdsByNativeIds(
 }
 
 /** First non-empty user message of each conversation, cut to `maxChars`. */
+export async function findIndexedAgentUiSessionIds(
+  db: SessionMemoryDb,
+  sessionIds: string[],
+): Promise<Set<string>> {
+  if (sessionIds.length === 0) {
+    return new Set();
+  }
+  const rows = await db
+    .selectFrom("conversations")
+    .select("agent_ui_session_id")
+    .distinct()
+    .where("agent_ui_session_id", "in", sessionIds)
+    .execute();
+  return new Set(
+    rows.flatMap((row) =>
+      row.agent_ui_session_id === null ? [] : [row.agent_ui_session_id],
+    ),
+  );
+}
+
 export async function getOpeningUserTexts(
   db: SessionMemoryDb,
   conversationIds: number[],

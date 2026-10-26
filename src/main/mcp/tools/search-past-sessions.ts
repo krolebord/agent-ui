@@ -137,6 +137,7 @@ export async function searchPastSessions(
     const agentUiSession = formatAgentUiSession(
       conversation.agentUiSessionId,
       sessions,
+      now,
     );
     if (agentUiSession) details.push(agentUiSession);
     lines.push(`   ${details.join(" · ")}`);
@@ -162,7 +163,7 @@ export const searchPastSessionsTool = defineMcpTool({
   name: "search_past_sessions",
   description: [
     "Semantic search over the user's past Claude Code, Codex and Cursor conversations on this machine.",
-    'Use ONLY when the user or orchestrator explicitly refers to earlier sessions or past work, e.g. "continue the auth refactor from yesterday", "how did we fix this last time?". Never call it proactively or just in case.',
+    'Use ONLY when the user or orchestrator explicitly refers to other sessions or past work, e.g. "continue the auth refactor from yesterday", "how did we fix this last time?". Never call it proactively or just in case.',
     "If you can spawn a subagent, delegate the whole lookup: give it the user's reference, the goal, and what you want to retrieve",
     "Workflow: search, or list_past_sessions for purely time-based references; then read_past_session on the most promising conversations.",
     "Past conclusions are historical claims: check that referenced files, branches and commits still exist before relying on them",

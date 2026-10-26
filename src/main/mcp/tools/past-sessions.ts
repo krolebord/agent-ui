@@ -3,6 +3,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ClaudeProject } from "@shared/claude-types";
+import {
+  type InboxStatus,
+  isSessionSettled,
+  isSessionSnoozed,
+  resolveInboxStatus,
+} from "@shared/session-lifecycle";
 import type {
   SessionMemoryAgent,
   SessionMemoryState,
@@ -213,6 +219,7 @@ export function describeFilters(
     agent?: string;
     project?: ProjectFilter;
     relation?: string;
+    inbox?: string;
   } & ActiveWindow,
 ): string | null {
   const parts: string[] = [];
@@ -224,6 +231,7 @@ export function describeFilters(
     );
   }
   if (filters.relation) parts.push(filters.relation);
+  if (filters.inbox) parts.push(filters.inbox);
   return parts.length > 0 ? `Filters: ${parts.join(" · ")}.` : null;
 }
 
@@ -247,6 +255,38 @@ function filterForProject(
   return { cwdPrefix: dir, label: `cwd under ${dir}` };
 }
 
+function isInsideDir(target: string, dir: string): boolean {
+  return target === dir || target.startsWith(`${dir}${path.sep}`);
+}
+
+function findProjectForCwd(
+  dir: string,
+  projects: readonly ClaudeProject[],
+): ClaudeProject | undefined {
+  return projects
+    .filter((candidate) => isInsideDir(dir, candidate.path))
+    .sort((a, b) => b.path.length - a.path.length)[0];
+}
+
+/** Mirrors how indexed conversations are linked to a project or cwd. */
+export function sessionMatchesProjectFilter(
+  session: Session,
+  filter: ProjectFilter,
+  projects: readonly ClaudeProject[],
+): boolean {
+  const dir = path.resolve(session.startupConfig.cwd);
+  if (filter.cwdPrefix !== undefined && !isInsideDir(dir, filter.cwdPrefix)) {
+    return false;
+  }
+  if (filter.projectPath !== undefined) {
+    const project = findProjectForCwd(dir, projects);
+    return (
+      (project?.worktreeOriginPath ?? project?.path) === filter.projectPath
+    );
+  }
+  return true;
+}
+
 function resolveCurrentProjectFilter(
   currentCwd: string | null,
   projects: readonly ClaudeProject[],
@@ -257,13 +297,7 @@ function resolveCurrentProjectFilter(
     );
   }
   const dir = path.resolve(currentCwd);
-  const project = projects
-    .filter(
-      (candidate) =>
-        dir === candidate.path ||
-        dir.startsWith(`${candidate.path}${path.sep}`),
-    )
-    .sort((a, b) => b.path.length - a.path.length)[0];
+  const project = findProjectForCwd(dir, projects);
   if (!project) {
     return { cwdPrefix: dir, label: `cwd under ${dir}` };
   }
@@ -358,6 +392,12 @@ function nativeIdsOf(
       return exhaustive;
     }
   }
+}
+
+export function sessionMemoryAgentOf(
+  session: Session,
+): SessionMemoryAgent | null {
+  return nativeIdsOf(session)?.agent ?? null;
 }
 
 /**
@@ -477,17 +517,40 @@ export function formatLocation(
   return parts.join(" · ");
 }
 
+const INBOX_STATUS_LABELS: Record<InboxStatus, string> = {
+  approval: "waiting for approval",
+  input: "waiting for input",
+  working: "working",
+  failed: "failed",
+  ready: "ready",
+};
+
+export function formatInboxState(session: Session, now: number): string {
+  if (isSessionSnoozed(session, now) && session.snoozedUntil !== undefined) {
+    return `snoozed until ${formatLocalTime(session.snoozedUntil)}`;
+  }
+  if (isSessionSettled(session)) {
+    return "settled";
+  }
+  return `active, ${INBOX_STATUS_LABELS[resolveInboxStatus(session)]}`;
+}
+
 export function formatAgentUiSession(
   sessionId: string | null,
   sessions: Readonly<Record<string, Session>>,
+  now: number,
 ): string | null {
   if (!sessionId) {
     return null;
   }
-  const title = sessions[sessionId]?.title;
-  return title
-    ? `agent-ui session "${excerpt(title, 60)}" (${sessionId})`
-    : `agent-ui session ${sessionId}`;
+  const session = sessions[sessionId];
+  if (!session) {
+    return `agent-ui session ${sessionId}`;
+  }
+  const inbox = `inbox: ${formatInboxState(session, now)}`;
+  return session.title
+    ? `agent-ui session "${excerpt(session.title, 60)}" (${sessionId}) · ${inbox}`
+    : `agent-ui session ${sessionId} · ${inbox}`;
 }
 
 export function formatRelation(

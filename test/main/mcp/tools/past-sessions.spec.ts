@@ -600,6 +600,115 @@ describe("past session tools", () => {
       expect(text).not.toContain("codex · ");
     });
 
+    describe("inbox filter", () => {
+      function inboxSession(
+        sessionId: string,
+        fields: Record<string, unknown>,
+      ): Session {
+        return {
+          type: "claude-local-terminal",
+          sessionId,
+          status: "idle",
+          createdAt: NOW - 5 * HOUR,
+          lastActivityAt: NOW - 2 * HOUR,
+          startupConfig: { cwd: "/work/app" },
+          ...fields,
+        } as unknown as Session;
+      }
+
+      beforeEach(async () => {
+        Object.assign(sessions["ocr-session"] as object, {
+          status: "stopped",
+          lastActivityAt: NOW - 3 * HOUR,
+          settledAt: NOW - HOUR,
+          settledOverride: "settled",
+        });
+        sessions["review-session"] = inboxSession("review-session", {
+          title: "Review the PR",
+          status: "awaiting_user_response",
+        });
+        sessions["snoozed-session"] = inboxSession("snoozed-session", {
+          type: "cursor-agent",
+          title: "Docs cleanup",
+          snoozedUntil: NOW + HOUR,
+          snoozedAt: NOW - HOUR,
+          startupConfig: { cwd: "/work/site" },
+        });
+        sessions["fresh-session"] = inboxSession("fresh-session", {
+          title: "Fresh start",
+          status: "running",
+        });
+        sessions["setup-session"] = inboxSession("setup-session", {
+          type: "worktree-setup",
+          title: "Worktree setup",
+        });
+
+        await addConversation("review-native", {
+          overrides: { cwd: "/work/app", title: "Review the PR" },
+          projectPath: "/work/app",
+          agentUiSessionId: "review-session",
+          turns: [makeTurn(0, { userText: "review the open PR" })],
+        });
+        await addConversation("docs-native", {
+          overrides: {
+            agent: "cursor",
+            cwd: "/work/site",
+            title: "Docs cleanup",
+          },
+          projectPath: "/work/site",
+          agentUiSessionId: "snoozed-session",
+          turns: [makeTurn(0, { userText: "clean up the docs" })],
+        });
+      });
+
+      it("lists conversations of unsettled sessions with their inbox state", async () => {
+        const text = await listPastSessions(
+          { inbox: "unsettled" },
+          services,
+          ownContext,
+          NOW,
+        );
+        expect(text).toContain("unsettled Agent UI sessions");
+        expect(text).toContain("2 past conversations");
+        expect(text).toContain(
+          'agent-ui session "Review the PR" (review-session) · inbox: active, waiting for input',
+        );
+        expect(text).toContain(
+          'agent-ui session "Docs cleanup" (snoozed-session) · inbox: snoozed until 2026-10-12 13:00',
+        );
+        expect(text).not.toContain("OCR benchmark");
+        expect(text).toContain(
+          'Not indexed yet, so not listed: "Fresh start" (fresh-session).',
+        );
+        expect(text).not.toContain("Worktree setup");
+        expect(text).not.toContain("own-session");
+      });
+
+      it("selects settled sessions and narrows by project", async () => {
+        const settled = await listPastSessions(
+          { inbox: "settled" },
+          services,
+          ownContext,
+          NOW,
+        );
+        expect(settled).toContain("1 past conversation,");
+        expect(settled).toContain(
+          'agent-ui session "OCR benchmark" (ocr-session) · inbox: settled',
+        );
+        expect(settled).not.toContain("Not indexed yet");
+
+        const site = await listPastSessions(
+          { inbox: "unsettled", project: "site" },
+          services,
+          ownContext,
+          NOW,
+        );
+        expect(site).toContain("1 past conversation,");
+        expect(site).toContain("Docs cleanup");
+        expect(site).not.toContain("Fresh start");
+      });
+    });
+
     it("pages 20 conversations at a time with offset", async () => {
       for (let index = 0; index < 20; index++) {
         await addConversation(`extra-${index}`, {

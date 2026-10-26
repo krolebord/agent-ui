@@ -188,6 +188,7 @@ export async function readPastSession(
   const agentUiSession = formatAgentUiSession(
     conversation.agentUiSessionId,
     services.sessions.state.state,
+    now,
   );
   if (agentUiSession) header.push(`Agent UI: ${agentUiSession}`);
   header.push(
@@ -258,7 +259,7 @@ export async function readPastSession(
 export const readPastSessionTool = defineMcpTool({
   name: "read_past_session",
   description:
-    "Reads a past conversation found with search_past_sessions or list_past_sessions: a header (project, cwd, git branch, transcript path and whether it still exists), then each turn's user and assistant text, touched files and commands. Long output is paged; it ends with the from_turn to continue from. Only for explicit references to past work.",
+    "Reads a past conversation found with search_past_sessions or list_past_sessions: a header (project, cwd, git branch, transcript path and whether it still exists), then each turn's user and assistant text, touched files and commands. Long output is paged; it ends with the from_turn to continue from. Only for explicit references to other sessions or past work.",
   inputSchema: readPastSessionInputSchema,
   annotations: { readOnlyHint: true, openWorldHint: false },
   isAvailable: isPastSessionsAvailable,
