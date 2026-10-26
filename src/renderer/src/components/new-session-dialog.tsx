@@ -70,6 +70,7 @@ import {
   type SessionTargetStatus,
   useSessionProjectTarget,
 } from "@renderer/hooks/use-session-project-target";
+import { uploadPastedFile } from "@renderer/hooks/use-terminal-file-upload";
 import { getTerminalSize } from "@renderer/hooks/use-terminal-size";
 import { shouldAutoFocus } from "@renderer/lib/autofocus";
 import { cn } from "@renderer/lib/utils";
@@ -785,6 +786,21 @@ function SessionTargetStatusLine({ status }: { status: SessionTargetStatus }) {
   );
 }
 
+async function attachPromptFiles(files: File[]): Promise<string[]> {
+  const paths = await Promise.all(
+    files.map((file) =>
+      uploadPastedFile(file, (input) => orpc.fs.uploadPastedFile.call(input)),
+    ),
+  );
+  return paths.filter((path): path is string => path !== null);
+}
+
+function getAttachDisabledReason(scheduled: boolean): string | null {
+  return scheduled
+    ? "Attached files expire after 24 hours, so scheduled sessions can't use them"
+    : null;
+}
+
 interface SessionFormProps<TOptions> {
   projectPath: string;
   resolveSessionCwd: () => Promise<string>;
@@ -985,6 +1001,10 @@ function LocalClaudeSessionForm({
         value={initialPrompt}
         onChange={setInitialPrompt}
         onSubmit={handleSubmit}
+        onAttachFiles={attachPromptFiles}
+        attachDisabledReason={getAttachDisabledReason(
+          editScheduledSessionId !== null || scheduleDraft !== null,
+        )}
         handoffControl={
           editScheduledSessionId ? null : (
             <HandoffPicker
@@ -1384,6 +1404,10 @@ function CodexSessionForm({
         value={initialPrompt}
         onChange={setInitialPrompt}
         onSubmit={handleSubmit}
+        onAttachFiles={attachPromptFiles}
+        attachDisabledReason={getAttachDisabledReason(
+          editScheduledSessionId !== null || scheduleDraft !== null,
+        )}
         handoffControl={
           editScheduledSessionId ? null : (
             <HandoffPicker
@@ -1681,6 +1705,10 @@ function CursorAgentSessionForm({
         value={initialPrompt}
         onChange={setInitialPrompt}
         onSubmit={handleSubmit}
+        onAttachFiles={attachPromptFiles}
+        attachDisabledReason={getAttachDisabledReason(
+          editScheduledSessionId !== null || scheduleDraft !== null,
+        )}
         handoffControl={
           editScheduledSessionId ? null : (
             <HandoffPicker

@@ -4,9 +4,8 @@ import { createDeferredPromise } from "@shared/utils";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import headlessXterm from "@xterm/headless";
 import { z } from "zod";
-import { MAX_PASTED_FILE_BYTES } from "../shared/pasted-files";
 import { procedure } from "./orpc";
-import { savePastedFile } from "./pasted-files";
+import { pastedFileInputSchema, savePastedFile } from "./pasted-files";
 import { assertProjectPathInteractionAllowed } from "./project-service";
 import {
   createTerminalSession,
@@ -112,17 +111,7 @@ export const terminalsRouter = {
       context.terminalManager.writeToTerminal(input.terminalId, input.data);
     }),
   uploadPastedFile: procedure
-    .input(
-      z.object({
-        terminalId: z.string(),
-        base64Data: z
-          .string()
-          .min(1)
-          .max(Math.ceil((MAX_PASTED_FILE_BYTES * 4) / 3) + 4),
-        fileName: z.string().max(500).optional(),
-        mimeType: z.string().max(255).optional(),
-      }),
-    )
+    .input(pastedFileInputSchema.extend({ terminalId: z.string() }))
     .handler(async ({ input, context }) => {
       const interactionCwd = context.terminalManager.resolveInteractionCwd(
         input.terminalId,

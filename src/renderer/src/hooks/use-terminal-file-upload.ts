@@ -19,32 +19,42 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
+type PastedFileUpload = (input: {
+  base64Data: string;
+  fileName?: string;
+  mimeType?: string;
+}) => Promise<{ filePath: string }>;
+
+export async function uploadPastedFile(
+  file: File,
+  upload: PastedFileUpload,
+): Promise<string | null> {
+  if (file.size > MAX_PASTED_FILE_BYTES) {
+    toast.error(`File is too large to attach (max ${MAX_PASTED_FILE_MB}MB)`);
+    return null;
+  }
+
+  try {
+    const base64Data = await readFileAsBase64(file);
+    const { filePath } = await upload({
+      base64Data,
+      fileName: file.name || undefined,
+      mimeType: file.type || undefined,
+    });
+    return filePath;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    toast.error(`Failed to attach file: ${message}`);
+    return null;
+  }
+}
+
 export function useTerminalFileUpload(terminalId: string) {
   return useCallback(
-    async (file: File): Promise<string | null> => {
-      if (file.size > MAX_PASTED_FILE_BYTES) {
-        toast.error(
-          `File is too large to attach (max ${MAX_PASTED_FILE_MB}MB)`,
-        );
-        return null;
-      }
-
-      try {
-        const base64Data = await readFileAsBase64(file);
-        const { filePath } = await orpc.terminals.uploadPastedFile.call({
-          terminalId,
-          base64Data,
-          fileName: file.name || undefined,
-          mimeType: file.type || undefined,
-        });
-        return filePath;
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unknown error";
-        toast.error(`Failed to attach file: ${message}`);
-        return null;
-      }
-    },
+    (file: File) =>
+      uploadPastedFile(file, (input) =>
+        orpc.terminals.uploadPastedFile.call({ terminalId, ...input }),
+      ),
     [terminalId],
   );
 }

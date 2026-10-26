@@ -1,4 +1,5 @@
 import { useTerminalSizeStore } from "@renderer/hooks/use-terminal-size";
+import { getPastedFile } from "@renderer/lib/clipboard-files";
 import { attachTouchScroll } from "@renderer/lib/terminal-touch-scroll";
 import { cn } from "@renderer/lib/utils";
 import { FitAddon } from "@xterm/addon-fit";
@@ -56,27 +57,6 @@ function handleOsc52(payload: string): boolean {
     void navigator.clipboard?.writeText(text).catch(() => {});
   } catch {}
   return true;
-}
-
-function getPastedFile(clipboardData: DataTransfer | null): File | null {
-  if (!clipboardData) {
-    return null;
-  }
-
-  if (clipboardData.getData("text/plain")) {
-    return null;
-  }
-
-  for (const item of clipboardData.items) {
-    if (item.kind === "file") {
-      const file = item.getAsFile();
-      if (file) {
-        return file;
-      }
-    }
-  }
-
-  return null;
 }
 
 export function TerminalPane({

@@ -134,6 +134,7 @@ function AttachFileButton({ terminalId }: { terminalId: string }) {
         className="size-7 shrink-0 px-0 max-md:hidden"
         aria-label="Attach file"
         title="Attach file"
+        onMouseDown={(event) => event.preventDefault()}
         onClick={openFilePicker}
       >
         <Paperclip className="size-3.5 text-muted-foreground" />

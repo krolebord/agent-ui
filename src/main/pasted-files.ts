@@ -2,10 +2,20 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { z } from "zod";
 import {
   MAX_PASTED_FILE_BYTES,
   MAX_PASTED_FILE_MB,
 } from "../shared/pasted-files";
+
+export const pastedFileInputSchema = z.object({
+  base64Data: z
+    .string()
+    .min(1)
+    .max(Math.ceil((MAX_PASTED_FILE_BYTES * 4) / 3) + 4),
+  fileName: z.string().max(500).optional(),
+  mimeType: z.string().max(255).optional(),
+});
 
 const PASTED_FILE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_FILE_NAME_LENGTH = 200;

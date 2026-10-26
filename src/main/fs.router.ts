@@ -7,6 +7,7 @@ import { z } from "zod";
 import { openInAppTargetSchema } from "../shared/open-in-app";
 import type { AppHost, DesktopHost } from "./app-host";
 import { procedure } from "./orpc";
+import { pastedFileInputSchema, savePastedFile } from "./pasted-files";
 
 const pathSchema = z.string().trim().min(1);
 
@@ -168,6 +169,9 @@ export const fsRouter = {
     const handoffsDir = path.join(context.host.paths.userData, "handoffs");
     await requireDesktopHost(context.host).openPath(handoffsDir);
   }),
+  uploadPastedFile: procedure
+    .input(pastedFileInputSchema)
+    .handler(({ input }) => savePastedFile(input)),
   openDevTools: procedure.handler(async ({ context }) => {
     requireDesktopHost(context.host).openDevTools();
   }),
