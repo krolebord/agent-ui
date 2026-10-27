@@ -4,7 +4,7 @@ export const changedFileKinds = [
   "code",
   "tests",
   "evals",
-  "mocks",
+  "fixtures",
   "generated",
   "docs",
 ] as const;
@@ -46,9 +46,9 @@ const GENERATED_DIRS = new Set(["__generated__", "generated"]);
 const EVAL_NAME = /(\.evals?\.[^.]+$|_evals?\.[^.]+$|^eval_.+\.py$)/i;
 const EVAL_DIRS = new Set(["__evals__", "eval", "evals"]);
 
-const MOCK_NAME =
+const FIXTURE_NAME =
   /(\.snap$|\.(mocks?|fixtures?|stubs?|fakes?)\.[^.]+$|^(mocks?|fixtures?|stubs?|fakes?)([-_.A-Z]|$))/;
-const MOCK_DIRS = new Set([
+const FIXTURE_DIRS = new Set([
   "__fixtures__",
   "__mocks__",
   "__snapshots__",
@@ -56,7 +56,7 @@ const MOCK_DIRS = new Set([
   "fixture",
   "fixtures",
   "mock",
-  "mocks",
+  "fixtures",
   "stubs",
   "testdata",
 ]);
@@ -96,7 +96,7 @@ export function classifyChangedFile(path: string): ChangedFileKind {
     return "generated";
   }
   if (EVAL_NAME.test(name) || inDir(EVAL_DIRS)) return "evals";
-  if (MOCK_NAME.test(name) || inDir(MOCK_DIRS)) return "mocks";
+  if (FIXTURE_NAME.test(name) || inDir(FIXTURE_DIRS)) return "fixtures";
   if (TEST_NAME.test(name) || CLASS_TEST_NAME.test(name) || inDir(TEST_DIRS)) {
     return "tests";
   }

@@ -13,6 +13,8 @@ import type { Session, SessionServiceState } from "../sessions/state";
 import type { UsageState } from "../usage-tracking";
 import type { ScheduledPrompt, ScheduledPromptsState } from "./state";
 
+const SETTLE_MS = 5_000;
+
 interface Options {
   state: ScheduledPromptsState;
   sessions: SessionServiceState;
@@ -29,6 +31,7 @@ export class ScheduledPromptsService {
     { id: string; startedAt: number; observedWork: boolean }
   >();
   private readonly refreshedAt = new Map<string, number>();
+  private readonly readySince = new Map<string, number>();
   private readonly now: () => number;
   private started = false;
   private disposed = false;
@@ -63,8 +66,10 @@ export class ScheduledPromptsService {
         });
     }
     this.updateDependencies();
+    this.updateReadiness(0);
     const onSessions = () => {
       this.updateDependencies();
+      this.updateReadiness(this.now());
       for (const [sessionId, active] of this.active) {
         const session = this.options.sessions.state[sessionId];
         if (!session) {
@@ -270,6 +275,26 @@ export class ScheduledPromptsService {
     });
   }
 
+  private updateReadiness(since: number): void {
+    const sessions = this.options.sessions.state;
+    for (const sessionId of this.readySince.keys()) {
+      if (!sessions[sessionId]) this.readySince.delete(sessionId);
+    }
+    for (const [sessionId, session] of Object.entries(sessions)) {
+      if (
+        session.status !== "idle" &&
+        session.status !== "awaiting_user_response"
+      )
+        this.readySince.delete(sessionId);
+      else if (!this.readySince.has(sessionId))
+        this.readySince.set(sessionId, since);
+    }
+  }
+
+  private settlesAt(sessionId: string): number {
+    return (this.readySince.get(sessionId) ?? -SETTLE_MS) + SETTLE_MS;
+  }
+
   private updateDependencies(): void {
     this.options.state.updateState((entries) => {
       for (const entry of Object.values(entries)) {
@@ -375,6 +400,10 @@ export class ScheduledPromptsService {
             entry.id,
             "Resolve the session error before this prompt can run.",
           );
+          continue;
+        }
+        if (this.settlesAt(entry.sessionId) > this.now()) {
+          this.setMessage(entry.id, "Waiting for the session to settle.");
           continue;
         }
         const key = getPromptUsageKey(session);
@@ -491,6 +520,9 @@ export class ScheduledPromptsService {
               entry.schedule.at > this.now()
             )
               delay = Math.min(delay, entry.schedule.at - this.now());
+            const settlesAt = this.settlesAt(entry.sessionId);
+            if (entry.status === "pending" && settlesAt > this.now())
+              delay = Math.min(delay, settlesAt - this.now());
           }
           this.wake(delay);
         }

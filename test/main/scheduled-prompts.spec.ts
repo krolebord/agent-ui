@@ -137,13 +137,31 @@ describe("scheduled prompts", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(deliver).not.toHaveBeenCalled();
     setStatus("awaiting_user_response");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(state.state[entry.id].message).toContain("settle");
+    await vi.advanceTimersByTimeAsync(1);
     expect(deliver).toHaveBeenCalledOnce();
     expect(state.state[entry.id].status).toBe("sending");
     setStatus("running");
     expect(state.state[entry.id]).toBeUndefined();
     setStatus("idle");
     await vi.advanceTimersByTimeAsync(120_000);
+    expect(deliver).toHaveBeenCalledOnce();
+  });
+
+  it("restarts the settle window when the session briefly goes idle", async () => {
+    const { service, create, deliver, setStatus } = setup();
+    service.start();
+    create();
+    setStatus("idle");
+    await vi.advanceTimersByTimeAsync(2_000);
+    setStatus("running");
+    await vi.advanceTimersByTimeAsync(1_000);
+    setStatus("idle");
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(deliver).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     expect(deliver).toHaveBeenCalledOnce();
   });
 
@@ -180,7 +198,7 @@ describe("scheduled prompts", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(deliver).toHaveBeenCalledOnce();
     setStatus("awaiting_user_response");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(deliver).toHaveBeenCalledTimes(2);
     expect(deliver.mock.calls[1]).toEqual([
       expect.objectContaining({ sessionId: "session" }),
@@ -195,7 +213,7 @@ describe("scheduled prompts", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(deliver).not.toHaveBeenCalled();
     setStatus("idle");
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(deliver).toHaveBeenCalledOnce();
   });
 
@@ -558,7 +576,7 @@ describe("scheduled prompts", () => {
         sourceTitle: "Source work",
       });
       setStatus("idle");
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(5_000);
       expect(deliver).toHaveBeenCalledWith(
         expect.objectContaining({ sessionId: "session" }),
         "Continue working",

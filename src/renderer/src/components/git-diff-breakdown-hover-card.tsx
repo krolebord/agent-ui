@@ -13,7 +13,7 @@ const KIND_LABELS = {
   code: "Code",
   tests: "Tests",
   evals: "Evals",
-  mocks: "Mocks",
+  fixtures: "Fixtures",
   generated: "Generated",
   docs: "Docs",
 } satisfies Record<ChangedFileKind, string>;
