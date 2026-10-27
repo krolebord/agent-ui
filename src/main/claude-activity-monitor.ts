@@ -17,6 +17,9 @@ interface ActivityMonitorEvents {
 export class ClaudeActivityMonitor {
   private readonly callbacks: ActivityMonitorEvents;
   private state: ClaudeActivityState = "unknown";
+  private mainAgentState: ClaudeActivityState = "unknown";
+  private readonly runningSubagentIds = new Set<string>();
+  private readonly subagentIdsAwaitingApproval = new Set<string>();
   private watcher: NdjsonFileWatcher<ClaudeHookEvent> | null = null;
   private watcherGeneration = 0;
 
@@ -44,7 +47,11 @@ export class ClaudeActivityMonitor {
         }
 
         this.callbacks.onHookEvent(event);
-        this.setState(this.reduceState(event));
+        this.trackSubagents(event);
+        if (!event.agent_id) {
+          this.mainAgentState = this.reduceState(event);
+        }
+        this.setState(this.deriveState());
       },
       onError: (error) => {
         if (this.watcher !== watcher || this.watcherGeneration !== generation) {
@@ -78,9 +85,76 @@ export class ClaudeActivityMonitor {
       });
     }
 
+    this.runningSubagentIds.clear();
+    this.subagentIdsAwaitingApproval.clear();
+
     if (!options?.preserveState) {
+      this.mainAgentState = "unknown";
       this.setState("unknown");
     }
+  }
+
+  private trackSubagents(event: ClaudeHookEvent): void {
+    switch (event.hook_event_name) {
+      case "SubagentStart": {
+        if (event.agent_id) {
+          this.runningSubagentIds.add(event.agent_id);
+        }
+        return;
+      }
+      case "SubagentStop": {
+        if (event.agent_id) {
+          this.runningSubagentIds.delete(event.agent_id);
+          this.subagentIdsAwaitingApproval.delete(event.agent_id);
+        }
+        return;
+      }
+      case "PreToolUse": {
+        if (event.agent_id) {
+          this.subagentIdsAwaitingApproval.delete(event.agent_id);
+        }
+        return;
+      }
+      case "PermissionRequest": {
+        if (event.agent_id) {
+          this.subagentIdsAwaitingApproval.add(event.agent_id);
+        }
+        return;
+      }
+      case "Stop": {
+        if (!event.background_tasks) {
+          return;
+        }
+        this.runningSubagentIds.clear();
+        for (const task of event.background_tasks) {
+          if (task.type === "subagent" && task.id) {
+            this.runningSubagentIds.add(task.id);
+          }
+        }
+        for (const agentId of this.subagentIdsAwaitingApproval) {
+          if (!this.runningSubagentIds.has(agentId)) {
+            this.subagentIdsAwaitingApproval.delete(agentId);
+          }
+        }
+        return;
+      }
+    }
+  }
+
+  private deriveState(): ClaudeActivityState {
+    if (this.subagentIdsAwaitingApproval.size > 0) {
+      return "awaiting_approval";
+    }
+
+    if (
+      this.runningSubagentIds.size > 0 &&
+      (this.mainAgentState === "idle" ||
+        this.mainAgentState === "awaiting_user_response")
+    ) {
+      return "working";
+    }
+
+    return this.mainAgentState;
   }
 
   private reduceState(event: ClaudeHookEvent): ClaudeActivityState {
@@ -104,7 +178,11 @@ export class ClaudeActivityMonitor {
           event.notification_type === "permission_prompt" ||
           event.notification_type === "permission_request"
         ) {
-          return "awaiting_approval";
+          // Notifications carry no agent_id, so with subagents running this
+          // may belong to one of them; their PermissionRequest covers it.
+          return this.runningSubagentIds.size > 0
+            ? this.mainAgentState
+            : "awaiting_approval";
         }
 
         if (
@@ -114,10 +192,10 @@ export class ClaudeActivityMonitor {
           return "awaiting_user_response";
         }
 
-        return this.state;
+        return this.mainAgentState;
       }
       default: {
-        return this.state;
+        return this.mainAgentState;
       }
     }
   }

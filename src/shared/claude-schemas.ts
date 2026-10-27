@@ -11,4 +11,13 @@ export const claudeHookEventSchema = z.object({
   tool_name: z.string().optional(),
   reason: z.string().optional(),
   stop_hook_active: z.boolean().optional(),
+  agent_id: z.string().optional(),
+  background_tasks: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        type: z.string().optional(),
+      }),
+    )
+    .optional(),
 });

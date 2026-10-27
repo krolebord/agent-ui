@@ -40,6 +40,8 @@ function buildHooksConfig(runtime: HookRuntime) {
       PermissionRequest: [anyMatcher()],
       Notification: [anyMatcher()],
       Stop: [noMatcher()],
+      SubagentStart: [anyMatcher()],
+      SubagentStop: [anyMatcher()],
       SessionEnd: [noMatcher()],
     },
   };
@@ -122,6 +124,16 @@ async function main() {
       typeof payload.stop_hook_active === "boolean"
         ? payload.stop_hook_active
         : undefined,
+    agent_id:
+      typeof payload.agent_id === "string" ? payload.agent_id : undefined,
+    background_tasks: Array.isArray(payload.background_tasks)
+      ? payload.background_tasks
+          .filter((task) => task && typeof task === "object")
+          .map((task) => ({
+            id: typeof task.id === "string" ? task.id : undefined,
+            type: typeof task.type === "string" ? task.type : undefined,
+          }))
+      : undefined,
   };
 
   await mkdir(path.dirname(stateFilePath), { recursive: true });

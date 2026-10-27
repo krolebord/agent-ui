@@ -97,4 +97,6 @@ export interface ClaudeHookEvent {
   tool_name?: string;
   reason?: string;
   stop_hook_active?: boolean;
+  agent_id?: string;
+  background_tasks?: Array<{ id?: string; type?: string }>;
 }
