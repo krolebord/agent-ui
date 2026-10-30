@@ -40,7 +40,13 @@ export function ArtifactToastListener() {
           label: isVisual ? "View" : "Open session",
           onClick: () => {
             if (isVisual) {
-              useArtifactPreviewDialogStore.getState().open(artifact.id);
+              const siblingIds = Object.values(store.getState().artifacts)
+                .filter((sibling) => sibling.sessionId === artifact.sessionId)
+                .sort((a, b) => b.createdAt - a.createdAt)
+                .map((sibling) => sibling.id);
+              useArtifactPreviewDialogStore
+                .getState()
+                .open(artifact.id, siblingIds);
             } else if (store.getState().sessions[artifact.sessionId]) {
               switchSession(artifact.sessionId);
             } else {

@@ -1,6 +1,7 @@
 import {
   canEditArtifact,
   formatTextPreview,
+  getArtifactNavigation,
   getArtifactPreviewKind,
   getHtmlPreviewSandbox,
   getNewArtifactToastTitle,
@@ -162,5 +163,36 @@ describe("getVisualFrameHeight", () => {
 
   it("never shrinks below the minimum height", () => {
     expect(getVisualFrameHeight(20)).toBe("min(120px, 70vh)");
+  });
+});
+
+describe("getArtifactNavigation", () => {
+  it("returns neighbours of the current artifact", () => {
+    expect(getArtifactNavigation(["a", "b", "c"], "b")).toEqual({
+      index: 1,
+      previousId: "a",
+      nextId: "c",
+    });
+  });
+
+  it("stops at both ends instead of wrapping", () => {
+    expect(getArtifactNavigation(["a", "b"], "a")).toEqual({
+      index: 0,
+      previousId: null,
+      nextId: "b",
+    });
+    expect(getArtifactNavigation(["a", "b"], "b")).toEqual({
+      index: 1,
+      previousId: "a",
+      nextId: null,
+    });
+  });
+
+  it("has no neighbours when the current artifact is not listed", () => {
+    expect(getArtifactNavigation(["a", "b"], "x")).toEqual({
+      index: -1,
+      previousId: null,
+      nextId: null,
+    });
   });
 });

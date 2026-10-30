@@ -118,3 +118,16 @@ export function formatTextPreview(
     return text;
   }
 }
+
+export function getArtifactNavigation(
+  ids: readonly string[],
+  currentId: string,
+): { index: number; previousId: string | null; nextId: string | null } {
+  const index = ids.indexOf(currentId);
+  if (index === -1) return { index, previousId: null, nextId: null };
+  return {
+    index,
+    previousId: ids[index - 1] ?? null,
+    nextId: ids[index + 1] ?? null,
+  };
+}

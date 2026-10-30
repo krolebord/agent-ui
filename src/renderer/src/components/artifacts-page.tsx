@@ -35,6 +35,7 @@ import {
   type ArtifactPreviewKind,
   canEditArtifact,
   formatTextPreview,
+  getArtifactNavigation,
   getArtifactPreviewKind,
   getHtmlPreviewSandbox,
   getTextPreviewFile,
@@ -55,6 +56,8 @@ import { useHotkey } from "@tanstack/react-hotkeys";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   Archive,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   Eraser,
@@ -187,6 +190,10 @@ export function ArtifactsPage() {
         bulkMode ? right.size - left.size : right.createdAt - left.createdAt,
       );
   }, [artifactsById, query, sessionId, bulkMode]);
+  const artifactIds = useMemo(
+    () => artifacts.map((artifact) => artifact.id),
+    [artifacts],
+  );
 
   const cycleMark = (id: string, keepMarked: boolean) => {
     setMarks((current) => {
@@ -333,6 +340,7 @@ export function ArtifactsPage() {
                     key={artifact.id}
                     artifact={artifact}
                     location={locations?.[artifact.id]}
+                    siblingIds={artifactIds}
                   />
                 ))}
               </ul>
@@ -662,9 +670,11 @@ export async function downloadArtifact(artifact: Artifact) {
 function ArtifactRow({
   artifact,
   location,
+  siblingIds,
 }: {
   artifact: Artifact;
   location: ArtifactLocation | undefined;
+  siblingIds: string[];
 }) {
   const [downloading, setDownloading] = useState(false);
   const previewKind = getArtifactPreviewKind(artifact.mimeType);
@@ -739,7 +749,7 @@ function ArtifactRow({
             size="sm"
             className="h-8 gap-1.5"
             disabled={!artifact.available}
-            onClick={() => openPreview(artifact.id)}
+            onClick={() => openPreview(artifact.id, siblingIds)}
           >
             <Eye className="size-3.5" />
             <span className="max-sm:hidden">Preview</span>
@@ -799,6 +809,7 @@ export const useArtifactPreviewDialogStore = create(
     {
       isOpen: false,
       artifactId: null as string | null,
+      siblingIds: [] as string[],
       editing: false,
       editDirty: false,
     },
@@ -808,11 +819,25 @@ export const useArtifactPreviewDialogStore = create(
         else then();
       };
       return {
-        open: (artifactId: string) => {
+        open: (artifactId: string, siblingIds: string[] = [artifactId]) => {
           const state = get();
-          if (state.isOpen && state.artifactId === artifactId) return;
+          if (state.isOpen && state.artifactId === artifactId) {
+            set({ siblingIds });
+            return;
+          }
           leaveEditing(() =>
-            set({ isOpen: true, artifactId, editing: false, editDirty: false }),
+            set({
+              isOpen: true,
+              artifactId,
+              siblingIds,
+              editing: false,
+              editDirty: false,
+            }),
+          );
+        },
+        show: (artifactId: string) => {
+          leaveEditing(() =>
+            set({ artifactId, editing: false, editDirty: false }),
           );
         },
         close: () => {
@@ -834,6 +859,16 @@ export const useArtifactPreviewDialogStore = create(
   ),
 );
 
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement)
+  );
+}
+
 export function canPreviewArtifact(artifact: Artifact): boolean {
   return (
     artifact.available && getArtifactPreviewKind(artifact.mimeType) !== null
@@ -843,7 +878,9 @@ export function canPreviewArtifact(artifact: Artifact): boolean {
 export function ArtifactPreviewDialog() {
   const isOpen = useArtifactPreviewDialogStore((state) => state.isOpen);
   const artifactId = useArtifactPreviewDialogStore((state) => state.artifactId);
+  const siblingIds = useArtifactPreviewDialogStore((state) => state.siblingIds);
   const close = useArtifactPreviewDialogStore((state) => state.close);
+  const show = useArtifactPreviewDialogStore((state) => state.show);
   const editing = useArtifactPreviewDialogStore((state) => state.editing);
   const startEditing = useArtifactPreviewDialogStore(
     (state) => state.startEditing,
@@ -851,27 +888,113 @@ export function ArtifactPreviewDialog() {
   const artifact = useAppState((state) =>
     artifactId ? (state.artifacts[artifactId] ?? null) : null,
   );
+  const artifactsById = useAppState((state) => state.artifacts);
   const kind = artifact ? getArtifactPreviewKind(artifact.mimeType) : null;
-  const [downloading, setDownloading] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const navigableIds = useMemo(
+    () =>
+      siblingIds.filter((id) => {
+        const sibling = artifactsById[id];
+        return (
+          id === artifactId ||
+          (sibling !== undefined && canPreviewArtifact(sibling))
+        );
+      }),
+    [siblingIds, artifactsById, artifactId],
+  );
+  const navigation = artifactId
+    ? getArtifactNavigation(navigableIds, artifactId)
+    : null;
+  const visible = isOpen && artifact !== null && kind !== null;
+  const canNavigate =
+    visible &&
+    !editing &&
+    navigation !== null &&
+    navigation.index !== -1 &&
+    navigableIds.length > 1;
+  const previousId = canNavigate ? navigation.previousId : null;
+  const nextId = canNavigate ? navigation.nextId : null;
+
+  useEffect(() => {
+    if (!previousId && !nextId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        isTextEntryTarget(event.target) ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey
+      ) {
+        return;
+      }
+      const targetId =
+        event.key === "ArrowLeft"
+          ? previousId
+          : event.key === "ArrowRight"
+            ? nextId
+            : null;
+      if (!targetId) return;
+      event.preventDefault();
+      show(targetId);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [previousId, nextId, show]);
 
   return (
     <Dialog
-      open={isOpen && artifact !== null && kind !== null}
+      open={visible}
       onOpenChange={(open) => {
         if (!open) close();
       }}
     >
       {artifact && kind ? (
         <DialogContent className="flex flex-col sm:max-w-4xl">
-          <DialogHeader className="min-w-0 pr-6">
-            <DialogTitle className="truncate" title={artifact.name}>
-              {artifact.name}
-            </DialogTitle>
-            <DialogDescription>
-              {formatBytes(artifact.size)}
-              {artifact.mimeType ? ` · ${artifact.mimeType}` : null}
-            </DialogDescription>
-          </DialogHeader>
+          <div className="flex min-w-0 items-start gap-2 pr-6">
+            <DialogHeader className="min-w-0 flex-1">
+              <DialogTitle className="truncate" title={artifact.name}>
+                {artifact.name}
+              </DialogTitle>
+              <DialogDescription>
+                {formatBytes(artifact.size)}
+                {artifact.mimeType ? ` · ${artifact.mimeType}` : null}
+              </DialogDescription>
+            </DialogHeader>
+            {canNavigate ? (
+              <div className="-mt-1 flex shrink-0 items-center gap-0.5">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="size-7 px-0"
+                  aria-label="Previous artifact"
+                  title="Previous artifact (←)"
+                  disabled={!previousId}
+                  onClick={() => {
+                    if (previousId) show(previousId);
+                  }}
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+                <span className="min-w-10 text-center text-xs tabular-nums text-muted-foreground">
+                  {navigation.index + 1} / {navigableIds.length}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="size-7 px-0"
+                  aria-label="Next artifact"
+                  title="Next artifact (→)"
+                  disabled={!nextId}
+                  onClick={() => {
+                    if (nextId) show(nextId);
+                  }}
+                >
+                  <ChevronRight className="size-4" />
+                </Button>
+              </div>
+            ) : null}
+          </div>
           {editing ? (
             <ArtifactEditor key={artifact.id} artifact={artifact} />
           ) : (
@@ -897,11 +1020,15 @@ export function ArtifactPreviewDialog() {
                   variant="outline"
                   size="sm"
                   className="h-8 gap-1.5"
-                  disabled={!artifact.available || downloading}
+                  disabled={
+                    !artifact.available || downloadingId === artifact.id
+                  }
                   onClick={async () => {
-                    setDownloading(true);
+                    setDownloadingId(artifact.id);
                     await downloadArtifact(artifact);
-                    setDownloading(false);
+                    setDownloadingId((current) =>
+                      current === artifact.id ? null : current,
+                    );
                   }}
                 >
                   <Download className="size-3.5" />

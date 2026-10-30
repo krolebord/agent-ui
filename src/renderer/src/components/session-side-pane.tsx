@@ -379,6 +379,7 @@ function ScheduledPromptRow({
 
 function ArtifactsSection({ sessionId }: { sessionId: string }) {
   const artifacts = useSessionArtifacts(sessionId);
+  const artifactIds = artifacts.map((artifact) => artifact.id);
   const showArtifacts = useMainViewStore((state) => state.showArtifacts);
   const [now, setNow] = useState(Date.now);
 
@@ -405,7 +406,12 @@ function ArtifactsSection({ sessionId }: { sessionId: string }) {
       {artifacts.length ? (
         <ul>
           {artifacts.map((artifact) => (
-            <ArtifactRow key={artifact.id} artifact={artifact} now={now} />
+            <ArtifactRow
+              key={artifact.id}
+              artifact={artifact}
+              siblingIds={artifactIds}
+              now={now}
+            />
           ))}
         </ul>
       ) : (
@@ -417,7 +423,15 @@ function ArtifactsSection({ sessionId }: { sessionId: string }) {
   );
 }
 
-function ArtifactRow({ artifact, now }: { artifact: Artifact; now: number }) {
+function ArtifactRow({
+  artifact,
+  siblingIds,
+  now,
+}: {
+  artifact: Artifact;
+  siblingIds: string[];
+  now: number;
+}) {
   const [downloading, setDownloading] = useState(false);
   const openPreview = useArtifactPreviewDialogStore((state) => state.open);
   const queryClient = useQueryClient();
@@ -449,7 +463,7 @@ function ArtifactRow({ artifact, now }: { artifact: Artifact; now: number }) {
         onPointerEnter={prefetchPreview}
         onFocus={prefetchPreview}
         onClick={() => {
-          if (previewable) openPreview(artifact.id);
+          if (previewable) openPreview(artifact.id, siblingIds);
           else void download();
         }}
         title={artifact.description ?? artifact.name}
