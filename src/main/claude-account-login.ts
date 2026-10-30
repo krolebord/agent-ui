@@ -1,8 +1,9 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import spawn from "nano-spawn";
 import { z } from "zod";
 import type { ManagedOauthCredentials } from "./claude-account-oauth";
 import type { ClaudeAccountsService } from "./claude-accounts";
@@ -14,6 +15,8 @@ const POLL_INTERVAL_MS = 1_000;
 const LOGIN_TIMEOUT_MS = 15 * 60_000;
 const EMAIL_POLL_INTERVAL_MS = 250;
 const EMAIL_WAIT_TIMEOUT_MS = 10_000;
+const KEYCHAIN_TIMEOUT_MS = 5_000;
+const KEYCHAIN_ITEM_NOT_FOUND_EXIT_CODE = 44;
 
 const harvestedCredentialsSchema = z.object({
   claudeAiOauth: z
@@ -39,6 +42,58 @@ const claudeJsonSchema = z
   })
   .passthrough();
 
+export interface CredentialsKeychain {
+  read(service: string): Promise<string | undefined>;
+  remove(service: string): Promise<void>;
+}
+
+export function claudeKeychainServiceName(configDir: string): string {
+  const hash = createHash("sha256")
+    .update(configDir.normalize("NFC"))
+    .digest("hex")
+    .substring(0, 8);
+  return `Claude Code-credentials-${hash}`;
+}
+
+function isKeychainItemNotFound(error: unknown): boolean {
+  return (
+    (error as { exitCode?: number }).exitCode ===
+    KEYCHAIN_ITEM_NOT_FOUND_EXIT_CODE
+  );
+}
+
+const macosKeychain: CredentialsKeychain = {
+  async read(service) {
+    try {
+      const { output } = await spawn(
+        "security",
+        ["find-generic-password", "-s", service, "-w"],
+        { timeout: KEYCHAIN_TIMEOUT_MS, stdin: "ignore" },
+      );
+      return output.trim() || undefined;
+    } catch (error) {
+      if (!isKeychainItemNotFound(error)) {
+        log.warn("Claude login: failed to read Keychain credentials", {
+          message: (error as Error).message,
+        });
+      }
+      return undefined;
+    }
+  },
+  async remove(service) {
+    try {
+      await spawn("security", ["delete-generic-password", "-s", service], {
+        timeout: KEYCHAIN_TIMEOUT_MS,
+        stdin: "ignore",
+      });
+    } catch (error) {
+      if (!isKeychainItemNotFound(error)) {
+        throw error;
+      }
+    }
+  },
+};
+
 interface ActiveLogin {
   loginId: string;
   terminalId: string;
@@ -53,16 +108,25 @@ interface ActiveLogin {
 
 export class ClaudeAccountLoginService {
   private active: ActiveLogin | null = null;
+  private readonly keychain: CredentialsKeychain | null;
 
   constructor(
     private readonly options: {
       userDataPath: string;
       terminalManager: TerminalManager;
       accounts: ClaudeAccountsService;
+      keychain?: CredentialsKeychain | null;
       emailWaitTimeoutMs?: number;
       emailPollIntervalMs?: number;
     },
-  ) {}
+  ) {
+    this.keychain =
+      options.keychain !== undefined
+        ? options.keychain
+        : process.platform === "darwin"
+          ? macosKeychain
+          : null;
+  }
 
   async begin(input: {
     reloginAccountId?: string;
@@ -166,7 +230,7 @@ export class ClaudeAccountLoginService {
     active.checking = true;
     let credentials: HarvestedCredentials | null = null;
     try {
-      credentials = await readHarvestedCredentials(active.configDir);
+      credentials = await this.readHarvestedCredentials(active.configDir);
     } finally {
       active.checking = false;
     }
@@ -245,8 +309,39 @@ export class ClaudeAccountLoginService {
     active.watcher?.close();
   }
 
+  private async readHarvestedCredentials(
+    configDir: string,
+  ): Promise<HarvestedCredentials | null> {
+    if (this.keychain) {
+      const raw = await this.keychain.read(
+        claudeKeychainServiceName(configDir),
+      );
+      const credentials = raw ? parseHarvestedCredentials(raw) : null;
+      if (credentials) {
+        return credentials;
+      }
+    }
+
+    try {
+      const raw = await readFile(
+        path.join(configDir, CREDENTIALS_FILE),
+        "utf8",
+      );
+      return parseHarvestedCredentials(raw);
+    } catch {
+      return null;
+    }
+  }
+
   private async cleanup(active: ActiveLogin): Promise<void> {
     await this.options.terminalManager.unregisterTerminal(active.terminalId);
+    await this.keychain
+      ?.remove(claudeKeychainServiceName(active.configDir))
+      .catch((error) => {
+        log.warn("Claude login: failed to remove throwaway Keychain item", {
+          error,
+        });
+      });
     await rm(path.dirname(active.configDir), {
       recursive: true,
       force: true,
@@ -263,16 +358,7 @@ interface HarvestedCredentials {
   subscriptionType?: string;
 }
 
-async function readHarvestedCredentials(
-  configDir: string,
-): Promise<HarvestedCredentials | null> {
-  let raw: string;
-  try {
-    raw = await readFile(path.join(configDir, CREDENTIALS_FILE), "utf8");
-  } catch {
-    return null;
-  }
-
+function parseHarvestedCredentials(raw: string): HarvestedCredentials | null {
   let parsedJson: unknown;
   try {
     parsedJson = JSON.parse(raw);

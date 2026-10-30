@@ -1,8 +1,13 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ClaudeAccountLoginService } from "../../src/main/claude-account-login";
+import {
+  ClaudeAccountLoginService,
+  type CredentialsKeychain,
+  claudeKeychainServiceName,
+} from "../../src/main/claude-account-login";
 import {
   ClaudeAccountsService,
   defineClaudeAccountsInternalState,
@@ -55,6 +60,7 @@ describe("ClaudeAccountLoginService", () => {
       userDataPath,
       terminalManager: createStubTerminalManager(),
       accounts,
+      keychain: null,
     });
   });
 
@@ -116,6 +122,7 @@ describe("ClaudeAccountLoginService", () => {
       userDataPath,
       terminalManager: createStubTerminalManager(),
       accounts,
+      keychain: null,
       emailPollIntervalMs: 10,
       emailWaitTimeoutMs: 1_000,
     });
@@ -139,6 +146,7 @@ describe("ClaudeAccountLoginService", () => {
       userDataPath,
       terminalManager: createStubTerminalManager(),
       accounts,
+      keychain: null,
       emailPollIntervalMs: 10,
       emailWaitTimeoutMs: 50,
     });
@@ -152,5 +160,73 @@ describe("ClaudeAccountLoginService", () => {
       label: "Claude account",
     });
     expect(accounts.getLoginFlow()).toMatchObject({ status: "success" });
+  });
+
+  describe("with a Keychain", () => {
+    let keychainItems: Map<string, string>;
+    let keychain: CredentialsKeychain & {
+      remove: ReturnType<typeof vi.fn>;
+    };
+
+    beforeEach(() => {
+      keychainItems = new Map();
+      keychain = {
+        read: async (name) => keychainItems.get(name),
+        remove: vi.fn(async (name: string) => {
+          keychainItems.delete(name);
+        }),
+      };
+      service = new ClaudeAccountLoginService({
+        userDataPath,
+        terminalManager: createStubTerminalManager(),
+        accounts,
+        keychain,
+        emailWaitTimeoutMs: 0,
+      });
+    });
+
+    it("names the item the way Claude Code does for CLAUDE_CONFIG_DIR", () => {
+      const configDir = "/Users/me/Library/Application Support/agent-ui/x";
+      const hash = createHash("sha256")
+        .update(configDir)
+        .digest("hex")
+        .substring(0, 8);
+
+      expect(claudeKeychainServiceName(configDir)).toBe(
+        `Claude Code-credentials-${hash}`,
+      );
+    });
+
+    it("harvests credentials from the Keychain and removes the item", async () => {
+      await service.begin({});
+      const itemName = claudeKeychainServiceName(await loginConfigDir());
+      keychainItems.set(itemName, credentialsJson);
+
+      await expect(check()).resolves.toBe(true);
+      expect(accounts.internalState.state.accounts[0]).toMatchObject({
+        type: "managed",
+        planType: "max",
+        oauth: { accessToken: "access-1", refreshToken: "refresh-1" },
+      });
+      expect(keychain.remove).toHaveBeenCalledWith(itemName);
+      expect(keychainItems.has(itemName)).toBe(false);
+    });
+
+    it("falls back to the credentials file when the Keychain has no item", async () => {
+      await service.begin({});
+      await writeCredentials();
+
+      await expect(check()).resolves.toBe(true);
+      expect(accounts.internalState.state.accounts).toHaveLength(1);
+    });
+
+    it("removes the Keychain item when the login is cancelled", async () => {
+      await service.begin({});
+      const itemName = claudeKeychainServiceName(await loginConfigDir());
+
+      await service.cancel();
+
+      expect(keychain.remove).toHaveBeenCalledWith(itemName);
+    });
   });
 });
